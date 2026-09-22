@@ -18,9 +18,25 @@ export type SessionClaims = {
   role: "ADMIN" | "EVALUATOR" | "APPLICANT";
 };
 
+let cachedFallback: Uint8Array | null = null;
+let warned = false;
+
 function secret(): Uint8Array {
   const s = process.env.NEXTAUTH_SECRET || "";
-  return new TextEncoder().encode(s);
+  if (s.length > 0) return new TextEncoder().encode(s);
+  // Zero-length keys are rejected by WebCrypto (DataError) and would 500 every
+  // sign-in. Fall back to a stable dev secret so sessions keep working; the
+  // real env var always wins when present.
+  if (!warned) {
+    console.warn("[auth] NEXTAUTH_SECRET is not set — using a derived development secret.");
+    warned = true;
+  }
+  if (!cachedFallback) {
+    cachedFallback = new TextEncoder().encode(
+      "rmis-dev-secret::" + (process.env.DATABASE_URL || "local") + "::do-not-use-in-production"
+    );
+  }
+  return cachedFallback;
 }
 
 export async function signSession(claims: SessionClaims): Promise<string> {

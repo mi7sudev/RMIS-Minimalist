@@ -10,8 +10,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer,
-  Tooltip as RTooltip, XAxis, YAxis,
+  Area, AreaChart, CartesianGrid, Cell, Pie, PieChart,
+  ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis,
 } from "recharts";
 import { AlertTriangle, Inbox, RefreshCw, Users } from "lucide-react";
 import {
@@ -61,7 +61,6 @@ type Drill = "All" | StageKey;
 const GRID = "#ececec";
 const TICK = { fontSize: 11, fill: "#949494" };
 const VIZ_1 = "#f69251";
-const VIZ_2 = "#242433";
 
 /** Funnel bar fill per stage (functional status tokens from globals.css). */
 const STAGE_BAR: Record<StageKey, string> = {
@@ -78,6 +77,12 @@ const STAGE_VARIANT: Record<StageKey, StatusVariant> = {
   "Shortlisted": "ok",
   "Rejected": "bad",
 };
+
+/** Donut slice fill for a stored status spelling (stage tokens + fallback). */
+function statusSliceColor(status: string): string {
+  const key = STAGE_BAR[stageForStatus(status) as StageKey];
+  return key ?? "#8b8b8b";
+}
 
 function Monogram({ name }: { name: string }) {
   const initials = name
@@ -180,6 +185,13 @@ export default function Analytics() {
     () => (drill === "All" ? rows : rows.filter((r) => stageForStatus(r.status) === drill)),
     [rows, drill]
   );
+
+  // Donut slices (zero-count statuses dropped so the ring stays readable).
+  const donutData = useMemo(
+    () => (stats?.byStatus ?? []).filter((d) => d.count > 0),
+    [stats]
+  );
+  const donutTotal = useMemo(() => donutData.reduce((sum, d) => sum + d.count, 0), [donutData]);
 
   if (error) {
     return (
@@ -293,17 +305,63 @@ export default function Analytics() {
             </SectionCard>
 
             <SectionCard title="Status distribution" description="All applications by stored status.">
-              <div className="mt-2">
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={stats.byStatus} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
-                    <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="status" tick={TICK} tickMargin={8} axisLine={false} tickLine={false} />
-                    <YAxis allowDecimals={false} tick={TICK} axisLine={false} tickLine={false} />
-                    <RTooltip />
-                    <Bar dataKey="count" fill={VIZ_2} radius={[6, 6, 0, 0]} maxBarSize={28} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              {donutData.length === 0 ? (
+                <EmptyState icon={Inbox} title="No applications recorded yet." compact />
+              ) : (
+                <div className="mt-2 grid grid-cols-1 items-center gap-6 sm:grid-cols-[200px_1fr]">
+                  {/* Donut with centered total — the award-dash staple */}
+                  <div className="relative mx-auto h-[200px] w-[200px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <RTooltip />
+                        <Pie
+                          data={donutData}
+                          dataKey="count"
+                          nameKey="status"
+                          innerRadius={64}
+                          outerRadius={92}
+                          paddingAngle={2}
+                          strokeWidth={0}
+                          startAngle={90}
+                          endAngle={-270}
+                        >
+                          {donutData.map((d) => (
+                            <Cell key={d.status} fill={statusSliceColor(d.status)} />
+                          ))}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="pointer-events-none absolute inset-0 grid place-items-center">
+                      <div className="text-center">
+                        <p className="num font-display text-3xl leading-none text-carbon">
+                          {donutTotal}
+                        </p>
+                        <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.08em] text-pebble">
+                          Applications
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Legend — stage dot + label + count, mirrors funnel rows */}
+                  <ul className="space-y-2.5">
+                    {donutData.map((d) => (
+                      <li key={d.status} className="flex items-center gap-2.5 text-sm">
+                        <span
+                          aria-hidden
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: statusSliceColor(d.status) }}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-stone">{d.status}</span>
+                        <span className="num font-medium text-ink">{d.count}</span>
+                        <span className="num w-12 text-right text-xs text-pebble">
+                          {donutTotal > 0 ? `${Math.round((d.count / donutTotal) * 100)}%` : "0%"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </SectionCard>
           </div>
         </div>

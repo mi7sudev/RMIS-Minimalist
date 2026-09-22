@@ -396,7 +396,7 @@ function OpenJobCard({ job }: { job: JobWire }) {
         )}
       </p>
       <div className="mt-3">
-        <span className={cn("status-pill num", urgent ? "status-bad" : "status-neutral")}>{dl.label}</span>
+        <span className={cn("status-pill num", urgent ? "status-warn" : "status-neutral")}>{dl.label}</span>
       </div>
       <div className="mt-4 flex-1" />
       <button
@@ -506,7 +506,7 @@ export default function ApplicantHome() {
 
       {loading ? (
         /* First-load skeletons — never stale data, never a blank pane. */
-        <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start">
+        <div className="mt-6 grid gap-10 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start lg:gap-14">
           <SkeletonKpis count={4} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 [&>div]:h-44" />
           <div className="space-y-4">
             <SkeletonRows rows={1} rowClassName="h-44" />
@@ -514,17 +514,19 @@ export default function ApplicantHome() {
           </div>
         </div>
       ) : (
-        <div className="mt-6 grid animate-in fade-in slide-in-from-bottom-2 duration-300 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start">
+        <div className="mt-6 grid animate-in fade-in slide-in-from-bottom-2 gap-10 duration-300 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start lg:gap-14">
           {/* LEFT — Open positions */}
           <section className="lg:col-start-1 lg:row-start-1">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-display text-xl text-ink">Open Positions · Apply Now</h2>
+            <div className="mb-4 flex items-center gap-3">
+              <h2 className="font-display text-xl text-ink">Open Positions</h2>
+              <span className="status-pill status-neutral num">{openJobs.length}</span>
+              <span className="hidden h-px flex-1 bg-divider sm:block" aria-hidden />
               <button
                 type="button"
                 onClick={() => navigate("jobs")}
-                className="focus-ring inline-flex min-h-[44px] items-center text-sm text-stone underline-offset-4 hover:text-ink hover:underline"
+                className="focus-ring inline-flex min-h-[44px] items-center gap-1.5 text-sm text-stone underline-offset-4 hover:text-ink hover:underline"
               >
-                View All
+                View All <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
               </button>
             </div>
             {openJobs.length === 0 ? (
@@ -555,7 +557,13 @@ export default function ApplicantHome() {
 
           {/* RIGHT — Your applications (first on mobile, sticky rail on desktop) */}
           <section className="order-first lg:order-none lg:sticky lg:top-6 lg:col-start-2 lg:row-start-1 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto scroll-thin">
-            <h2 className="mb-4 font-display text-xl text-ink">Your Applications</h2>
+            <div className="mb-4 flex items-center gap-3">
+              <h2 className="font-display text-xl text-ink">Your Applications</h2>
+              {sortedApps.length > 0 && (
+                <span className="status-pill status-neutral num">{sortedApps.length}</span>
+              )}
+              <span className="hidden h-px flex-1 bg-divider sm:block" aria-hidden />
+            </div>
             {sortedApps.length === 0 ? (
               <div className="dlg-card-plain border border-border">
                 <EmptyState

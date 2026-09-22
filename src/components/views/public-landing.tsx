@@ -10,7 +10,7 @@
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Inbox } from "lucide-react";
+import { Activity, ArrowRight, FileUp, Inbox, ScrollText } from "lucide-react";
 import { SiteHeader } from "@/components/shell/site-header";
 import { Footer } from "@/components/shell/footer";
 import { EmptyState } from "@/components/ui/shell";
@@ -105,15 +105,11 @@ function LandingJobCard({ job }: { job: JobWire }) {
   const pos = job.position;
   const salary = pos?.salaryAmount ?? null;
   return (
-    <article className="dlg-card flex flex-col p-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <article className="dlg-card flex flex-col p-6 transition-shadow duration-200 hover:shadow-dialog-subtle">
+      <div className="flex flex-wrap items-center gap-2">
         <span
-          className={`dlg-pill px-3 py-1 text-xs font-medium ${
-            dl.overdue
-              ? "border border-dusty-rose/30 bg-dusty-rose/10 text-dusty-rose"
-              : dl.closingSoon
-                ? "bg-ink text-white"
-                : "bg-fog text-graphite"
+          className={`status-pill num ${
+            dl.overdue ? "status-bad" : dl.closingSoon ? "status-warn" : "status-neutral"
           }`}
         >
           {dl.label}
@@ -123,24 +119,31 @@ function LandingJobCard({ job }: { job: JobWire }) {
         </span>
       </div>
 
-      <h3 className="mt-3 font-display text-xl text-carbon">{job.title}</h3>
-      <p className="num mt-1 text-sm text-stone">
-        {salary != null ? `${formatCurrency(salary)}/mo` : "Competitive"}
-      </p>
+      <div className="mt-3 flex items-start gap-3">
+        <span
+          aria-hidden="true"
+          className="hidden h-11 w-11 shrink-0 place-items-center rounded-[12px] bg-fog font-display text-base leading-none text-ink sm:grid"
+        >
+          M
+        </span>
+        <div className="min-w-0">
+          <h3 className="font-display text-xl leading-snug text-carbon">{job.title}</h3>
+          <p className="mt-1 text-xs text-pebble">
+            {pos?.placeOfAssignment || "—"} ·{" "}
+            {job.numberOfVacancy} vacanc{job.numberOfVacancy === 1 ? "y" : "ies"}
+          </p>
+        </div>
+      </div>
 
-      <p className="mt-3 text-xs text-pebble">
-        {pos?.placeOfAssignment || "—"} ·{" "}
-        {job.numberOfVacancy} vacanc{job.numberOfVacancy === 1 ? "y" : "ies"}
-      </p>
-
-      <div className="mt-auto flex items-center justify-between gap-2 pt-4">
+      <p className="num mt-3 text-[15px] font-medium text-ink">
+        {salary != null ? formatCurrency(salary) : "Competitive"}
+        {salary != null && <span className="font-normal text-stone">/mo</span>}
         {pos?.salaryGrade ? (
-          <span className="dlg-pill num bg-fog px-3 py-1 text-xs font-medium text-graphite">
-            SG {pos.salaryGrade}
-          </span>
-        ) : (
-          <span />
-        )}
+          <span className="ml-2 font-normal text-stone">SG {pos.salaryGrade}</span>
+        ) : null}
+      </p>
+
+      <div className="mt-auto flex items-center justify-end gap-2 pt-4">
         <button
           onClick={() => navigate("jobs", { job: String(job.id) })}
           className="dlg-ghost min-h-[44px] px-5 text-sm"
@@ -376,6 +379,43 @@ export default function PublicLanding() {
               </button>
             </div>
           )}
+        </section>
+
+        {/* Value band — why apply here (Intercom-style quiet 3-up) */}
+        <section className="mx-auto w-full max-w-[1200px] px-4 pt-12 sm:px-6 sm:pt-16">
+          <div className="max-w-2xl">
+            <h2 className="text-heading-lg">Why Apply With MIRDC</h2>
+            <p className="mt-3 text-sm leading-relaxed text-stone">
+              A government hiring process built to be transparent from posting to decision.
+            </p>
+          </div>
+          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {[
+              {
+                icon: ScrollText,
+                title: "CSC-standard position catalog",
+                body: "Every posting follows Civil Service qualification standards, so you know exactly how you match before you apply.",
+              },
+              {
+                icon: FileUp,
+                title: "PDS auto-fill",
+                body: "Upload your Personal Data Sheet (CS Form 212) once and your profile fills itself — no retyping.",
+              },
+              {
+                icon: Activity,
+                title: "Track your application in real time",
+                body: "Follow every stage of your application the moment it moves, from submission to the shortlist decision.",
+              },
+            ].map((item) => (
+              <div key={item.title} className="dlg-card p-6">
+                <span className="grid h-9 w-9 place-items-center rounded-[12px] bg-fog">
+                  <item.icon className="h-4 w-4 text-ink" aria-hidden="true" />
+                </span>
+                <h3 className="mt-4 text-[15px] font-medium text-ink">{item.title}</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-stone">{item.body}</p>
+              </div>
+            ))}
+          </div>
         </section>
 
         {/* How to apply */}

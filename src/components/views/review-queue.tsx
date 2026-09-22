@@ -357,11 +357,14 @@ export default function ReviewQueue() {
                   className={cardCls + " focus-ring w-full cursor-pointer p-4 text-left"}
                   onClick={() => navigate("candidate", { id: String(r.id) })}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="min-w-0 truncate text-sm font-medium text-ink">{fullName(r)}</p>
+                  <div className="flex items-start gap-2.5">
+                    <Monogram name={fullName(r)} />
+                    <div className="min-w-0 flex-1">
+                      <p className="min-w-0 truncate text-sm font-medium text-ink">{fullName(r)}</p>
+                      <p className="mt-0.5 truncate text-xs text-stone">{r.emailAddress || "No email on record"}</p>
+                    </div>
                     <UserRound className="h-4 w-4 shrink-0 text-pebble" aria-hidden />
                   </div>
-                  <p className="mt-1 truncate text-xs text-stone">{r.emailAddress || "No email on record"}</p>
                   <div className="mt-2.5">
                     <StatusPill
                       status={r.isProfileComplete ? "Profile complete" : "Profile incomplete"}
@@ -394,8 +397,12 @@ export default function ReviewQueue() {
                         onKeyDown={(e) => e.key === "Enter" && setSelectedId(row.id)}
                         aria-label={`Review application from ${fullName(row.applicant)}`}
                       >
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="min-w-0 truncate text-sm font-medium text-ink">{fullName(row.applicant)}</p>
+                        <div className="flex items-start gap-2.5">
+                          <Monogram name={fullName(row.applicant)} />
+                          <div className="min-w-0 flex-1">
+                            <p className="min-w-0 truncate text-sm font-medium text-ink">{fullName(row.applicant)}</p>
+                            <p className="num mt-0.5 text-xs text-pebble">Applied {formatDate(row.dateApplied)}</p>
+                          </div>
                           <button
                             type="button"
                             className={iconBtn + " -mr-1.5 -mt-1 h-8 w-8 shrink-0"}
@@ -411,7 +418,6 @@ export default function ReviewQueue() {
                         <p className="mt-1 truncate text-xs text-stone">
                           {[humanize(position), place].filter(Boolean).join(" · ")}
                         </p>
-                        <p className="num mt-0.5 text-xs text-pebble">Applied {formatDate(row.dateApplied)}</p>
                         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                           <StatusPill status={row.status} />
                           <VerdictPill verdict={row.match?.verdict} />

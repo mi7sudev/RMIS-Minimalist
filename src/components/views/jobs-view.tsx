@@ -19,6 +19,7 @@ import {
   Plus,
   Search,
   SlidersHorizontal,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useApplyFlow } from "@/components/apply/apply-dialogs";
@@ -79,16 +80,25 @@ function pageWindow(current: number, total: number): (number | "…")[] {
   return out;
 }
 
+/** % of the application window elapsed between publish and deadline (0–100). */
+function deadlineProgress(job: JobWire): number {
+  const start = new Date(job.publishDate ?? job.publishedAt).getTime();
+  const end = job.deadlineDate ? new Date(job.deadlineDate).getTime() : Number.NaN;
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return job.deadlineDate ? 100 : 0;
+  const pct = ((Date.now() - start) / (end - start)) * 100;
+  return Math.min(100, Math.max(0, pct));
+}
+
 function DeadlinePill({ job, className }: { job: JobWire; className?: string }) {
   const dl = deadlineState(job.deadlineDate);
   return (
     <span
-      className={`dlg-pill px-3 py-1 text-xs font-medium ${
+      className={`status-pill num ${
         dl.overdue
-          ? "border border-dusty-rose/30 bg-dusty-rose/10 text-dusty-rose"
+          ? "status-bad"
           : dl.closingSoon
-            ? "bg-ink text-white"
-            : "bg-fog text-graphite"
+            ? "status-warn"
+            : "status-neutral"
       } ${className ?? ""}`}
     >
       {dl.label}
@@ -206,9 +216,17 @@ function JobCard({
   const applied = (job.applications?.length ?? 0) > 0;
   const dl = deadlineState(job.deadlineDate);
   return (
-    <article className="dlg-card p-4 sm:p-6">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+    <article className="dlg-card p-4 transition-shadow duration-200 hover:shadow-dialog-subtle sm:p-6">
+      <div className="flex items-start gap-4">
+        {/* MIRDC monogram tile — anchors the card the way a company logo does
+            on every top-ranked job-board design */}
+        <span
+          aria-hidden="true"
+          className="hidden h-12 w-12 shrink-0 place-items-center rounded-[12px] bg-fog font-display text-lg leading-none text-ink sm:grid"
+        >
+          M
+        </span>
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <DeadlinePill job={job} />
             {applied && (
@@ -220,11 +238,17 @@ function JobCard({
           <h3 className="mt-2 font-display text-xl text-carbon">{humanize(job.title)}</h3>
           <p className="mt-1 text-sm text-stone">
             {pos?.placeOfAssignment || "—"} ·{" "}
-            {job.positionType ? humanize(job.positionType) : "—"} ·{" "}
-            {salary != null ? `${formatCurrency(salary)} monthly` : "Competitive"} ·{" "}
-            <span className={dl.overdue ? "text-dusty-rose" : undefined}>
+            {job.positionType ? humanize(job.positionType) : "—"}
+            {pos?.salaryGrade ? <span className="num"> · SG {pos.salaryGrade}</span> : null}
+            <span className={dl.overdue ? "text-[var(--bad)]" : undefined}>
+              {" "}
+              ·{" "}
               {job.deadlineDate ? `Closes ${formatDate(job.deadlineDate)}` : "Open until filled"}
             </span>
+          </p>
+          <p className="num mt-1.5 text-[15px] font-medium text-ink">
+            {salary != null ? formatCurrency(salary) : "Competitive"}
+            {salary != null && <span className="font-normal text-stone">/mo</span>}
           </p>
         </div>
         <button
@@ -287,6 +311,28 @@ function SummaryCard({
           </div>
         ))}
       </dl>
+
+      {/* Application-window progress — visualizes the publish→deadline span */}
+      {job.deadlineDate && (
+        <div className="mt-4 border-t border-border pt-4">
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="text-stone">
+              Posted <span className="num">{formatDate(job.publishDate ?? job.publishedAt)}</span>
+            </span>
+            <span className={dl.overdue ? "text-[var(--bad)]" : "text-stone"}>
+              Closes <span className="num">{formatDate(job.deadlineDate)}</span>
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-fog" role="presentation">
+            <div
+              className={`h-full rounded-full transition-[width] duration-500 ${
+                dl.overdue ? "bg-[var(--bad)]" : dl.closingSoon ? "bg-[var(--warn)]" : "bg-ink"
+              }`}
+              style={{ width: `${deadlineProgress(job)}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="mt-5">
         {applied ? (
@@ -897,6 +943,45 @@ export default function JobsView() {
               </Select>
             </div>
           </div>
+
+          {/* Active-filter chips — presentation of existing filter state */}
+          {activeFilterCount > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              {query.trim() && (
+                <span className="dlg-pill inline-flex items-center gap-1.5 bg-white px-3 py-1 text-xs font-medium text-graphite">
+                  &ldquo;{query.trim()}&rdquo;
+                  <button
+                    onClick={() => changeQuery("")}
+                    aria-label="Clear search filter"
+                    className="focus-ring -mr-1 grid h-5 w-5 place-items-center rounded-full text-stone hover:bg-fog hover:text-ink"
+                  >
+                    <X className="h-3 w-3" aria-hidden="true" />
+                  </button>
+                </span>
+              )}
+              {divisionFilter.map((code) => (
+                <span
+                  key={code}
+                  className="dlg-pill inline-flex items-center gap-1.5 bg-white px-3 py-1 text-xs font-medium text-graphite"
+                >
+                  {divisionShort(code)}
+                  <button
+                    onClick={() => toggleDivision(code)}
+                    aria-label={`Remove ${divisionShort(code)} filter`}
+                    className="focus-ring -mr-1 grid h-5 w-5 place-items-center rounded-full text-stone hover:bg-fog hover:text-ink"
+                  >
+                    <X className="h-3 w-3" aria-hidden="true" />
+                  </button>
+                </span>
+              ))}
+              <button
+                onClick={clearFilters}
+                className="text-xs text-stone underline underline-offset-4 hover:text-ink"
+              >
+                Clear all
+              </button>
+            </div>
+          )}
 
           {content}
         </div>
