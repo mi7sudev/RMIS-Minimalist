@@ -2,17 +2,19 @@
 
 // ============================================================================
 // RMIS — Profile builder (spec §7.4): the 7-part applicant profile.
-// Header card (avatar from PROFILE_PICTURE, completeness ring as "X of 7" +
-// thin bar, document count, Mark Complete gate) · PDS auto-fill card (§7.5) ·
-// numbered 01–07 section navigation (mobile stepper strip + desktop sticky
-// list) · sections 01–07. Data loads in parallel; every mutation silently
-// reloads and refreshes the session (§3.2).
+// Header card (avatar from PROFILE_PICTURE, "X of 7" progress bar + status
+// pill, document count, Mark Complete gate) · PDS auto-fill card (§7.5) ·
+// vertical step rail in a sticky white card (mobile stepper strip + desktop
+// rail) · sections 01–07 as SectionCards with per-section save indicators.
+// Data loads in parallel; every mutation silently reloads and refreshes the
+// session (§3.2).
 // ============================================================================
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertCircle,
+  Check,
   ChevronLeft,
   ChevronRight,
   FileText,
@@ -28,7 +30,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { SkeletonRows, StatusPill } from "@/components/ui/shell";
 import { apiFetch, fullName } from "@/lib/client";
+import { variantForCompletion } from "@/lib/status-ui";
 import { useSession } from "@/components/session-provider";
 import type { DocumentWire } from "@/lib/router";
 import PdsUploadCard from "./profile/pds-upload-card";
@@ -144,12 +148,28 @@ export default function ProfileView() {
   // ── Loading / error states ────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="mx-auto w-full max-w-[1100px] px-4 py-6 sm:px-6 lg:py-8">
-        <div className="dlg-card h-40 animate-pulse p-6" />
-        <div className="mt-6 dlg-card h-44 animate-pulse p-6" />
+      <div>
+        <div className="dlg-card-plain border border-border p-6">
+          <div className="flex items-center gap-4">
+            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full">
+              <div className="skel h-full w-full" />
+            </div>
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="skel h-4 w-48" />
+              <div className="skel h-3 w-36" />
+            </div>
+            <div className="hidden w-48 space-y-2 sm:block">
+              <div className="skel h-5 w-20" />
+              <div className="skel h-1.5 w-full" />
+            </div>
+          </div>
+        </div>
+        <div className="skel mt-6 h-40 w-full" />
         <div className="mt-6 grid gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
-          <div className="dlg-card hidden h-72 animate-pulse lg:block" />
-          <div className="dlg-card h-96 animate-pulse p-6" />
+          <div className="hidden lg:block">
+            <SkeletonRows rows={7} rowClassName="h-11" />
+          </div>
+          <SkeletonRows rows={4} rowClassName="h-20" />
         </div>
       </div>
     );
@@ -157,9 +177,9 @@ export default function ProfileView() {
 
   if (error && !profile) {
     return (
-      <div className="mx-auto w-full max-w-[1100px] px-4 py-6 sm:px-6 lg:py-8">
+      <div>
         <div className="dlg-card flex flex-col items-center gap-3 p-10 text-center">
-          <AlertCircle className="h-6 w-6 text-dusty-rose" />
+          <AlertCircle className="h-6 w-6 text-[var(--bad)]" />
           <p className="text-sm text-stone">{error}</p>
           <button type="button" onClick={() => void loadAll(false)} className="dlg-ghost min-h-[44px] px-6 py-2.5 text-sm">
             <RefreshCw className="mr-2 inline h-3.5 w-3.5" /> Retry
@@ -170,14 +190,13 @@ export default function ProfileView() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1100px] px-4 py-6 sm:px-6 lg:py-8">
+    <div>
       {/* ── Header card ─────────────────────────────────────────────────────── */}
       <section className="dlg-card p-6">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
           {/* Avatar */}
           <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full bg-ink">
             {pictureDoc ? (
-               
               <img src={`/api/files/${pictureDoc.filePath}`} alt="Profile picture" className="h-full w-full rounded-full object-cover" />
             ) : (
               <span className="flex h-full w-full items-center justify-center font-display text-lg text-white">{initials}</span>
@@ -193,28 +212,30 @@ export default function ProfileView() {
                   lastName: user?.lastName ?? profile?.lastName,
                 })}
               </h1>
-              <span
-                className={`rounded-full px-3 py-1 text-xs font-medium ${
-                  isComplete ? "bg-ink text-white" : "border border-border bg-fog text-stone"
-                }`}
-              >
-                {isComplete ? "Complete" : "Incomplete"}
-              </span>
+              <StatusPill status={isComplete ? "Complete" : "Incomplete"} variant={variantForCompletion(isComplete)} />
             </div>
             <p className="mt-1 flex items-center gap-1.5 text-sm text-stone">
               <FileText className="h-3.5 w-3.5" />
-              {docs.length} document{docs.length === 1 ? "" : "s"} on file
+              <span className="num">{docs.length}</span>
+              &nbsp;document{docs.length === 1 ? "" : "s"} on file
               {!isComplete && " · PDS auto-fill available below"}
             </p>
           </div>
 
-          {/* Completion ring — "X of 7" + thin bar (ink fill, not orange) */}
+          {/* Completion — "X of 7" + 6px progress bar (ink fill, not orange) */}
           <div className="w-full sm:w-48">
             <div className="flex items-baseline justify-between">
-              <span className="font-display text-xl text-ink">{completedCount} of 7</span>
+              <span className="num font-display text-xl text-ink">{completedCount} of 7</span>
               <span className="text-xs text-pebble">sections done</span>
             </div>
-            <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-fog">
+            <div
+              className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-fog"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={7}
+              aria-valuenow={completedCount}
+              aria-label={`${completedCount} of 7 sections completed`}
+            >
               <div className="h-full rounded-full bg-ink transition-all" style={{ width: `${(completedCount / 7) * 100}%` }} />
             </div>
             {canMarkComplete && (
@@ -246,7 +267,8 @@ export default function ProfileView() {
                 type="button"
                 onClick={() => setActive(s.n)}
                 aria-label={s.label}
-                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
+                aria-current={active === s.n ? "step" : undefined}
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
                   active === s.n ? "bg-ink text-white" : "border border-border bg-white text-stone"
                 }`}
               >
@@ -263,7 +285,7 @@ export default function ProfileView() {
             >
               <ChevronLeft className="h-4 w-4" /> Prev
             </button>
-            <span className="text-xs text-pebble">
+            <span className="num text-xs text-pebble">
               Section {active} of 7 · {SECTIONS[active - 1].label}
             </span>
             <button
@@ -277,41 +299,42 @@ export default function ProfileView() {
           </div>
         </div>
 
-        {/* Desktop sticky list */}
-        <nav className="hidden lg:block lg:sticky lg:top-6" aria-label="Profile sections">
-          <ul className="space-y-1.5">
-            {SECTIONS.map((s) => {
-              const isActive = active === s.n;
-              const done = sectionDone[s.n - 1];
-              return (
-                <li key={s.n}>
-                  <button
-                    type="button"
-                    onClick={() => setActive(s.n)}
-                    className={`flex w-full items-center gap-3 rounded-full px-4 py-2.5 text-left text-sm transition-colors ${
-                      isActive ? "bg-ink text-white" : "text-stone hover:bg-fog hover:text-ink"
-                    }`}
-                  >
-                    <span className={`text-xs ${isActive ? "text-white/70" : "text-pebble"}`}>{s.num}</span>
-                    <span className="flex-1 truncate">{s.label}</span>
-                    <span
-                      className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] ${
-                        done
-                          ? isActive
-                            ? "bg-white text-ink"
-                            : "bg-ink text-white"
-                          : isActive
-                            ? "bg-white/20"
-                            : "border border-border bg-fog"
+        {/* Desktop step rail — sticky card with 28px chips (check chip when done) */}
+        <nav className="hidden self-start lg:sticky lg:top-24 lg:block" aria-label="Profile sections">
+          <div className="dlg-card p-3">
+            <ol>
+              {SECTIONS.map((s) => {
+                const isActive = active === s.n;
+                const done = sectionDone[s.n - 1];
+                return (
+                  <li key={s.n}>
+                    <button
+                      type="button"
+                      onClick={() => setActive(s.n)}
+                      aria-current={isActive ? "step" : undefined}
+                      className={`focus-ring flex min-h-[44px] w-full items-center gap-3 rounded-full py-1.5 pl-1.5 pr-3 text-left text-sm transition-colors ${
+                        isActive ? "text-ink" : "text-stone hover:bg-fog hover:text-ink"
                       }`}
                     >
-                      {done ? "✓" : ""}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                      <span
+                        className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-medium ${
+                          isActive
+                            ? "bg-ink text-white"
+                            : done
+                              ? "bg-[var(--ok-bg)] text-[var(--ok)]"
+                              : "bg-fog text-stone"
+                        }`}
+                      >
+                        {done ? <Check className="h-3.5 w-3.5" /> : s.num}
+                      </span>
+                      <span className={`flex-1 truncate ${isActive ? "font-medium text-ink" : ""}`}>{s.label}</span>
+                      {done && !isActive && <span className="stage-dot dot-ok" aria-hidden="true" />}
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
         </nav>
 
         {/* Active section */}
@@ -349,14 +372,14 @@ export default function ProfileView() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="dlg-ghost min-h-[44px] border-0 px-5 py-2.5 text-sm">Not yet</AlertDialogCancel>
+            <AlertDialogCancel className="dlg-ghost min-h-[44px] px-5 py-2.5 text-sm">Not yet</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
                 void markComplete();
               }}
               disabled={marking}
-              className="dlg-cta min-h-[44px] border-0 px-5 py-2.5 text-sm disabled:opacity-50"
+              className="dlg-cta min-h-[44px] px-5 py-2.5 text-sm disabled:opacity-50"
             >
               {marking ? "Marking…" : "Mark Complete"}
             </AlertDialogAction>

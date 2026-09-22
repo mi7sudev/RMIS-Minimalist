@@ -1,0 +1,693 @@
+     1→"use client";
+     2→
+     3→// ============================================================================
+     4→// RMIS — Admin settings (spec §7.14, `#/settings?tab=users|audit|sms|email`).
+     5→// Sub-nav: Users & Roles / Audit Log / SMS Gateway / Email Notices. Deep
+     6→// linkable; the command center links to ?tab=audit.
+     7→// ============================================================================
+     8→
+     9→import { useCallback, useEffect, useState } from "react";
+    10→import { toast } from "sonner";
+    11→import { Search, Send, ShieldCheck, Users } from "lucide-react";
+    12→import { Input } from "@/components/ui/input";
+    13→import { Label } from "@/components/ui/label";
+    14→import { Switch } from "@/components/ui/switch";
+    15→import { Checkbox } from "@/components/ui/checkbox";
+    16→import { Skeleton } from "@/components/ui/skeleton";
+    17→import {
+    18→  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    19→} from "@/components/ui/dialog";
+    20→import {
+    21→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    22→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    23→} from "@/components/ui/alert-dialog";
+    24→import {
+    25→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    26→} from "@/components/ui/select";
+    27→import { apiFetch, formatDateTime, humanize, timeAgo } from "@/lib/client";
+    28→import { useHashRoute, navigate } from "@/lib/router";
+    29→import { ghostBtn, ctaBtn } from "@/components/views/recruitment";
+    30→
+    31→const TABS = [
+    32→  { key: "users", label: "Users & Roles", icon: Users },
+    33→  { key: "audit", label: "Audit Log", icon: ShieldCheck },
+    34→  { key: "sms", label: "SMS Gateway", icon: Send },
+    35→  { key: "email", label: "Email Notices", icon: Send },
+    36→] as const;
+    37→
+    38→type TabKey = (typeof TABS)[number]["key"];
+    39→
+    40→function labelCls() {
+    41→  return "mb-1.5 block text-xs font-medium text-graphite";
+    42→}
+    43→
+    44→// ───────────────────────────────────────────────────────────── Users panel
+    45→
+    46→type UserRow = {
+    47→  id: string;
+    48→  username: string;
+    49→  email: string;
+    50→  firstName: string | null;
+    51→  lastName: string | null;
+    52→  role: "ADMIN" | "EVALUATOR" | "APPLICANT";
+    53→  blocked: boolean;
+    54→  createdAt: string;
+    55→  applicant?: { id: number; isProfileComplete: boolean } | null;
+    56→};
+    57→
+    58→function RolePill({ role }: { role: string }) {
+    59→  return (
+    60→    <span className="inline-flex items-center rounded-full bg-fog px-2.5 py-1 text-xs font-medium text-graphite">
+    61→      {role}
+    62→    </span>
+    63→  );
+    64→}
+    65→
+    66→function UsersPanel() {
+    67→  const [rows, setRows] = useState<UserRow[] | null>(null);
+    68→  const [total, setTotal] = useState(0);
+    69→  const [q, setQ] = useState("");
+    70→  const [role, setRole] = useState("ALL");
+    71→  const [page, setPage] = useState(1);
+    72→  const pageSize = 15;
+    73→  const [busyId, setBusyId] = useState<string | null>(null);
+    74→
+    75→  const [createOpen, setCreateOpen] = useState(false);
+    76→  const [editUser, setEditUser] = useState<UserRow | null>(null);
+    77→  const [hardTarget, setHardTarget] = useState<UserRow | null>(null);
+    78→  const [disableTarget, setDisableTarget] = useState<UserRow | null>(null);
+    79→
+    80→  const load = useCallback(async (silent = false) => {
+    81→    if (!silent) setRows(null);
+    82→    try {
+    83→      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    84→      if (q.trim()) params.set("q", q.trim());
+    85→      if (role !== "ALL") params.set("role", role);
+    86→      const data = await apiFetch<{ data: UserRow[]; total: number }>(`/api/admin/users?${params.toString()}`);
+    87→      setRows(data.data);
+    88→      setTotal(data.total);
+    89→    } catch (e) {
+    90→      if (!silent) toast.error(e instanceof Error ? e.message : "Failed to load users");
+    91→      setRows([]);
+    92→    }
+    93→  }, [q, role, page]);
+    94→
+    95→  useEffect(() => {
+    96→    const t = setTimeout(() => void load(), 250);
+    97→    return () => clearTimeout(t);
+    98→  }, [load]);
+    99→
+   100→  const toggleActive = async (u: UserRow) => {
+   101→    setBusyId(u.id);
+   102→    try {
+   103→      if (!u.blocked) {
+   104→        setDisableTarget(u); // confirm first
+   105→      } else {
+   106→        await apiFetch(`/api/admin/users/${u.id}`, { method: "PATCH", body: { isActive: true } });
+   107→        toast.success(`${u.username} re-enabled`);
+   108→        await load(true);
+   109→      }
+   110→    } catch (e) {
+   111→      toast.error(e instanceof Error ? e.message : "Action failed");
+   112→    } finally {
+   113→      setBusyId(null);
+   114→    }
+   115→  };
+   116→
+   117→  const confirmDisable = async () => {
+   118→    if (!disableTarget) return;
+   119→    try {
+   120→      await apiFetch(`/api/admin/users/${disableTarget.id}`, { method: "DELETE" });
+   121→      toast.success(`${disableTarget.username} disabled`);
+   122→      await load(true);
+   123→    } catch (e) {
+   124→      toast.error(e instanceof Error ? e.message : "Action failed");
+   125→    }
+   126→    setDisableTarget(null);
+   127→  };
+   128→
+   129→  const confirmHardDelete = async () => {
+   130→    if (!hardTarget) return;
+   131→    try {
+   132→      await apiFetch(`/api/admin/users/${hardTarget.id}?hard=1`, { method: "DELETE" });
+   133→      toast.success(`${hardTarget.username} permanently deleted`);
+   134→      await load(true);
+   135→    } catch (e) {
+   136→      toast.error(e instanceof Error ? e.message : "Delete failed");
+   137→    }
+   138→    setHardTarget(null);
+   139→  };
+   140→
+   141→  const pages = Math.max(1, Math.ceil(total / pageSize));
+   142→
+   143→  return (
+   144→    <div className="space-y-4">
+   145→      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+   146→        <p className="text-sm text-stone">{total} account{total === 1 ? "" : "s"}</p>
+   147→        <button type="button" className={ctaBtn} onClick={() => setCreateOpen(true)}>Create User</button>
+   148→      </div>
+   149→
+   150→      <div className="dlg-card p-4 flex flex-col gap-3 sm:flex-row">
+   151→        <div className="relative flex-1">
+   152→          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-pebble" aria-hidden />
+   153→          <Input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search name, email or username…" className="dlg-input min-h-[44px] pl-9" />
+   154→        </div>
+   155→        <Select value={role} onValueChange={(v) => { setRole(v); setPage(1); }}>
+   156→          <SelectTrigger className="dlg-input min-h-[44px] w-full sm:w-44"><SelectValue /></SelectTrigger>
+   157→          <SelectContent>
+   158→            <SelectItem value="ALL">All roles</SelectItem>
+   159→            <SelectItem value="APPLICANT">Applicant</SelectItem>
+   160→            <SelectItem value="EVALUATOR">Evaluator</SelectItem>
+   161→            <SelectItem value="ADMIN">Admin</SelectItem>
+   162→          </SelectContent>
+   163→        </Select>
+   164→      </div>
+   165→
+   166→      <div className="dlg-card overflow-hidden">
+   167→        <div className="max-h-96 overflow-y-auto scroll-thin">
+   168→          <table className="w-full text-sm">
+   169→            <thead className="bg-fog text-left text-xs text-stone">
+   170→              <tr>
+   171→                <th className="px-4 py-3 font-medium">User</th>
+   172→                <th className="px-4 py-3 font-medium">Role</th>
+   173→                <th className="px-4 py-3 font-medium">Active</th>
+   174→                <th className="px-4 py-3 font-medium text-right">Actions</th>
+   175→              </tr>
+   176→            </thead>
+   177→            <tbody>
+   178→              {rows === null && (
+   179→                <tr><td colSpan={4} className="p-4"><Skeleton className="h-16 w-full bg-fog" /></td></tr>
+   180→              )}
+   181→              {rows?.length === 0 && (
+   182→                <tr><td colSpan={4} className="p-8 text-center text-sm text-pebble">No accounts match your filters.</td></tr>
+   183→              )}
+   184→              {rows?.map((u) => (
+   185→                <tr key={u.id} className="border-t border-border">
+   186→                  <td className="px-4 py-3">
+   187→                    <p className="font-medium text-ink">{[u.firstName, u.lastName].filter(Boolean).join(" ") || u.username}</p>
+   188→                    <p className="text-xs text-pebble">{u.email} · @{u.username}</p>
+   189→                  </td>
+   190→                  <td className="px-4 py-3"><RolePill role={u.role} /></td>
+   191→                  <td className="px-4 py-3">
+   192→                    <Switch checked={!u.blocked} disabled={busyId === u.id} onCheckedChange={() => void toggleActive(u)} aria-label={`Toggle ${u.username}`} />
+   193→                  </td>
+   194→                  <td className="px-4 py-3">
+   195→                    <div className="flex justify-end gap-2">
+   196→                      <button type="button" className="dlg-ghost inline-flex min-h-[36px] items-center rounded-full px-3 text-xs" onClick={() => setEditUser(u)}>Edit</button>
+   197→                      <button type="button" className="inline-flex min-h-[36px] items-center rounded-full border border-dusty-rose/40 bg-dusty-rose/10 px-3 text-xs font-medium text-dusty-rose" onClick={() => setHardTarget(u)}>Delete</button>
+   198→                    </div>
+   199→                  </td>
+   200→                </tr>
+   201→              ))}
+   202→            </tbody>
+   203→          </table>
+   204→        </div>
+   205→      </div>
+   206→
+   207→      {pages > 1 && (
+   208→        <div className="flex items-center justify-center gap-2">
+   209→          <button type="button" className={ghostBtn} disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</button>
+   210→          <span className="text-sm text-stone">Page {page} of {pages}</span>
+   211→          <button type="button" className={ghostBtn} disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</button>
+   212→        </div>
+   213→      )}
+   214→
+   215→      <CreateUserDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={() => void load(true)} />
+   216→      {editUser && (
+   217→        <EditUserDialog user={editUser} onOpenChange={(o) => !o && setEditUser(null)} onSaved={() => void load(true)} />
+   218→      )}
+   219→
+   220→      <AlertDialog open={!!disableTarget} onOpenChange={(o) => !o && setDisableTarget(null)}>
+   221→        <AlertDialogContent className="dlg-card-plain">
+   222→          <AlertDialogHeader>
+   223→            <AlertDialogTitle className="font-display text-xl">Disable {disableTarget?.username}?</AlertDialogTitle>
+   224→            <AlertDialogDescription className="text-sm text-stone">
+   225→              The account will be signed out and cannot sign in until re-enabled. Nothing is permanently deleted.
+   226→            </AlertDialogDescription>
+   227→          </AlertDialogHeader>
+   228→          <AlertDialogFooter>
+   229→            <AlertDialogCancel className="dlg-ghost rounded-full">Cancel</AlertDialogCancel>
+   230→            <AlertDialogAction className="dlg-cta rounded-full" onClick={() => void confirmDisable()}>Disable</AlertDialogAction>
+   231→          </AlertDialogFooter>
+   232→        </AlertDialogContent>
+   233→      </AlertDialog>
+   234→
+   235→      <AlertDialog open={!!hardTarget} onOpenChange={(o) => !o && setHardTarget(null)}>
+   236→        <AlertDialogContent className="dlg-card-plain">
+   237→          <AlertDialogHeader>
+   238→            <AlertDialogTitle className="font-display text-xl">Permanently delete {hardTarget?.username}?</AlertDialogTitle>
+   239→            <AlertDialogDescription className="text-sm text-stone">
+   240→              This removes the account and its applicant profile. Administrators and your own account are protected.
+   241→            </AlertDialogDescription>
+   242→          </AlertDialogHeader>
+   243→          <AlertDialogFooter>
+   244→            <AlertDialogCancel className="dlg-ghost rounded-full">Cancel</AlertDialogCancel>
+   245→            <AlertDialogAction className="rounded-full bg-dusty-rose text-white hover:bg-dusty-rose/90" onClick={() => void confirmHardDelete()}>Delete forever</AlertDialogAction>
+   246→          </AlertDialogFooter>
+   247→        </AlertDialogContent>
+   248→      </AlertDialog>
+   249→    </div>
+   250→  );
+   251→}
+   252→
+   253→function CreateUserDialog({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: () => void }) {
+   254→  const [form, setForm] = useState({ email: "", username: "", password: "", role: "APPLICANT", firstName: "", lastName: "" });
+   255→  const [busy, setBusy] = useState(false);
+   256→  const usernameError = form.username.length > 0 && form.username.length < 3 ? "Username must be at least 3 characters" : null;
+   257→  const passwordError = form.password.length > 0 && form.password.length < 6 ? "Password must be at least 6 characters" : null;
+   258→
+   259→  const submit = async () => {
+   260→    setBusy(true);
+   261→    try {
+   262→      await apiFetch("/api/admin/users", { method: "POST", body: form });
+   263→      toast.success("Account created");
+   264→      onOpenChange(false);
+   265→      setForm({ email: "", username: "", password: "", role: "APPLICANT", firstName: "", lastName: "" });
+   266→      onCreated();
+   267→    } catch (e) {
+   268→      toast.error(e instanceof Error ? e.message : "Create failed");
+   269→    } finally {
+   270→      setBusy(false);
+   271→    }
+   272→  };
+   273→
+   274→  return (
+   275→    <Dialog open={open} onOpenChange={onOpenChange}>
+   276→      <DialogContent className="dlg-card-plain sm:max-w-md">
+   277→        <DialogHeader className="text-left">
+   278→          <DialogTitle className="font-display text-2xl text-ink">Create User</DialogTitle>
+   279→          <DialogDescription className="text-sm text-stone">Staff accounts can only sign in from the MIRDC intranet.</DialogDescription>
+   280→        </DialogHeader>
+   281→        <div className="space-y-3">
+   282→          <div><Label className={labelCls()}>Email *</Label><Input className="dlg-input min-h-[44px]" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="name@mirdc.gov.ph" /></div>
+   283→          <div>
+   284→            <Label className={labelCls()}>Username *</Label>
+   285→            <Input className="dlg-input min-h-[44px]" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
+   286→            {usernameError && <p className="mt-1 text-xs text-dusty-rose">{usernameError}</p>}
+   287→          </div>
+   288→          <div>
+   289→            <Label className={labelCls()}>Password *</Label>
+   290→            <Input type="password" className="dlg-input min-h-[44px]" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+   291→            {passwordError && <p className="mt-1 text-xs text-dusty-rose">{passwordError}</p>}
+   292→          </div>
+   293→          <div>
+   294→            <Label className={labelCls()}>Role</Label>
+   295→            <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
+   296→              <SelectTrigger className="dlg-input min-h-[44px]"><SelectValue /></SelectTrigger>
+   297→              <SelectContent>
+   298→                <SelectItem value="APPLICANT">Applicant</SelectItem>
+   299→                <SelectItem value="EVALUATOR">Evaluator</SelectItem>
+   300→                <SelectItem value="ADMIN">Admin</SelectItem>
+   301→              </SelectContent>
+   302→            </Select>
+   303→          </div>
+   304→          <div className="grid grid-cols-2 gap-3">
+   305→            <div><Label className={labelCls()}>First name</Label><Input className="dlg-input min-h-[44px]" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></div>
+   306→            <div><Label className={labelCls()}>Last name</Label><Input className="dlg-input min-h-[44px]" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></div>
+   307→          </div>
+   308→        </div>
+   309→        <DialogFooter className="flex-col gap-3 sm:flex-row">
+   310→          <button type="button" className={ghostBtn} onClick={() => onOpenChange(false)}>Cancel</button>
+   311→          <button
+   312→            type="button"
+   313→            className={ctaBtn}
+   314→            disabled={busy || !form.email || usernameError !== null || passwordError !== null || form.password.length < 6 || form.username.length < 3}
+   315→            onClick={() => void submit()}
+   316→          >
+   317→            {busy ? "Creating…" : "Create"}
+   318→          </button>
+   319→        </DialogFooter>
+   320→      </DialogContent>
+   321→    </Dialog>
+   322→  );
+   323→}
+   324→
+   325→function EditUserDialog({ user, onOpenChange, onSaved }: { user: UserRow; onOpenChange: (o: boolean) => void; onSaved: () => void }) {
+   326→  const [form, setForm] = useState({ firstName: user.firstName ?? "", lastName: user.lastName ?? "", role: user.role, password: "" });
+   327→  const [busy, setBusy] = useState(false);
+   328→
+   329→  const submit = async () => {
+   330→    setBusy(true);
+   331→    try {
+   332→      const body: Record<string, unknown> = { firstName: form.firstName, lastName: form.lastName, role: form.role };
+   333→      if (form.password) body.password = form.password;
+   334→      await apiFetch(`/api/admin/users/${user.id}`, { method: "PATCH", body });
+   335→      toast.success("Account updated");
+   336→      onOpenChange(false);
+   337→      onSaved();
+   338→    } catch (e) {
+   339→      toast.error(e instanceof Error ? e.message : "Update failed");
+   340→    } finally {
+   341→      setBusy(false);
+   342→    }
+   343→  };
+   344→
+   345→  return (
+   346→    <Dialog open onOpenChange={onOpenChange}>
+   347→      <DialogContent className="dlg-card-plain sm:max-w-md">
+   348→        <DialogHeader className="text-left">
+   349→          <DialogTitle className="font-display text-2xl text-ink">Edit @{user.username}</DialogTitle>
+   350→          <DialogDescription className="text-sm text-stone">{user.email}</DialogDescription>
+   351→        </DialogHeader>
+   352→        <div className="space-y-3">
+   353→          <div className="grid grid-cols-2 gap-3">
+   354→            <div><Label className={labelCls()}>First name</Label><Input className="dlg-input min-h-[44px]" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></div>
+   355→            <div><Label className={labelCls()}>Last name</Label><Input className="dlg-input min-h-[44px]" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></div>
+   356→          </div>
+   357→          <div>
+   358→            <Label className={labelCls()}>Role</Label>
+   359→            <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v as UserRow["role"] })}>
+   360→              <SelectTrigger className="dlg-input min-h-[44px]"><SelectValue /></SelectTrigger>
+   361→              <SelectContent>
+   362→                <SelectItem value="APPLICANT">Applicant</SelectItem>
+   363→                <SelectItem value="EVALUATOR">Evaluator</SelectItem>
+   364→                <SelectItem value="ADMIN">Admin</SelectItem>
+   365→              </SelectContent>
+   366→            </Select>
+   367→          </div>
+   368→          <div>
+   369→            <Label className={labelCls()}>Reset password</Label>
+   370→            <Input type="password" className="dlg-input min-h-[44px]" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Leave blank to keep current" />
+   371→            {form.password.length > 0 && form.password.length < 6 && <p className="mt-1 text-xs text-dusty-rose">Password must be at least 6 characters</p>}
+   372→          </div>
+   373→        </div>
+   374→        <DialogFooter className="flex-col gap-3 sm:flex-row">
+   375→          <button type="button" className={ghostBtn} onClick={() => onOpenChange(false)}>Cancel</button>
+   376→          <button type="button" className={ctaBtn} disabled={busy || (form.password.length > 0 && form.password.length < 6)} onClick={() => void submit()}>
+   377→            {busy ? "Saving…" : "Save changes"}
+   378→          </button>
+   379→        </DialogFooter>
+   380→      </DialogContent>
+   381→    </Dialog>
+   382→  );
+   383→}
+   384→
+   385→// ───────────────────────────────────────────────────────────── Audit panel
+   386→
+   387→type AuditRow = {
+   388→  id: number;
+   389→  timestamp: string;
+   390→  userLabel: string | null;
+   391→  userRole: string | null;
+   392→  action: string;
+   393→  entityType: string | null;
+   394→  entityId: string | null;
+   395→  description: string | null;
+   396→  ipAddress: string | null;
+   397→};
+   398→
+   399→function AuditPanel() {
+   400→  const [rows, setRows] = useState<AuditRow[] | null>(null);
+   401→  const [summary, setSummary] = useState<{ totalEvents: number; byRole: Record<string, number> } | null>(null);
+   402→  const [actions, setActions] = useState<string[]>([]);
+   403→  const [q, setQ] = useState("");
+   404→  const [action, setAction] = useState("ALL");
+   405→  const [page, setPage] = useState(1);
+   406→  const pageSize = 25;
+   407→
+   408→  const load = useCallback(async (silent = false) => {
+   409→    if (!silent) setRows(null);
+   410→    try {
+   411→      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+   412→      if (q.trim()) params.set("search", q.trim());
+   413→      if (action !== "ALL") params.set("action", action);
+   414→      const data = await apiFetch<{
+   415→        data: AuditRow[];
+   416→        total: number;
+   417→        actions: string[];
+   418→        summary: { totalEvents: number; onPage: number; topActions: { action: string; count: number }[]; byRole: Record<string, number> };
+   419→      }>(`/api/admin/audit-logs?${params.toString()}`);
+   420→      setRows(data.data);
+   421→      setSummary({ totalEvents: data.summary.totalEvents, byRole: data.summary.byRole });
+   422→      setActions(data.actions);
+   423→    } catch (e) {
+   424→      if (!silent) toast.error(e instanceof Error ? e.message : "Failed to load audit log");
+   425→      setRows([]);
+   426→    }
+   427→  }, [q, action, page]);
+   428→
+   429→  useEffect(() => {
+   430→    const t = setTimeout(() => void load(), 250);
+   431→    return () => clearTimeout(t);
+   432→  }, [load]);
+   433→
+   434→  const pages = Math.max(1, Math.ceil((rows === null ? 0 : summary?.totalEvents ?? 0) / pageSize));
+   435→
+   436→  return (
+   437→    <div className="space-y-4">
+   438→      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+   439→        <div className="dlg-card p-4">
+   440→          <p className="text-xs text-pebble">Total events</p>
+   441→          <p className="font-display text-3xl text-ink tabular-nums">{summary?.totalEvents ?? "—"}</p>
+   442→        </div>
+   443→        {(["ADMIN", "EVALUATOR", "APPLICANT"] as const).map((r) => (
+   444→          <div key={r} className="dlg-card p-4">
+   445→            <p className="text-xs text-pebble">{humanize(r)}</p>
+   446→            <p className="font-display text-3xl text-ink tabular-nums">{summary?.byRole?.[r] ?? 0}</p>
+   447→          </div>
+   448→        ))}
+   449→      </div>
+   450→
+   451→      <div className="dlg-card p-4 flex flex-col gap-3 sm:flex-row">
+   452→        <div className="relative flex-1">
+   453→          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-pebble" aria-hidden />
+   454→          <Input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search descriptions and actors…" className="dlg-input min-h-[44px] pl-9" />
+   455→        </div>
+   456→        <Select value={action} onValueChange={(v) => { setAction(v); setPage(1); }}>
+   457→          <SelectTrigger className="dlg-input min-h-[44px] w-full sm:w-56"><SelectValue /></SelectTrigger>
+   458→          <SelectContent>
+   459→            <SelectItem value="ALL">All actions</SelectItem>
+   460→            {actions.map((a) => <SelectItem key={a} value={a}>{humanize(a)}</SelectItem>)}
+   461→          </SelectContent>
+   462→        </Select>
+   463→      </div>
+   464→
+   465→      <div className="dlg-card overflow-hidden">
+   466→        <div className="max-h-96 overflow-y-auto scroll-thin">
+   467→          <table className="w-full text-sm">
+   468→            <thead className="bg-fog text-left text-xs text-stone">
+   469→              <tr>
+   470→                <th className="px-4 py-3 font-medium">Actor</th>
+   471→                <th className="px-4 py-3 font-medium">Action</th>
+   472→                <th className="px-4 py-3 font-medium">Detail</th>
+   473→                <th className="px-4 py-3 font-medium">When</th>
+   474→              </tr>
+   475→            </thead>
+   476→            <tbody>
+   477→              {rows === null && <tr><td colSpan={4} className="p-4"><Skeleton className="h-16 w-full bg-fog" /></td></tr>}
+   478→              {rows?.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-sm text-pebble">No audit events match.</td></tr>}
+   479→              {rows?.map((r) => (
+   480→                <tr key={r.id} className="border-t border-border align-top">
+   481→                  <td className="px-4 py-3">
+   482→                    <p className="font-medium text-ink">{r.userLabel ?? "System"}</p>
+   483→                    {r.userRole && <p className="text-xs text-pebble">{r.userRole}</p>}
+   484→                  </td>
+   485→                  <td className="px-4 py-3"><span className="inline-flex rounded-full bg-fog px-2.5 py-1 text-xs font-medium text-graphite">{humanize(r.action)}</span></td>
+   486→                  <td className="px-4 py-3 text-stone">{r.description ?? "—"}</td>
+   487→                  <td className="px-4 py-3 text-xs text-pebble">{timeAgo(r.timestamp)}</td>
+   488→                </tr>
+   489→              ))}
+   490→            </tbody>
+   491→          </table>
+   492→        </div>
+   493→      </div>
+   494→
+   495→      {pages > 1 && (
+   496→        <div className="flex items-center justify-center gap-2">
+   497→          <button type="button" className={ghostBtn} disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</button>
+   498→          <span className="text-sm text-stone">Page {page} of {pages}</span>
+   499→          <button type="button" className={ghostBtn} disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</button>
+   500→        </div>
+   501→      )}
+   502→    </div>
+   503→  );
+   504→}
+   505→
+   506→// ─────────────────────────────────────────────── Messaging panels (SMS/email)
+   507→
+   508→type MsgLog = {
+   509→  id: number;
+   510→  to: string;
+   511→  subject?: string;
+   512→  message?: string;
+   513→  provider: string;
+   514→  status: string;
+   515→  error: string | null;
+   516→  createdAt: string;
+   517→  attachments?: string | null;
+   518→};
+   519→
+   520→type MsgPanelData = {
+   521→  provider: string;
+   522→  configured: boolean;
+   523→  stats: { total: number; sent: number; failed: number; skipped?: number; mock?: number; last24h: number };
+   524→  logs: MsgLog[];
+   525→};
+   526→
+   527→function StatusChip({ status }: { status: string }) {
+   528→  const cls =
+   529→    status === "sent" ? "bg-ink text-white"
+   530→    : status === "failed" ? "bg-dusty-rose/15 text-dusty-rose"
+   531→    : status === "skipped" ? "bg-fog text-pebble"
+   532→    : "bg-fog text-stone";
+   533→  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${cls}`}>{status}</span>;
+   534→}
+   535→
+   536→function MessagingPanel({ kind }: { kind: "sms" | "email" }) {
+   537→  const [data, setData] = useState<MsgPanelData | null>(null);
+   538→  const [to, setTo] = useState("");
+   539→  const [subject, setSubject] = useState("");
+   540→  const [message, setMessage] = useState("");
+   541→  const [busy, setBusy] = useState(false);
+   542→
+   543→  const load = useCallback(async (silent = false) => {
+   544→    if (!silent) setData(null);
+   545→    try {
+   546→      setData(await apiFetch<MsgPanelData>(`/api/admin/${kind}`));
+   547→    } catch (e) {
+   548→      if (!silent) toast.error(e instanceof Error ? e.message : "Failed to load");
+   549→      setData({ provider: "mock", configured: false, stats: { total: 0, sent: 0, failed: 0, last24h: 0 }, logs: [] });
+   550→    }
+   551→  }, [kind]);
+   552→
+   553→  useEffect(() => { void load(); }, [load]);
+   554→
+   555→  const testSend = async () => {
+   556→    setBusy(true);
+   557→    try {
+   558→      const body = kind === "sms" ? { to, message: message || undefined } : { to, subject: subject || undefined, message: message || undefined };
+   559→      const res = await apiFetch<{ email?: { status: string }; sms?: { status: string } }>(`/api/admin/${kind}`, { method: "POST", body });
+   560→      const status = res.email?.status ?? res.sms?.status ?? "sent";
+   561→      if (status === "sent") toast.success(`Test ${kind} sent`);
+   562→      else if (status === "mock") toast.info(`Test ${kind} logged in mock mode`, { description: "Configure a provider to deliver for real." });
+   563→      else if (status === "skipped") toast.warning("Recipient skipped", { description: "Check the address or mobile number format." });
+   564→      else toast.error(`Delivery failed — check the logs`);
+   565→      await load(true);
+   566→    } catch (e) {
+   567→      toast.error(e instanceof Error ? e.message : "Send failed");
+   568→    } finally {
+   569→      setBusy(false);
+   570→    }
+   571→  };
+   572→
+   573→  const tiles: [string, number | undefined][] = [
+   574→    ["Total", data?.stats.total],
+   575→    ["Sent", data?.stats.sent],
+   576→    ["Failed", data?.stats.failed],
+   577→    ["Last 24h", data?.stats.last24h],
+   578→  ];
+   579→
+   580→  return (
+   581→    <div className="space-y-4">
+   582→      <div className="dlg-card p-6">
+   583→        <div className="flex flex-wrap items-center justify-between gap-3">
+   584→          <div>
+   585→            <p className="text-xs text-pebble">Active provider</p>
+   586→            <p className="font-display text-xl text-ink">{humanize(data?.provider ?? "…")}</p>
+   587→          </div>
+   588→          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${data?.provider === "mock" ? "bg-fog text-stone" : "bg-ink text-white"}`}>
+   589→            {data?.provider === "mock" ? "Mock mode — messages are logged only" : data?.configured ? "Configured" : "Not configured"}
+   590→          </span>
+   591→        </div>
+   592→        <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+   593→          {tiles.map(([label, value]) => (
+   594→            <div key={label} className="rounded-[12px] bg-fog p-3">
+   595→              <p className="text-xs text-pebble">{label}</p>
+   596→              <p className="font-display text-2xl text-ink tabular-nums">{value ?? "—"}</p>
+   597→            </div>
+   598→          ))}
+   599→        </div>
+   600→      </div>
+   601→
+   602→      <div className="dlg-card p-6">
+   603→        <p className="mb-4 text-sm font-medium text-ink">Test send</p>
+   604→        <div className="grid gap-3 sm:grid-cols-2">
+   605→          <div>
+   606→            <Label className={labelCls()}>{kind === "sms" ? "Mobile number (09…)" : "Recipient email"}</Label>
+   607→            <Input className="dlg-input min-h-[44px]" value={to} onChange={(e) => setTo(e.target.value)} placeholder={kind === "sms" ? "09171234567" : "name@example.com"} />
+   608→          </div>
+   609→          {kind === "email" && (
+   610→            <div>
+   611→              <Label className={labelCls()}>Subject</Label>
+   612→              <Input className="dlg-input min-h-[44px]" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="RMIS test email" />
+   613→            </div>
+   614→          )}
+   615→          <div className={kind === "email" ? "sm:col-span-2" : ""}>
+   616→            <Label className={labelCls()}>Message</Label>
+   617→            <Input className="dlg-input min-h-[44px]" value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Optional message" />
+   618→          </div>
+   619→        </div>
+   620→        <button type="button" className={`${ctaBtn} mt-4`} disabled={busy || !to.trim()} onClick={() => void testSend()}>
+   621→          {busy ? "Sending…" : `Send test ${kind}`}
+   622→        </button>
+   623→      </div>
+   624→
+   625→      <div className="dlg-card overflow-hidden">
+   626→        <div className="max-h-96 overflow-y-auto scroll-thin">
+   627→          <table className="w-full text-sm">
+   628→            <thead className="bg-fog text-left text-xs text-stone">
+   629→              <tr>
+   630→                <th className="px-4 py-3 font-medium">To</th>
+   631→                <th className="px-4 py-3 font-medium">{kind === "sms" ? "Message" : "Subject"}</th>
+   632→                <th className="px-4 py-3 font-medium">Status</th>
+   633→                <th className="px-4 py-3 font-medium">When</th>
+   634→              </tr>
+   635→            </thead>
+   636→            <tbody>
+   637→              {data === null && <tr><td colSpan={4} className="p-4"><Skeleton className="h-16 w-full bg-fog" /></td></tr>}
+   638→              {data?.logs.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-sm text-pebble">Nothing sent yet.</td></tr>}
+   639→              {data?.logs.map((l) => (
+   640→                <tr key={l.id} className="border-t border-border align-top">
+   641→                  <td className="px-4 py-3 font-medium text-ink">{l.to}</td>
+   642→                  <td className="max-w-[280px] truncate px-4 py-3 text-stone">{l.subject ?? l.message ?? "—"}</td>
+   643→                  <td className="px-4 py-3"><StatusChip status={l.status} />{l.error && <p className="mt-1 text-xs text-pebble">{l.error}</p>}</td>
+   644→                  <td className="px-4 py-3 text-xs text-pebble">{timeAgo(l.createdAt)}</td>
+   645→                </tr>
+   646→              ))}
+   647→            </tbody>
+   648→          </table>
+   649→        </div>
+   650→      </div>
+   651→    </div>
+   652→  );
+   653→}
+   654→
+   655→// ───────────────────────────────────────────────────────────── Root view
+   656→
+   657→export default function Settings() {
+   658→  const route = useHashRoute();
+   659→  const tabParam = route.params.tab;
+   660→  const tab: TabKey = TABS.some((t) => t.key === tabParam) ? (tabParam as TabKey) : "users";
+   661→
+   662→  return (
+   663→    <div className="space-y-6">
+   664→      <header>
+   665→        <h1 className="font-display text-heading-md text-carbon">Settings</h1>
+   666→        <p className="mt-1 text-sm text-stone">Manage accounts, review the audit trail, and configure notification channels.</p>
+   667→      </header>
+   668→
+   669→      <div className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible">
+   670→        {TABS.map((t) => (
+   671→          <button
+   672→            key={t.key}
+   673→            type="button"
+   674→            onClick={() => navigate("settings", { tab: t.key })}
+   675→            className={`inline-flex min-h-[44px] items-center gap-2 whitespace-nowrap rounded-full px-4 text-sm transition-colors lg:w-full lg:justify-start ${
+   676→              tab === t.key ? "bg-ink text-white" : "text-stone hover:bg-white"
+   677→            }`}
+   678→            aria-current={tab === t.key ? "page" : undefined}
+   679→          >
+   680→            <t.icon className="h-4 w-4" aria-hidden />
+   681→            {t.label}
+   682→          </button>
+   683→        ))}
+   684→      </div>
+   685→
+   686→      {tab === "users" && <UsersPanel />}
+   687→      {tab === "audit" && <AuditPanel />}
+   688→      {tab === "sms" && <MessagingPanel kind="sms" />}
+   689→      {tab === "email" && <MessagingPanel kind="email" />}
+   690→    </div>
+   691→  );
+   692→}
+   693→

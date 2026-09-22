@@ -5,11 +5,16 @@
 // list from /api/admin/applicants with KPI tiles, debounced search, profile
 // status / has-account filters, list rows with quick-view modal, and a kanban
 // mode over the evaluator queue. 20 s silent poll + focus refresh.
+// Enterprise polish pass: PageHeader, KpiCard row, single-card filter toolbar,
+// table-card rows with hover quick-view, EmptyState, skeleton loading.
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, LayoutGrid, List, Mail, Phone, RefreshCw, UserRound } from "lucide-react";
+import {
+  AlertTriangle, ArrowUpRight, Inbox, KeyRound, LayoutGrid, List, Mail, Phone,
+  RefreshCw, Search, UserCheck, UserRound, Users,
+} from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -18,9 +23,12 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { EmptyState, KpiCard, PageHeader, SkeletonRows } from "@/components/ui/shell";
 import { apiFetch, formatDate, fullName, humanize } from "@/lib/client";
-import { PIPELINE_STAGES, isRejectedStatus, stageForStatus, getStatusMeta, type StageKey } from "@/lib/status";
+import { PIPELINE_STAGES, isRejectedStatus, stageForStatus, type StageKey } from "@/lib/status";
+import { dotClass, variantForCompletion, type StatusVariant } from "@/lib/status-ui";
 import { navigate, useHashRoute } from "@/lib/router";
+import { cn } from "@/lib/utils";
 import { StatusPill } from "@/components/views/review-workspace";
 import { ghostBtn, ctaBtn } from "@/components/views/recruitment";
 
@@ -66,7 +74,21 @@ type QueueRow = {
 
 const PAGE_SIZE = 25;
 
-function Monogram({ name }: { name: string }) {
+/** Stage → stage-dot variant. */
+const STAGE_DOT: Record<StageKey, StatusVariant> = {
+  "Applied": "info",
+  "Under Review": "warn",
+  "Shortlisted": "ok",
+  "Rejected": "bad",
+};
+
+const cardCls =
+  "rounded-[12px] border border-border bg-white transition-all duration-200 hover:border-ink/10 hover:shadow-dialog-subtle";
+
+const iconBtn =
+  "focus-ring inline-flex h-9 w-9 items-center justify-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink";
+
+function Monogram({ name, className }: { name: string; className?: string }) {
   const initials = name
     .split(/\s+/)
     .filter(Boolean)
@@ -74,7 +96,13 @@ function Monogram({ name }: { name: string }) {
     .map((w) => w[0]?.toUpperCase() ?? "")
     .join("");
   return (
-    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-fog text-xs font-medium text-ink">
+    <span
+      aria-hidden
+      className={cn(
+        "inline-flex shrink-0 items-center justify-center rounded-full bg-fog font-medium text-ink",
+        className ?? "h-9 w-9 text-xs"
+      )}
+    >
       {initials || "?"}
     </span>
   );
@@ -86,14 +114,28 @@ function s(v: unknown): string {
   return t;
 }
 
-function KpiTile({ label, value, onClick }: { label: string; value: string; onClick?: () => void }) {
-  const cls =
-    "dlg-card p-4 text-left transition-shadow" + (onClick ? " cursor-pointer hover:shadow-md min-h-[44px]" : "");
+function KanbanColumn({
+  label,
+  dot,
+  count,
+  children,
+}: {
+  label: string;
+  dot: StatusVariant;
+  count: number;
+  children: React.ReactNode;
+}) {
   return (
-    <button type="button" className={cls} onClick={onClick} disabled={!onClick}>
-      <p className="text-xs text-pebble">{label}</p>
-      <p className="font-display text-2xl text-ink mt-1">{value}</p>
-    </button>
+    <div className="w-[260px] min-w-[260px] shrink-0 snap-start lg:w-auto lg:min-w-0">
+      <div className="flex items-center justify-between gap-2 px-1 pb-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={dotClass(dot)} aria-hidden />
+          <h2 className="truncate text-[13px] font-medium text-ink">{label}</h2>
+        </div>
+        <span className="status-pill status-neutral num shrink-0">{count}</span>
+      </div>
+      <div className="max-h-[calc(100vh-330px)] min-h-[200px] space-y-3 overflow-y-auto scroll-thin">{children}</div>
+    </div>
   );
 }
 
@@ -135,7 +177,7 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
         </DialogHeader>
 
         {error ? (
-          <p className="text-sm text-dusty-rose py-4">{error}</p>
+          <p className="py-4 text-sm text-[var(--bad)]">{error}</p>
         ) : !detail ? (
           <div className="space-y-3">
             <Skeleton className="h-10 w-2/3" />
@@ -144,15 +186,16 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
         ) : (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <Monogram name={fullName(detail)} />
+              <Monogram name={fullName(detail)} className="h-10 w-10 text-xs" />
               <div className="min-w-0">
-                <p className="text-sm text-ink truncate">{fullName(detail)}</p>
-                <p className="text-xs text-pebble">#{detail.id}</p>
+                <p className="truncate text-sm font-medium text-ink">{fullName(detail)}</p>
+                <p className="num text-xs text-pebble">#{detail.id}</p>
               </div>
-              <span
-                className={`ml-auto rounded-full px-2.5 py-1 text-xs shrink-0 ${detail.isProfileComplete ? "bg-ink text-white" : "bg-fog text-stone"}`}
-              >
-                {detail.isProfileComplete ? "Complete" : "Incomplete"}
+              <span className="ml-auto shrink-0">
+                <StatusPill
+                  status={detail.isProfileComplete ? "Complete" : "Incomplete"}
+                  variant={variantForCompletion(detail.isProfileComplete)}
+                />
               </span>
             </div>
 
@@ -160,7 +203,7 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
               {detail.emailAddress && (
                 <a
                   href={`mailto:${detail.emailAddress}`}
-                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-full bg-fog px-3 text-xs text-ink hover:bg-[#ececec]"
+                  className="focus-ring inline-flex min-h-[36px] items-center gap-1.5 rounded-full bg-fog px-3 text-xs text-ink transition-colors hover:bg-[#ececec]"
                 >
                   <Mail className="h-3.5 w-3.5" aria-hidden />
                   {detail.emailAddress}
@@ -169,7 +212,7 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
               {detail.mobileNumber && (
                 <a
                   href={`tel:${detail.mobileNumber}`}
-                  className="inline-flex min-h-[36px] items-center gap-1.5 rounded-full bg-fog px-3 text-xs text-ink hover:bg-[#ececec]"
+                  className="focus-ring inline-flex min-h-[36px] items-center gap-1.5 rounded-full bg-fog px-3 text-xs text-ink transition-colors hover:bg-[#ececec]"
                 >
                   <Phone className="h-3.5 w-3.5" aria-hidden />
                   {detail.mobileNumber}
@@ -178,30 +221,28 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
             </div>
 
             {/* Mini pipeline dots: Submitted → Review → Shortlisted */}
-            <div className="bg-fog rounded-[12px] p-4">
+            <div className="rounded-[12px] bg-fog p-4">
               <div className="flex items-center justify-between gap-2">
                 {(["Applied", "Under Review", "Shortlisted"] as StageKey[]).map((stage, i) => (
                   <div key={stage} className="flex flex-1 items-center gap-2">
                     <div className="flex items-center gap-1.5">
                       <span
-                        className={`inline-block h-2.5 w-2.5 rounded-full ${countBy(stage) > 0 ? "bg-ink" : "bg-[#dcdcdc]"}`}
+                        className={`stage-dot ${countBy(stage) > 0 ? dotClass(STAGE_DOT[stage]) : "dot-neutral"}`}
                         aria-hidden
                       />
                       <span className="text-xs text-stone">{["Submitted", "Review", "Shortlisted"][i]}</span>
-                      <span className="text-xs text-ink tabular-nums">{countBy(stage)}</span>
+                      <span className="num text-xs text-ink">{countBy(stage)}</span>
                     </div>
                   </div>
                 ))}
-                {anyRejected && (
-                  <span className="rounded-full bg-dusty-rose/15 text-dusty-rose text-xs px-2 py-0.5 shrink-0">Not Selected</span>
-                )}
+                {anyRejected && <span className="status-pill status-bad shrink-0">Not Selected</span>}
               </div>
             </div>
 
             <div>
               <p className="text-xs font-medium text-stone">Education</p>
               {detail.educations.length === 0 ? (
-                <p className="text-xs text-pebble mt-1">No education entries.</p>
+                <p className="mt-1 text-xs text-pebble">No education entries.</p>
               ) : (
                 <ul className="mt-1 space-y-1">
                   {detail.educations.slice(0, 2).map((e, i) => (
@@ -213,12 +254,12 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
               )}
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="rounded-full bg-fog text-ink text-xs px-2.5 py-1">
-                {detail.documents.length} document{detail.documents.length === 1 ? "" : "s"}
+            <div className="flex flex-wrap gap-1.5">
+              <span className="status-pill status-neutral">
+                Documents: <span className="num">{detail.documents.length}</span>
               </span>
-              <span className="rounded-full bg-fog text-ink text-xs px-2.5 py-1">
-                {detail.applicationCount ?? apps.length} application{(detail.applicationCount ?? apps.length) === 1 ? "" : "s"}
+              <span className="status-pill status-neutral">
+                Applications: <span className="num">{detail.applicationCount ?? apps.length}</span>
               </span>
             </div>
           </div>
@@ -344,53 +385,59 @@ export default function Candidates() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="font-display text-2xl text-ink">Candidates</h1>
-        <div className="ml-auto flex items-center gap-2">
-          <div className="flex items-center gap-1 rounded-full bg-fog p-1">
-            <button
-              type="button"
-              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium ${mode === "list" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
-              onClick={() => setMode("list")}
-              aria-pressed={mode === "list"}
-            >
-              <List className="h-3.5 w-3.5" aria-hidden />
-              List
+      <PageHeader
+        title="Candidates"
+        description="Registry of every candidate on file — profiles, logins, and pipeline activity."
+        actions={
+          <>
+            <div className="flex items-center gap-1 rounded-full bg-fog p-1" role="group" aria-label="View mode">
+              <button
+                type="button"
+                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${mode === "list" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
+                onClick={() => setMode("list")}
+                aria-pressed={mode === "list"}
+              >
+                <List className="h-3.5 w-3.5" aria-hidden />
+                List
+              </button>
+              <button
+                type="button"
+                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${mode === "kanban" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
+                onClick={() => setMode("kanban")}
+                aria-pressed={mode === "kanban"}
+              >
+                <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
+                Kanban
+              </button>
+            </div>
+            <button type="button" className={ghostBtn} onClick={manualRefresh}>
+              <RefreshCw className={`h-4 w-4 ${spin ? "animate-spin" : ""}`} aria-hidden />
+              Refresh
             </button>
-            <button
-              type="button"
-              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium ${mode === "kanban" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
-              onClick={() => setMode("kanban")}
-              aria-pressed={mode === "kanban"}
-            >
-              <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
-              Kanban
-            </button>
-          </div>
-          <button type="button" className={ghostBtn} onClick={manualRefresh}>
-            <RefreshCw className={`h-4 w-4 ${spin ? "animate-spin" : ""}`} aria-hidden />
-            Refresh
-          </button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* KPI tiles */}
-      <div className="dlg-card p-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiTile label="Total on file" value={String(total)} />
-        <KpiTile label="Showing" value={`${start}–${end}`} />
-        <KpiTile label="Complete profiles (page)" value={String(completeOnPage)} />
-        <KpiTile label="Has login (page)" value={String(accountsOnPage)} />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <KpiCard label="Total on file" value={total} icon={Users} tone="info" hint="all registered candidates" />
+        <KpiCard label="Showing" value={`${start}–${end}`} icon={List} tone="neutral" hint={`of ${total}`} />
+        <KpiCard label="Complete profiles" value={completeOnPage} icon={UserCheck} tone="ok" hint="on this page" />
+        <KpiCard label="Has login" value={accountsOnPage} icon={KeyRound} tone="neutral" hint="on this page" />
       </div>
 
-      {/* Filter bar */}
-      <div className="dlg-card p-4 grid gap-3 sm:grid-cols-[1fr_180px_160px]">
-        <Input
-          className="dlg-input"
-          placeholder="Search name, email, employee no., mobile…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label="Search candidates"
-        />
+      {/* Filter bar — one card row */}
+      <div className="dlg-card flex flex-wrap items-center gap-3 px-4 py-3">
+        <div className="relative min-w-0 flex-1 basis-56">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-pebble" aria-hidden />
+          <Input
+            className="dlg-input min-h-[44px] pl-10"
+            placeholder="Search name, email, employee no., mobile…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search candidates"
+          />
+        </div>
         <Select
           value={status}
           onValueChange={(v) => {
@@ -398,7 +445,7 @@ export default function Candidates() {
             setPage(1);
           }}
         >
-          <SelectTrigger className="dlg-input min-h-[44px] w-full" aria-label="Profile status">
+          <SelectTrigger className="dlg-input min-h-[44px] w-40 shrink-0" aria-label="Profile status">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -414,7 +461,7 @@ export default function Candidates() {
             setPage(1);
           }}
         >
-          <SelectTrigger className="dlg-input min-h-[44px] w-full" aria-label="Has account">
+          <SelectTrigger className="dlg-input min-h-[44px] w-40 shrink-0" aria-label="Has account">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -426,65 +473,95 @@ export default function Candidates() {
       </div>
 
       {error ? (
-        <div className="dlg-card p-8 text-center space-y-4">
-          <AlertTriangle className="h-8 w-8 text-dusty-rose mx-auto" aria-hidden />
+        <div className="dlg-card space-y-4 p-8 text-center">
+          <AlertTriangle className="mx-auto h-8 w-8 text-[var(--bad)]" aria-hidden />
           <p className="text-sm text-stone">{error}</p>
           <button type="button" className={ghostBtn} onClick={() => void load()}>
             Retry
           </button>
         </div>
       ) : rows === null ? (
-        <div className="space-y-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-16 w-full rounded-[12px]" />
-          ))}
-        </div>
+        <SkeletonRows rows={6} rowClassName="h-16" />
       ) : mode === "list" ? (
         <div className="space-y-3">
           {list.length === 0 ? (
-            <div className="dlg-card p-10 text-center">
-              <p className="text-sm text-pebble">No candidates match the current filters.</p>
+            <div className="dlg-card py-6">
+              <EmptyState
+                icon={Users}
+                title="No candidates match"
+                description="Try a different search, or clear the profile and account filters."
+              />
             </div>
           ) : (
-            list.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                className="dlg-card-plain border border-[#ececec] rounded-[12px] p-4 w-full flex flex-wrap items-center gap-3 text-left hover:shadow-md transition-shadow min-h-[44px]"
-                onClick={() => setModalId(r.id)}
-              >
-                <Monogram name={fullName(r)} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm text-ink truncate">{fullName(r)}</span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs shrink-0 ${r.isProfileComplete ? "bg-ink text-white" : "bg-fog text-stone"}`}
-                    >
-                      {r.isProfileComplete ? "Complete" : "Incomplete"}
-                    </span>
-                  </div>
-                  <p className="text-xs text-stone mt-0.5 truncate">
-                    {[r.emailAddress, r.mobileNumber].filter(Boolean).join(" · ") || "No contact on file"} · #{r.id}
-                  </p>
-                </div>
-                <span className="rounded-full bg-fog text-stone text-xs px-2.5 py-1 shrink-0">
-                  {r.applicationCount} application{r.applicationCount === 1 ? "" : "s"}
-                </span>
-              </button>
-            ))
+            <div className="dlg-card overflow-hidden">
+              <div className="overflow-x-auto scroll-thin">
+                <table className="w-full min-w-[640px] border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left">
+                      <th scope="col" className="px-5 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Candidate</th>
+                      <th scope="col" className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Profile</th>
+                      <th scope="col" className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Applications</th>
+                      <th scope="col" className="px-4 py-3"><span className="sr-only">Open</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {list.map((r) => {
+                      const name = fullName(r);
+                      return (
+                        <tr key={r.id} className="group/row border-b border-border transition-colors last:border-0 hover:bg-fog/60">
+                          <td className="px-5 py-3">
+                            <div className="flex items-center gap-3">
+                              <Monogram name={name} className="h-7 w-7 text-[11px]" />
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-ink">{name}</p>
+                                <p className="num truncate text-xs text-stone">
+                                  {[r.emailAddress, r.mobileNumber].filter(Boolean).join(" · ") || "No contact on file"} · #{r.id}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusPill
+                              status={r.isProfileComplete ? "Complete" : "Incomplete"}
+                              variant={variantForCompletion(r.isProfileComplete)}
+                            />
+                          </td>
+                          <td className="num px-4 py-3 text-[13px] text-stone">
+                            {r.applicationCount} application{r.applicationCount === 1 ? "" : "s"}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100 max-lg:opacity-100">
+                              <button
+                                type="button"
+                                className={iconBtn}
+                                aria-label={`Quick view ${name}`}
+                                title="Quick view"
+                                onClick={() => setModalId(r.id)}
+                              >
+                                <ArrowUpRight className="h-4 w-4" aria-hidden />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
 
           {/* Pagination */}
           {total > PAGE_SIZE && (
             <div className="flex items-center justify-between gap-3 pt-1">
-              <p className="text-xs text-pebble">
+              <p className="num text-xs text-pebble">
                 {start}–{end} of {total}
               </p>
               <div className="flex items-center gap-2">
                 <button type="button" className={ghostBtn + " min-h-[36px] px-3 text-xs"} disabled={page <= 1} onClick={() => setPage(page - 1)}>
                   Previous
                 </button>
-                <span className="text-xs text-stone tabular-nums">
+                <span className="num text-xs text-stone">
                   Page {page} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}
                 </span>
                 <button
@@ -501,40 +578,34 @@ export default function Candidates() {
         </div>
       ) : (
         /* Kanban */
-        <div className="flex gap-4 overflow-x-auto pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible">
+        <div className="flex snap-x snap-proximity gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible lg:pb-0">
           {PIPELINE_STAGES.map((stage) => {
             const cards = kanban[stage];
             return (
-              <div key={stage} className="w-[240px] shrink-0 lg:w-auto lg:min-w-0">
-                <div className="flex items-center justify-between px-1 pb-2">
-                  <h2 className="text-sm font-medium text-ink">{stage}</h2>
-                  <span className="rounded-full bg-fog text-stone text-xs px-2 py-0.5">{cards.length}</span>
-                </div>
-                <div className="space-y-2">
-                  {cards.length === 0 ? (
-                    <p className="text-xs text-pebble px-1 py-3">No candidates in this stage.</p>
-                  ) : (
-                    cards.map((c) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        className="dlg-card-plain border border-[#ececec] rounded-[12px] p-3 w-full text-left hover:shadow-md transition-shadow min-h-[44px]"
-                        onClick={() => navigate("candidate", { id: String(c.applicantId) })}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <span className="text-sm text-ink truncate">{fullName(c.applicant)}</span>
-                          <UserRound className="h-4 w-4 text-pebble shrink-0" aria-hidden />
-                        </div>
-                        <p className="text-xs text-stone mt-1 truncate">{humanize(c.job.title)}</p>
-                        <p className="text-xs text-pebble mt-0.5">Applied {formatDate(c.dateApplied)}</p>
-                        <div className="mt-2">
-                          <StatusPill status={c.status} />
-                        </div>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
+              <KanbanColumn key={stage} label={stage} dot={STAGE_DOT[stage]} count={cards.length}>
+                {cards.length === 0 ? (
+                  <EmptyState icon={Inbox} title="No candidates" description="Nothing in this stage right now." compact />
+                ) : (
+                  cards.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={cardCls + " focus-ring w-full cursor-pointer p-4 text-left"}
+                      onClick={() => navigate("candidate", { id: String(c.applicantId) })}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="min-w-0 truncate text-sm font-medium text-ink">{fullName(c.applicant)}</p>
+                        <UserRound className="h-4 w-4 shrink-0 text-pebble" aria-hidden />
+                      </div>
+                      <p className="mt-1 truncate text-xs text-stone">{humanize(c.job.title)}</p>
+                      <p className="num mt-0.5 text-xs text-pebble">Applied {formatDate(c.dateApplied)}</p>
+                      <div className="mt-2.5">
+                        <StatusPill status={c.status} />
+                      </div>
+                    </button>
+                  ))
+                )}
+              </KanbanColumn>
             );
           })}
         </div>

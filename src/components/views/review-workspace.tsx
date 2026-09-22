@@ -6,14 +6,17 @@
 // workspace body (used inside the review-queue modal); without one it reads
 // the deep-link `#/evaluator-review?id=<applicationId>` from useHashRoute and
 // renders page-style with a close action back to the review queue.
-// LEFT = frozen-snapshot dossier, RIGHT = decision rail (requirements match,
-// credentials, state banner, decisions, notices, direct email).
+// LEFT = frozen-snapshot dossier (underline section tabs), RIGHT = decision
+// rail (requirements match, credentials, state banner, decisions, notices,
+// direct email). Enterprise polish pass: functional status pills/dots only —
+// every handler, fetch, and confirmation dialog is unchanged.
 // ============================================================================
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
-  AlertTriangle, Check, FileText, HelpCircle, Mail, Paperclip, Send, X,
+  AlertTriangle, ArrowLeft, Award, BadgeCheck, BookOpen, BriefcaseBusiness,
+  FileText, GraduationCap, Mail, Paperclip, Send, UserRound,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -27,9 +30,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { EmptyState, PageHeader, SkeletonRows } from "@/components/ui/shell";
 import { apiFetch, formatDate, formatDateTime, fullName, timeAgo } from "@/lib/client";
 import { getStatusMeta, stageForStatus, type Tone } from "@/lib/status";
+import { pillClass, variantForStatus, variantForVerdict, type StatusVariant } from "@/lib/status-ui";
 import { navigate, useHashRoute } from "@/lib/router";
+import { cn } from "@/lib/utils";
 import type { RequirementsReport } from "@/lib/requirements";
 
 // ── Wire shapes (GET /api/evaluator/applications/[id]) ──────────────────────
@@ -102,26 +108,68 @@ type NoticeSendResult = {
 
 // ── Small shared visuals ────────────────────────────────────────────────────
 
+/** Legacy tone→class bridge (kept for existing importers). */
 export function toneClass(tone: Tone): string {
-  if (tone === "success") return "bg-ink text-white";
-  if (tone === "danger") return "bg-dusty-rose/15 text-dusty-rose";
-  if (tone === "primary" || tone === "info") return "bg-fog text-ink";
-  return "bg-fog text-stone";
+  const map: Record<Tone, StatusVariant> = {
+    success: "ok",
+    warning: "warn",
+    danger: "bad",
+    info: "info",
+    primary: "info",
+    neutral: "neutral",
+  };
+  return pillClass(map[tone]);
 }
 
-export function StatusPill({ status, className = "" }: { status: string | null | undefined; className?: string }) {
-  const meta = getStatusMeta(status);
-  return (
-    <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium ${toneClass(meta.tone)} ${className}`}>
-      {meta.label}
-    </span>
-  );
+/**
+ * Canonical stage/status pill. Displays the normalized status label; the
+ * variant comes from variantForStatus unless explicitly overridden (used for
+ * completion / verdict labels that are not application statuses).
+ */
+export function StatusPill({
+  status,
+  variant,
+  className = "",
+}: {
+  status: string | null | undefined;
+  variant?: StatusVariant;
+  className?: string;
+}) {
+  const label = getStatusMeta(status).label;
+  const v: StatusVariant = variant ?? variantForStatus(status);
+  return <span className={cn(pillClass(v), "shrink-0", className)}>{label}</span>;
+}
+
+function verdictMeta(verdict: string): { chip: string; variant: StatusVariant; meaning: string } {
+  switch (verdict) {
+    case "ALL_MET":
+      return { chip: "Qualified", variant: variantForVerdict("Qualified"), meaning: "Meets the minimum requirements" };
+    case "PARTIAL":
+      return { chip: "Partial", variant: variantForVerdict("Partial"), meaning: "Partially meets the minimum requirements" };
+    case "NONE_MET":
+      return { chip: "Not qualified", variant: variantForVerdict("Not qualified"), meaning: "Does not meet the minimum requirements" };
+    case "NEEDS_REVIEW":
+      return { chip: "Verify", variant: variantForVerdict("Verify"), meaning: "Needs manual verification" };
+    case "NO_REQUIREMENTS":
+      return { chip: "No reqs", variant: variantForVerdict("No reqs"), meaning: "No published requirements" };
+    default:
+      return { chip: verdict, variant: variantForVerdict(verdict), meaning: "" };
+  }
+}
+
+/** MQR verdict pill for queue cards / list rows (null when no verdict). */
+export function VerdictPill({ verdict, className = "" }: { verdict: string | null | undefined; className?: string }) {
+  if (!verdict) return null;
+  const vm = verdictMeta(verdict);
+  return <span className={cn(pillClass(vm.variant), "shrink-0", className)}>{vm.chip}</span>;
 }
 
 const ghostBtn =
   "dlg-ghost inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 const ctaBtn =
   "dlg-cta inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-5 text-sm transition-all disabled:cursor-not-allowed disabled:opacity-50";
+const destructiveGhost =
+  "border-[var(--bad)]/30 text-[var(--bad)] hover:bg-[var(--bad-bg)]";
 
 function str(v: unknown): string {
   if (v === null || v === undefined) return "";
@@ -130,17 +178,17 @@ function str(v: unknown): string {
   return s;
 }
 
-function LedgerRow({ label, value }: { label: string; value: string }) {
+function LedgerRow({ label, value, num = false }: { label: string; value: string; num?: boolean }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-2 border-b border-[#ececec] last:border-0">
-      <span className="text-xs text-pebble shrink-0 pt-0.5">{label}</span>
-      <span className="text-sm text-ink text-right break-words">{value || "—"}</span>
+    <div className="flex items-start justify-between gap-4 border-b border-[#ececec] py-2.5 last:border-0">
+      <span className="shrink-0 pt-0.5 text-xs text-stone">{label}</span>
+      <span className={cn("break-words text-right text-sm text-ink", num && "num")}>{value || "—"}</span>
     </div>
   );
 }
 
 function EmptyNote({ children }: { children: React.ReactNode }) {
-  return <p className="text-sm text-pebble py-6 text-center">{children}</p>;
+  return <p className="py-6 text-center text-sm text-pebble">{children}</p>;
 }
 
 function snapshotDisplayDate(v: unknown): string {
@@ -150,24 +198,22 @@ function snapshotDisplayDate(v: unknown): string {
   return Number.isNaN(d.getTime()) ? s : formatDate(d);
 }
 
-// ── Verdict chip (requirements report) ──────────────────────────────────────
+// ── Dossier section tabs (underline style) ──────────────────────────────────
 
-function verdictMeta(verdict: string): { chip: string; cls: string; meaning: string } {
-  switch (verdict) {
-    case "ALL_MET":
-      return { chip: "Qualified", cls: "bg-ink text-white", meaning: "Meets the minimum requirements" };
-    case "PARTIAL":
-      return { chip: "Partial", cls: "bg-fog text-ink", meaning: "Partially meets the minimum requirements" };
-    case "NONE_MET":
-      return { chip: "Not qualified", cls: "bg-dusty-rose/15 text-dusty-rose", meaning: "Does not meet the minimum requirements" };
-    case "NEEDS_REVIEW":
-      return { chip: "Verify", cls: "bg-fog text-ink", meaning: "Needs manual verification" };
-    case "NO_REQUIREMENTS":
-      return { chip: "No reqs", cls: "bg-fog text-stone", meaning: "No published requirements" };
-    default:
-      return { chip: verdict, cls: "bg-fog text-stone", meaning: "" };
-  }
-}
+const DOSSIER_TABS = [
+  { value: "profile", label: "Profile", icon: UserRound },
+  { value: "education", label: "Education", icon: GraduationCap },
+  { value: "experience", label: "Experience", icon: BriefcaseBusiness },
+  { value: "training", label: "Training", icon: BookOpen },
+  { value: "eligibility", label: "Eligibility", icon: BadgeCheck },
+  { value: "awards", label: "Awards", icon: Award },
+  { value: "documents", label: "Documents", icon: FileText },
+] as const;
+
+const tabsListCls =
+  "h-auto w-full flex-wrap justify-start gap-1 rounded-none border-b border-border bg-transparent p-0";
+const tabTriggerCls =
+  "flex-none gap-1.5 rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 py-2.5 text-[13px] font-medium text-stone shadow-none transition-colors hover:text-ink data-[state=active]:border-ink data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-none";
 
 // ── Snapshot tab renderers ──────────────────────────────────────────────────
 
@@ -176,22 +222,20 @@ function EducationCards({ rows }: { rows: SnapRow[] }) {
   return (
     <div className="space-y-3">
       {rows.map((r, i) => (
-        <div key={i} className="bg-fog rounded-[12px] p-4">
+        <div key={i} className="rounded-[12px] bg-fog p-4">
           <div className="flex items-start justify-between gap-3">
             <p className="text-sm text-ink">{str(r.degree) || str(r.course) || str(r.specifyOthers) || "—"}</p>
-            {r.ongoing === true && (
-              <span className="rounded-full bg-fog text-stone text-xs px-2 py-0.5 shrink-0">Ongoing</span>
-            )}
+            {r.ongoing === true && <span className="status-pill status-neutral shrink-0">Ongoing</span>}
           </div>
-          <p className="text-xs text-stone mt-1">
+          <p className="mt-1 text-xs text-stone">
             {[str(r.educationLevel), str(r.schoolName)].filter(Boolean).join(" · ") || "—"}
           </p>
-          <p className="text-xs text-pebble mt-0.5">
+          <p className="num mt-0.5 text-xs text-pebble">
             {[str(r.yearFrom) && `${str(r.yearFrom)}–${str(r.yearTo) || (r.ongoing ? "Present" : "")}`, str(r.yearGraduated) && `Graduated ${str(r.yearGraduated)}`, str(r.unitsEarned) && `${str(r.unitsEarned)} units`]
               .filter(Boolean)
               .join(" · ") || "—"}
           </p>
-          {str(r.awards) && <p className="text-xs text-stone mt-1">Honors: {str(r.awards)}</p>}
+          {str(r.awards) && <p className="mt-1 text-xs text-stone">Honors: {str(r.awards)}</p>}
         </div>
       ))}
     </div>
@@ -203,15 +247,15 @@ function ExperienceCards({ rows }: { rows: SnapRow[] }) {
   return (
     <div className="space-y-3">
       {rows.map((r, i) => (
-        <div key={i} className="bg-fog rounded-[12px] p-4">
+        <div key={i} className="rounded-[12px] bg-fog p-4">
           <div className="flex items-start justify-between gap-3">
             <p className="text-sm text-ink">{str(r.positionTitle) || "—"}</p>
             {r.isPresentWork === true && (
-              <span className="rounded-full bg-ink text-white text-xs px-2 py-0.5 shrink-0">Present</span>
+              <span className="shrink-0 rounded-full bg-ink px-2 py-0.5 text-xs text-white">Present</span>
             )}
           </div>
-          <p className="text-xs text-stone mt-1">{str(r.employerName) || "—"}</p>
-          <p className="text-xs text-pebble mt-0.5">
+          <p className="mt-1 text-xs text-stone">{str(r.employerName) || "—"}</p>
+          <p className="num mt-0.5 text-xs text-pebble">
             {[
               (str(r.dateFrom) || str(r.dateTo)) &&
                 `${snapshotDisplayDate(r.dateFrom) || "—"} – ${r.isPresentWork ? "Present" : snapshotDisplayDate(r.dateTo) || "—"}`,
@@ -231,14 +275,14 @@ function TrainingCards({ rows }: { rows: SnapRow[] }) {
   return (
     <div className="space-y-3">
       {rows.map((r, i) => (
-        <div key={i} className="bg-fog rounded-[12px] p-4">
+        <div key={i} className="rounded-[12px] bg-fog p-4">
           <p className="text-sm text-ink">{str(r.title) || "—"}</p>
-          <p className="text-xs text-stone mt-1">
+          <p className="num mt-1 text-xs text-stone">
             {[str(r.typeOfTraining), str(r.numberHours) && `${str(r.numberHours)} hrs`, str(r.hourDecimal) && `${str(r.hourDecimal)} hrs`]
               .filter(Boolean)
               .join(" · ") || "—"}
           </p>
-          <p className="text-xs text-pebble mt-0.5">
+          <p className="num mt-0.5 text-xs text-pebble">
             {snapshotDisplayDate(r.dateFrom) || snapshotDisplayDate(r.dateTo)
               ? `${snapshotDisplayDate(r.dateFrom) || "—"} – ${snapshotDisplayDate(r.dateTo) || "—"}`
               : "—"}
@@ -254,9 +298,9 @@ function EligibilityCards({ rows }: { rows: SnapRow[] }) {
   return (
     <div className="space-y-3">
       {rows.map((r, i) => (
-        <div key={i} className="bg-fog rounded-[12px] p-4">
+        <div key={i} className="rounded-[12px] bg-fog p-4">
           <p className="text-sm text-ink">{str(r.title) || str(r.eligibilityTitle) || "—"}</p>
-          <p className="text-xs text-stone mt-1">
+          <p className="num mt-1 text-xs text-stone">
             {[str(r.rating) && `Rating: ${str(r.rating)}`, snapshotDisplayDate(r.examDate), str(r.examPlace), str(r.licenseNumber) && `License ${str(r.licenseNumber)}`]
               .filter(Boolean)
               .join(" · ") || "—"}
@@ -272,9 +316,9 @@ function AwardCards({ rows }: { rows: SnapRow[] }) {
   return (
     <div className="space-y-3">
       {rows.map((r, i) => (
-        <div key={i} className="bg-fog rounded-[12px] p-4">
+        <div key={i} className="rounded-[12px] bg-fog p-4">
           <p className="text-sm text-ink">{str(r.details) || "—"}</p>
-          <p className="text-xs text-stone mt-1">
+          <p className="num mt-1 text-xs text-stone">
             {[str(r.recognitionType), str(r.scope), str(r.provider), snapshotDisplayDate(r.dateGranted)]
               .filter(Boolean)
               .join(" · ") || "—"}
@@ -287,49 +331,62 @@ function AwardCards({ rows }: { rows: SnapRow[] }) {
 
 // ── Decision rail pieces ────────────────────────────────────────────────────
 
+/** Requirement check status → pill (verdict colors). */
+function checkPill(status: string): { label: string; variant: StatusVariant } {
+  switch (status) {
+    case "MET":
+      return { label: "Met", variant: "ok" };
+    case "NOT_MET":
+      return { label: "Not met", variant: "bad" };
+    case "REVIEW":
+      return { label: "Verify", variant: "neutral" };
+    default:
+      return { label: "Not required", variant: "neutral" };
+  }
+}
+
 function RequirementsMatchPanel({ report }: { report: RequirementsReport }) {
   const vm = verdictMeta(report.verdict);
+  const allMet = report.requiredCount > 0 && report.metCount === report.requiredCount;
+  const summaryCls = allMet ? "text-[var(--ok)]" : report.metCount > 0 ? "text-[var(--warn)]" : "text-stone";
   return (
     <div className="dlg-card p-4">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="font-display text-lg text-ink">Requirements match</h3>
-        <span className={`rounded-full px-2.5 py-1 text-xs font-medium shrink-0 ${vm.cls}`}>{vm.chip}</span>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-[15px] font-medium leading-6 text-ink">Requirements match</h3>
+          <p className="mt-0.5 text-xs text-stone">{vm.meaning}</p>
+        </div>
+        <StatusPill status={vm.chip} variant={vm.variant} className="shrink-0" />
       </div>
-      <p className="text-xs text-stone mt-1">{vm.meaning}</p>
-      <p className="text-sm text-ink mt-2">
+      <p className={cn("num mt-2 text-sm font-medium", summaryCls)}>
         {report.metCount} of {report.requiredCount} standards met
       </p>
       {report.checks.length > 0 && (
-        <div className="mt-3 space-y-3 max-h-96 overflow-y-auto scroll-thin pr-1">
-          {report.checks.map((c, i) => (
-            <div key={i} className="bg-fog rounded-[12px] p-3">
-              <p className="text-sm text-ink line-clamp-2">{c.standard || "—"}</p>
-              <div className="flex items-center gap-1.5 mt-1.5">
-                {c.status === "MET" && (
-                  <>
-                    <Check className="h-3.5 w-3.5 text-ink" aria-hidden />
-                    <span className="text-xs font-medium text-ink">Met</span>
-                  </>
-                )}
-                {c.status === "NOT_MET" && (
-                  <>
-                    <X className="h-3.5 w-3.5 text-dusty-rose" aria-hidden />
-                    <span className="text-xs font-medium text-dusty-rose">Not met</span>
-                  </>
-                )}
-                {c.status === "REVIEW" && (
-                  <>
-                    <HelpCircle className="h-3.5 w-3.5 text-stone" aria-hidden />
-                    <span className="text-xs font-medium text-stone">Verify manually</span>
-                  </>
-                )}
-                {c.status === "NOT_REQUIRED" && <span className="text-xs font-medium text-pebble">Not required</span>}
-                <span className="text-[10px] uppercase tracking-wide text-pebble ml-auto">{c.dimension}</span>
+        <div className="mt-3 max-h-96 space-y-2.5 overflow-y-auto scroll-thin pr-1">
+          {report.checks.map((c, i) => {
+            const cp = checkPill(c.status);
+            return (
+              <div key={i} className="rounded-[12px] border border-border p-3.5">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="min-w-0 text-[13px] leading-5 text-ink line-clamp-2">{c.standard || "—"}</p>
+                  <StatusPill status={cp.label} variant={cp.variant} className="shrink-0" />
+                </div>
+                <p className="num mt-1.5 text-xs leading-5 text-stone line-clamp-2">
+                  {c.applicantSummary || "No applicant data on file."}
+                </p>
+                <div className="mt-1.5 flex items-center justify-between gap-2">
+                  {c.shortfall ? (
+                    <p className="text-xs text-[var(--bad)]">{c.shortfall}</p>
+                  ) : (
+                    <span aria-hidden />
+                  )}
+                  <span className="shrink-0 rounded-full bg-fog px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-pebble">
+                    {c.dimension}
+                  </span>
+                </div>
               </div>
-              {c.shortfall && <p className="text-xs text-dusty-rose mt-1">{c.shortfall}</p>}
-              <p className="text-xs text-stone mt-1.5 line-clamp-2">{c.applicantSummary || "No applicant data on file."}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -349,11 +406,11 @@ function CredentialsRow({ payload }: { payload: ReviewPayload }) {
   ];
   return (
     <div className="dlg-card p-4">
-      <h3 className="font-display text-lg text-ink">Credentials on file</h3>
-      <div className="flex flex-wrap gap-2 mt-2">
+      <h3 className="text-[15px] font-medium leading-6 text-ink">Credentials on file</h3>
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
         {items.map(([label, n]) => (
-          <span key={label} className="rounded-full bg-fog text-ink text-xs px-2.5 py-1">
-            {label}: {n}
+          <span key={label} className="status-pill status-neutral">
+            {label}: <span className="num">{n}</span>
           </span>
         ))}
       </div>
@@ -362,8 +419,8 @@ function CredentialsRow({ payload }: { payload: ReviewPayload }) {
 }
 
 function stateBanner(stage: string): { text: string; cls: string } {
-  if (stage === "Shortlisted") return { text: "Applicant has been notified.", cls: "text-ink" };
-  if (stage === "Rejected") return { text: "Applicant was not shortlisted.", cls: "text-dusty-rose" };
+  if (stage === "Shortlisted") return { text: "Applicant has been notified.", cls: "text-stone" };
+  if (stage === "Rejected") return { text: "Applicant was not shortlisted.", cls: "text-stone" };
   if (stage === "Under Review") return { text: "Review in progress.", cls: "text-ink" };
   return { text: "Awaiting review.", cls: "text-stone" };
 }
@@ -516,6 +573,10 @@ function parseAttachments(json: string | null): { name: string; bytes: number }[
   }
 }
 
+function emailStatusVariant(status: string): StatusVariant {
+  return status === "sent" || status === "mock" ? "neutral" : "bad";
+}
+
 function DirectEmailCard({
   applicationId,
   emails,
@@ -580,10 +641,10 @@ function DirectEmailCard({
     <div className="dlg-card p-4">
       <div className="flex items-center gap-2">
         <Mail className="h-4 w-4 text-stone" aria-hidden />
-        <h3 className="font-display text-lg text-ink">Direct email</h3>
+        <h3 className="text-[15px] font-medium leading-6 text-ink">Direct email</h3>
       </div>
-      <p className="text-xs text-stone mt-1">Recipient is resolved from the applicant record — attachments ≤ 3 files × 5 MB.</p>
-      <div className="space-y-3 mt-3">
+      <p className="mt-1 text-xs text-stone">Recipient is resolved from the applicant record — attachments ≤ 3 files × 5 MB.</p>
+      <div className="mt-3 space-y-3">
         <Input
           className="dlg-input"
           placeholder="Subject"
@@ -601,7 +662,7 @@ function DirectEmailCard({
           aria-label="Email message"
         />
         <div>
-          <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-full border border-[#ececec] bg-white px-4 text-sm hover:bg-fog">
+          <label className="dlg-ghost focus-ring inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-full px-4 text-sm">
             <Paperclip className="h-4 w-4" aria-hidden />
             Attach files
             <input
@@ -620,7 +681,7 @@ function DirectEmailCard({
                   <span className="truncate">{f.name}</span>
                   <button
                     type="button"
-                    className="text-dusty-rose shrink-0"
+                    className="focus-ring shrink-0 text-[var(--bad)] hover:underline"
                     onClick={() => setFiles((prev) => prev.filter((x) => x !== f))}
                   >
                     Remove
@@ -637,7 +698,7 @@ function DirectEmailCard({
       </div>
       <div className="mt-4 border-t border-[#ececec] pt-3">
         <p className="text-xs font-medium text-stone">History</p>
-        <div className="mt-2 max-h-48 overflow-y-auto scroll-thin space-y-1.5">
+        <div className="mt-2 max-h-48 space-y-1.5 overflow-y-auto scroll-thin">
           {emails === null ? (
             <p className="text-xs text-pebble">Loading…</p>
           ) : emails.length === 0 ? (
@@ -648,12 +709,10 @@ function DirectEmailCard({
               return (
                 <div key={m.id} className="flex items-center justify-between gap-2 text-xs">
                   <span className="truncate text-ink">{m.subject || "(no subject)"}</span>
-                  <span className="shrink-0 flex items-center gap-2 text-pebble">
-                    {atts.length > 0 && <span>{atts.length} att.</span>}
-                    <span>{timeAgo(m.createdAt)}</span>
-                    <span className={`rounded-full px-2 py-0.5 ${m.status === "sent" || m.status === "mock" ? "bg-fog text-ink" : "bg-dusty-rose/15 text-dusty-rose"}`}>
-                      {m.status}
-                    </span>
+                  <span className="flex shrink-0 items-center gap-2 text-pebble">
+                    {atts.length > 0 && <span className="num">{atts.length} att.</span>}
+                    <span className="num">{timeAgo(m.createdAt)}</span>
+                    <span className={pillClass(emailStatusVariant(m.status))}>{m.status}</span>
                   </span>
                 </div>
               );
@@ -785,8 +844,8 @@ export function ReviewWorkspace({
 
   if (error) {
     return (
-      <div className="dlg-card p-8 text-center space-y-4">
-        <AlertTriangle className="h-8 w-8 text-dusty-rose mx-auto" aria-hidden />
+      <div className="dlg-card space-y-4 p-8 text-center">
+        <AlertTriangle className="mx-auto h-8 w-8 text-[var(--bad)]" aria-hidden />
         <p className="text-sm text-stone">{error}</p>
         <div className="flex items-center justify-center gap-3">
           <button type="button" className={ghostBtn} onClick={() => void load()}>
@@ -805,14 +864,27 @@ export function ReviewWorkspace({
   if (!payload) {
     return (
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
-        <div className="dlg-card p-6 space-y-4">
-          <Skeleton className="h-8 w-1/2" />
-          <Skeleton className="h-4 w-1/3" />
-          <Skeleton className="h-64 w-full" />
+        <div className="dlg-card space-y-5 p-6">
+          <div className="space-y-2.5">
+            <Skeleton className="h-7 w-1/2" />
+            <Skeleton className="h-4 w-1/3" />
+          </div>
+          <div className="flex gap-2 border-b border-border pb-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-4 w-20" />
+            ))}
+          </div>
+          <SkeletonRows rows={6} />
         </div>
         <div className="space-y-4">
-          <Skeleton className="h-40 w-full" />
-          <Skeleton className="h-64 w-full" />
+          <div className="dlg-card p-4">
+            <Skeleton className="mb-3 h-4 w-32" />
+            <SkeletonRows rows={3} rowClassName="h-6" />
+          </div>
+          <div className="dlg-card p-4">
+            <Skeleton className="mb-3 h-4 w-24" />
+            <SkeletonRows rows={4} rowClassName="h-6" />
+          </div>
         </div>
       </div>
     );
@@ -827,19 +899,19 @@ export function ReviewWorkspace({
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
       {/* ── LEFT: frozen dossier ── */}
-      <div className="dlg-card p-6 space-y-4">
+      <div className="dlg-card space-y-4 p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="font-display text-2xl text-ink">{applicantName}</h2>
-            <p className="text-sm text-stone mt-1">
+          <div className="min-w-0">
+            <h2 className="font-display text-2xl leading-tight text-ink">{applicantName}</h2>
+            <p className="num mt-1 text-sm text-stone">
               {[positionTitle, place].filter(Boolean).join(" · ")} · Applied {formatDate(payload.dateApplied)}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <StatusPill status={payload.status} />
             <button
               type="button"
-              className="text-sm text-ink underline underline-offset-4 min-h-[44px] inline-flex items-center"
+              className="focus-ring inline-flex min-h-[44px] items-center text-sm font-medium text-ink underline underline-offset-4"
               onClick={() => navigate("candidate", { id: String(payload.applicant.id) })}
             >
               View full profile
@@ -848,31 +920,30 @@ export function ReviewWorkspace({
         </div>
 
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="flex-wrap h-auto">
-            <TabsTrigger value="profile">Profile</TabsTrigger>
-            <TabsTrigger value="education">Education</TabsTrigger>
-            <TabsTrigger value="experience">Experience</TabsTrigger>
-            <TabsTrigger value="training">Training</TabsTrigger>
-            <TabsTrigger value="eligibility">Eligibility</TabsTrigger>
-            <TabsTrigger value="awards">Awards</TabsTrigger>
-            <TabsTrigger value="documents">Documents</TabsTrigger>
+          <TabsList className={tabsListCls}>
+            {DOSSIER_TABS.map((t) => (
+              <TabsTrigger key={t.value} value={t.value} className={tabTriggerCls}>
+                <t.icon className="size-3.5" aria-hidden />
+                {t.label}
+              </TabsTrigger>
+            ))}
           </TabsList>
 
-          <TabsContent value="profile" className="mt-4">
-            <div className="bg-fog rounded-[12px] p-4">
+          <TabsContent value="profile" className="pt-4">
+            <div className="rounded-[12px] bg-fog p-4">
               <LedgerRow label="Email" value={str(p.emailAddress) || str(payload.applicant.emailAddress)} />
-              <LedgerRow label="Mobile" value={str(p.mobileNumber) || str(p.contactNumber)} />
-              <LedgerRow label="Other phone" value={[str(p.contactNumberSec), str(p.telephoneNumber)].filter(Boolean).join(" · ")} />
+              <LedgerRow label="Mobile" value={str(p.mobileNumber) || str(p.contactNumber)} num />
+              <LedgerRow label="Other phone" value={[str(p.contactNumberSec), str(p.telephoneNumber)].filter(Boolean).join(" · ")} num />
               <LedgerRow label="Gender" value={str(p.gender)} />
               <LedgerRow label="Civil status" value={str(p.civilStatus)} />
-              <LedgerRow label="Birth date" value={snapshotDisplayDate(p.birthDate)} />
+              <LedgerRow label="Birth date" value={snapshotDisplayDate(p.birthDate)} num />
               <LedgerRow label="Birth place" value={str(p.birthPlace)} />
               <LedgerRow label="Address" value={str(p.presentAddress)} />
             </div>
             <div className="mt-4">
               <p className="text-xs font-medium text-stone">Character references</p>
               {characterRefs.length === 0 ? (
-                <p className="text-sm text-pebble mt-1">None on file.</p>
+                <p className="mt-1 text-sm text-pebble">None on file.</p>
               ) : (
                 <ul className="mt-1 space-y-1">
                   {characterRefs.map((r, i) => (
@@ -884,25 +955,25 @@ export function ReviewWorkspace({
               )}
             </div>
           </TabsContent>
-          <TabsContent value="education" className="mt-4">
+          <TabsContent value="education" className="pt-4">
             <EducationCards rows={payload.snapshots.educations} />
           </TabsContent>
-          <TabsContent value="experience" className="mt-4">
+          <TabsContent value="experience" className="pt-4">
             <ExperienceCards rows={payload.snapshots.experiences} />
           </TabsContent>
-          <TabsContent value="training" className="mt-4">
+          <TabsContent value="training" className="pt-4">
             <TrainingCards rows={payload.snapshots.trainings} />
           </TabsContent>
-          <TabsContent value="eligibility" className="mt-4">
+          <TabsContent value="eligibility" className="pt-4">
             <EligibilityCards rows={payload.snapshots.eligibilities} />
           </TabsContent>
-          <TabsContent value="awards" className="mt-4">
+          <TabsContent value="awards" className="pt-4">
             <AwardCards rows={payload.snapshots.awards} />
           </TabsContent>
-          <TabsContent value="documents" className="mt-4">
-            <div className="bg-fog rounded-[12px] p-6 text-center">
-              <FileText className="h-6 w-6 text-pebble mx-auto" aria-hidden />
-              <p className="text-sm text-stone mt-2">Supporting documents are verified in person at the next stage.</p>
+          <TabsContent value="documents" className="pt-4">
+            <div className="rounded-[12px] bg-fog p-6 text-center">
+              <FileText className="mx-auto h-6 w-6 text-pebble" aria-hidden />
+              <p className="mt-2 text-sm text-stone">Supporting documents are verified in person at the next stage.</p>
             </div>
           </TabsContent>
         </Tabs>
@@ -913,14 +984,14 @@ export function ReviewWorkspace({
         <RequirementsMatchPanel report={payload.requirements} />
         <CredentialsRow payload={payload} />
 
-        <div className={`bg-fog rounded-[12px] p-4 text-sm ${banner.cls}`}>
+        <div className={`rounded-[12px] bg-fog p-4 text-sm ${banner.cls}`}>
           <StatusPill status={payload.status} className="mr-2" />
           {banner.text}
         </div>
 
         {(stage === "Applied" || stage === "Under Review") && (
-          <div className="dlg-card p-4 space-y-3">
-            <h3 className="font-display text-lg text-ink">Decision</h3>
+          <div className="dlg-card space-y-3 p-4">
+            <h3 className="text-[15px] font-medium leading-6 text-ink">Decision</h3>
             <Textarea
               className="dlg-input min-h-[80px]"
               placeholder="Remarks (optional) — included as the reason"
@@ -940,7 +1011,7 @@ export function ReviewWorkspace({
               </button>
               <button
                 type="button"
-                className={ghostBtn + " w-full text-dusty-rose"}
+                className={ghostBtn + " w-full " + destructiveGhost}
                 onClick={() => openConfirm("Rejected")}
               >
                 Not Qualified
@@ -953,12 +1024,14 @@ export function ReviewWorkspace({
         )}
 
         {(stage === "Shortlisted" || stage === "Rejected") && (
-          <div className="dlg-card p-4 space-y-3">
-            <h3 className="font-display text-lg text-ink">Revise decision</h3>
+          <div className="dlg-card space-y-3 p-4">
+            <h3 className="text-[15px] font-medium leading-6 text-ink">Revise decision</h3>
             <p className="text-xs text-pebble">Changing the decision notifies the applicant.</p>
             <button
               type="button"
-              className={ghostBtn + " w-full"}
+              className={
+                ghostBtn + " w-full" + (stage === "Shortlisted" ? " " + destructiveGhost : "")
+              }
               onClick={() =>
                 stage === "Shortlisted"
                   ? setConfirmAction({
@@ -997,9 +1070,9 @@ export function ReviewWorkspace({
         )}
 
         {/* Notices */}
-        <div className="dlg-card p-4 space-y-3">
-          <h3 className="font-display text-lg text-ink">Notices</h3>
-          <div className="max-h-48 overflow-y-auto scroll-thin space-y-1.5">
+        <div className="dlg-card space-y-3 p-4">
+          <h3 className="text-[15px] font-medium leading-6 text-ink">Notices</h3>
+          <div className="max-h-48 space-y-1.5 overflow-y-auto scroll-thin">
             {notices === null ? (
               <p className="text-xs text-pebble">Loading…</p>
             ) : notices.length === 0 ? (
@@ -1008,9 +1081,9 @@ export function ReviewWorkspace({
               notices.map((n) => (
                 <div key={n.id} className="flex items-center justify-between gap-2 text-xs">
                   <span className="truncate text-ink">{noticeLabel[n.type] ?? n.type}</span>
-                  <span className="shrink-0 flex items-center gap-2 text-pebble">
-                    <span>{formatDateTime(n.sentAt)}</span>
-                    <span className="rounded-full bg-fog px-2 py-0.5 text-ink">{n.status}</span>
+                  <span className="flex shrink-0 items-center gap-2 text-pebble">
+                    <span className="num">{formatDateTime(n.sentAt)}</span>
+                    <span className={pillClass(n.status === "sent" || n.status === "mock" ? "neutral" : "bad")}>{n.status}</span>
                   </span>
                 </div>
               ))
@@ -1029,7 +1102,7 @@ export function ReviewWorkspace({
           {stage === "Rejected" && (
             <button
               type="button"
-              className={ghostBtn + " w-full text-dusty-rose"}
+              className={ghostBtn + " w-full " + destructiveGhost}
               disabled={regretAlreadySent || regretBusy}
               onClick={() => setRegretOpen(true)}
             >
@@ -1051,7 +1124,7 @@ export function ReviewWorkspace({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className={confirmAction?.destructive ? "bg-dusty-rose/10 text-dusty-rose hover:bg-dusty-rose/20" : ""}
+              className={confirmAction?.destructive ? "border border-[var(--bad)]/30 bg-[var(--bad-bg)] text-[var(--bad)] hover:bg-[var(--bad-bg)]/80" : ""}
               onClick={(e) => {
                 e.preventDefault();
                 if (confirmAction) void decide(confirmAction.status);
@@ -1077,7 +1150,7 @@ export function ReviewWorkspace({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-dusty-rose/10 text-dusty-rose hover:bg-dusty-rose/20"
+              className="border border-[var(--bad)]/30 bg-[var(--bad-bg)] text-[var(--bad)] hover:bg-[var(--bad-bg)]/80"
               onClick={(e) => {
                 e.preventDefault();
                 void sendRegret();
@@ -1111,21 +1184,31 @@ function ReviewWorkspacePage() {
   const close = useCallback(() => navigate("review-queue"), []);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <button type="button" className={ghostBtn} onClick={close}>
-          ← Back to review queue
-        </button>
-        <h1 className="font-display text-2xl text-ink">Review workspace</h1>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Review Workspace"
+        description="Applicant dossier and decision rail."
+        actions={
+          <button type="button" className={ghostBtn} onClick={close}>
+            <ArrowLeft className="h-4 w-4" aria-hidden />
+            Back to review queue
+          </button>
+        }
+      />
       {valid ? (
         <ReviewWorkspace applicationId={id} onClose={close} />
       ) : (
-        <div className="dlg-card p-8 text-center space-y-3">
-          <p className="text-sm text-stone">No application selected. Open a review from the queue.</p>
-          <button type="button" className={ctaBtn} onClick={close}>
-            Go to review queue
-          </button>
+        <div className="dlg-card py-6">
+          <EmptyState
+            icon={FileText}
+            title="No application selected"
+            description="Open a review from the queue to see the applicant dossier."
+            action={
+              <button type="button" className={ctaBtn} onClick={close}>
+                Go to review queue
+              </button>
+            }
+          />
         </div>
       )}
     </div>

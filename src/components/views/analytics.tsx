@@ -2,7 +2,7 @@
 
 // ============================================================================
 // RMIS — Analytics (spec §7.13, `#/analytics`). Pipeline conversion funnel
-// (clickable → drill filter), application volume line chart (last 30 days,
+// (clickable → drill filter), application volume chart (last 30 days,
 // recharts), status distribution bar chart, drill-down candidate list, and the
 // audit activity feed. Sources: /api/admin/stats + evaluator queue + audit
 // logs.
@@ -10,18 +10,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer,
   Tooltip as RTooltip, XAxis, YAxis,
 } from "recharts";
-import { AlertTriangle, RefreshCw } from "lucide-react";
-import { Skeleton } from "@/components/ui/skeleton";
+import { AlertTriangle, Inbox, RefreshCw, Users } from "lucide-react";
+import {
+  EmptyState, PageHeader, SectionCard, SkeletonKpis, SkeletonRows, StatusPill,
+} from "@/components/ui/shell";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { apiFetch, formatDate, fullName, humanize, timeAgo } from "@/lib/client";
-import { PIPELINE_STAGES, stageForStatus, type StageKey } from "@/lib/status";
+import { PIPELINE_STAGES, stageForStatus, getStatusMeta, type StageKey } from "@/lib/status";
 import { navigate } from "@/lib/router";
-import { StatusPill } from "@/components/views/review-workspace";
+import { dotClass, pillClass, variantForStatus, type StatusVariant } from "@/lib/status-ui";
 import { ghostBtn } from "@/components/views/recruitment";
 
 type Stats = {
@@ -54,8 +56,28 @@ type AuditRow = {
 
 type Drill = "All" | StageKey;
 
-const INK = "#181825";
+// ── Data-viz tokens (globals.css --viz-1..5) & shared chart chrome ──────────
+
 const GRID = "#ececec";
+const TICK = { fontSize: 11, fill: "#949494" };
+const VIZ_1 = "#f69251";
+const VIZ_2 = "#242433";
+
+/** Funnel bar fill per stage (functional status tokens from globals.css). */
+const STAGE_BAR: Record<StageKey, string> = {
+  "Applied": "#484758",
+  "Under Review": "#a16207",
+  "Shortlisted": "#2e7d4f",
+  "Rejected": "#b3556a",
+};
+
+/** Stage-dot variant per stage (mirrors STAGE_BAR). */
+const STAGE_VARIANT: Record<StageKey, StatusVariant> = {
+  "Applied": "info",
+  "Under Review": "warn",
+  "Shortlisted": "ok",
+  "Rejected": "bad",
+};
 
 function Monogram({ name }: { name: string }) {
   const initials = name
@@ -65,7 +87,7 @@ function Monogram({ name }: { name: string }) {
     .map((w) => w[0]?.toUpperCase() ?? "")
     .join("");
   return (
-    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fog text-xs font-medium text-ink">
+    <span className="num inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fog text-xs font-medium text-ink">
       {initials || "?"}
     </span>
   );
@@ -161,12 +183,15 @@ export default function Analytics() {
 
   if (error) {
     return (
-      <div className="dlg-card p-8 text-center space-y-4">
-        <AlertTriangle className="h-8 w-8 text-dusty-rose mx-auto" aria-hidden />
-        <p className="text-sm text-stone">{error}</p>
-        <button type="button" className={ghostBtn} onClick={() => void load()}>
-          Retry
-        </button>
+      <div className="space-y-6">
+        <PageHeader title="Analytics" description="Pipeline health, application volume, and audit activity." />
+        <div className="dlg-card p-8 text-center space-y-4">
+          <AlertTriangle className="h-8 w-8 text-dusty-rose mx-auto" aria-hidden />
+          <p className="text-sm text-stone">{error}</p>
+          <button type="button" className={ghostBtn} onClick={() => void load()}>
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -174,166 +199,202 @@ export default function Analytics() {
   if (!stats || queue === null || audit === null) {
     return (
       <div className="space-y-6">
-        <Skeleton className="h-10 w-1/3" />
+        <PageHeader title="Analytics" description="Pipeline health, application volume, and audit activity." />
+        <SkeletonKpis count={4} />
         <div className="grid gap-6 lg:grid-cols-2">
-          <Skeleton className="h-64 rounded-[24px]" />
-          <Skeleton className="h-64 rounded-[24px]" />
+          <SkeletonRows rows={5} rowClassName="h-16" />
+          <SkeletonRows rows={5} rowClassName="h-16" />
         </div>
-        <Skeleton className="h-64 rounded-[24px]" />
+        <SkeletonRows rows={4} rowClassName="h-16" />
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="font-display text-2xl text-ink">Analytics</h1>
-        <button type="button" className={`${ghostBtn} ml-auto`} onClick={manualRefresh}>
-          <RefreshCw className={`h-4 w-4 ${spin ? "animate-spin" : ""}`} aria-hidden />
-          Refresh
-        </button>
-      </div>
+      <PageHeader
+        title="Analytics"
+        description="Pipeline health, application volume, and audit activity."
+        actions={
+          <button type="button" className={ghostBtn} onClick={manualRefresh}>
+            <RefreshCw className={`h-4 w-4 ${spin ? "animate-spin" : ""}`} aria-hidden />
+            Refresh
+          </button>
+        }
+      />
 
-      {/* 1. Pipeline funnel + 3. Status distribution */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="dlg-card p-6 space-y-2">
-          <h2 className="font-display text-xl text-ink">Pipeline conversion</h2>
-          <p className="text-xs text-stone">Click a stage to drill into its applicants. Percentages are of Applied.</p>
-          <div className="mt-2 space-y-2">
-            {funnel.map((f) => {
-              const active = drill === f.stage;
-              return (
-                <button
-                  key={f.stage}
-                  type="button"
-                  className={`w-full text-left rounded-[12px] px-3 py-3 transition-colors min-h-[44px] ${active ? "bg-ink text-white" : "bg-fog hover:bg-[#ececec]"}`}
-                  onClick={() => setDrill(drill === f.stage ? "All" : f.stage)}
-                  aria-pressed={active}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className={`text-sm ${active ? "text-white" : "text-ink"}`}>{f.stage}</span>
-                    <span className={`text-sm tabular-nums ${active ? "text-white" : "text-ink"}`}>{f.count}</span>
-                  </div>
-                  <div className="mt-1.5 h-1.5 rounded-full bg-white/40 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${active ? "bg-white" : "bg-ink"}`}
-                      style={{ width: `${Math.min(100, f.pct)}%` }}
+      <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+        {/* 1. Pipeline funnel + 3. Status distribution */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          <SectionCard
+            title="Pipeline conversion"
+            description="Click a stage to drill into its applicants. Percentages are of Applied."
+          >
+            <div className="space-y-1">
+              {funnel.map((f) => {
+                const active = drill === f.stage;
+                return (
+                  <button
+                    key={f.stage}
+                    type="button"
+                    className={`focus-ring w-full rounded-[12px] px-3 py-3 text-left transition-colors min-h-[44px] ${
+                      active ? "bg-fog ring-1 ring-ink/20" : "hover:bg-fog/60"
+                    }`}
+                    onClick={() => setDrill(drill === f.stage ? "All" : f.stage)}
+                    aria-pressed={active}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className={`stage-dot ${dotClass(STAGE_VARIANT[f.stage])}`} aria-hidden />
+                      <span className="flex-1 text-sm text-ink">{f.stage}</span>
+                      <span className="num text-sm font-medium text-ink">{f.count}</span>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2.5">
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-fog">
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${Math.min(100, f.pct)}%`, background: STAGE_BAR[f.stage] }}
+                        />
+                      </div>
+                      <span className="num w-10 shrink-0 text-right text-xs text-stone">{f.pct}%</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </SectionCard>
+
+          <div className="space-y-6">
+            <SectionCard title="Applications per day" description="Last 30 days, from the review queue.">
+              <div className="mt-2">
+                <ResponsiveContainer width="100%" height={220}>
+                  <AreaChart data={volume} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+                    <defs>
+                      <linearGradient id="analytics-volume-fill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={VIZ_1} stopOpacity={0.12} />
+                        <stop offset="100%" stopColor={VIZ_1} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="day" tick={TICK} tickMargin={8} interval={6} axisLine={false} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={TICK} axisLine={false} tickLine={false} />
+                    <RTooltip />
+                    <Area
+                      type="monotone"
+                      dataKey="applications"
+                      stroke={VIZ_1}
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                      fill="url(#analytics-volume-fill)"
                     />
-                  </div>
-                  <p className={`text-xs mt-1 ${active ? "text-white/70" : "text-pebble"}`}>{f.pct}% of Applied</p>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="space-y-6">
-          <div className="dlg-card p-6">
-            <h2 className="font-display text-xl text-ink">Applications per day</h2>
-            <p className="text-xs text-stone">Last 30 days, from the review queue.</p>
-            <div className="mt-4">
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={volume} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
-                  <CartesianGrid stroke={GRID} vertical={false} />
-                  <XAxis dataKey="day" tick={{ fontSize: 10, fill: "#949494" }} tickMargin={8} interval={6} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#949494" }} />
-                  <RTooltip />
-                  <Line type="monotone" dataKey="applications" stroke={INK} strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="dlg-card p-6">
-            <h2 className="font-display text-xl text-ink">Status distribution</h2>
-            <div className="mt-4">
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={stats.byStatus} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
-                  <CartesianGrid stroke={GRID} vertical={false} />
-                  <XAxis dataKey="status" tick={{ fontSize: 10, fill: "#949494" }} tickMargin={8} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#949494" }} />
-                  <RTooltip />
-                  <Bar dataKey="count" fill="#242433" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 4. Drill-down */}
-      <div className="dlg-card p-6 space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 className="font-display text-xl text-ink">Drill-down</h2>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            <Select value={drill} onValueChange={(v) => setDrill(v as Drill)}>
-              <SelectTrigger className="dlg-input min-h-[44px] w-[170px]" aria-label="Stage drill filter">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All stages</SelectItem>
-                {PIPELINE_STAGES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={cycle} onValueChange={setCycle}>
-              <SelectTrigger className="dlg-input min-h-[44px] w-[140px]" aria-label="Recruitment cycle">
-                <SelectValue placeholder="All time" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all-time">All time</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        {drillRows.length === 0 ? (
-          <p className="text-sm text-pebble py-4 text-center">No applicants in this selection.</p>
-        ) : (
-          <div className="max-h-96 overflow-y-auto scroll-thin space-y-2 pr-1">
-            {drillRows.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                className="w-full bg-fog rounded-[12px] p-3 flex items-center gap-3 text-left hover:bg-[#ececec] transition-colors min-h-[44px]"
-                onClick={() => navigate("candidate", { id: String(r.applicantId) })}
-              >
-                <Monogram name={fullName(r.applicant)} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-ink truncate">{fullName(r.applicant)}</p>
-                  <p className="text-xs text-stone truncate">
-                    {r.job.title} · Applied {formatDate(r.dateApplied)}
-                  </p>
-                </div>
-                <StatusPill status={r.status} />
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* 5. Recent activity (audit feed) */}
-      <div className="dlg-card p-6 space-y-3">
-        <div className="flex flex-wrap items-baseline gap-3">
-          <h2 className="font-display text-xl text-ink">Recent activity</h2>
-          <span className="text-xs text-stone">{auditTotal} logged event{auditTotal === 1 ? "" : "s"}</span>
-        </div>
-        {audit.length === 0 ? (
-          <p className="text-sm text-pebble py-4 text-center">No audit events recorded yet.</p>
-        ) : (
-          <div className="max-h-96 overflow-y-auto scroll-thin space-y-2 pr-1">
-            {audit.map((a) => (
-              <div key={a.id} className="bg-fog rounded-[12px] p-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span className="text-sm text-ink truncate max-w-[240px]">{a.userLabel || "System"}</span>
-                <span className="rounded-full bg-white px-2 py-0.5 text-xs text-ink">{humanize(a.action)}</span>
-                <span className="text-xs text-stone truncate flex-1 min-w-[160px]">{a.description || "—"}</span>
-                <span className="text-xs text-pebble shrink-0">{timeAgo(a.timestamp)}</span>
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
-            ))}
+            </SectionCard>
+
+            <SectionCard title="Status distribution" description="All applications by stored status.">
+              <div className="mt-2">
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={stats.byStatus} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+                    <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="status" tick={TICK} tickMargin={8} axisLine={false} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={TICK} axisLine={false} tickLine={false} />
+                    <RTooltip />
+                    <Bar dataKey="count" fill={VIZ_2} radius={[6, 6, 0, 0]} maxBarSize={28} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </SectionCard>
           </div>
-        )}
+        </div>
+
+        {/* 4. Drill-down */}
+        <SectionCard
+          title="Drill-down"
+          description={drill === "All" ? "All stages." : `Filtered to ${drill}.`}
+          actions={
+            <>
+              <Select value={drill} onValueChange={(v) => setDrill(v as Drill)}>
+                <SelectTrigger className="dlg-input min-h-[44px] w-[170px]" aria-label="Stage drill filter">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All stages</SelectItem>
+                  {PIPELINE_STAGES.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={cycle} onValueChange={setCycle}>
+                <SelectTrigger className="dlg-input min-h-[44px] w-[140px]" aria-label="Recruitment cycle">
+                  <SelectValue placeholder="All time" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all-time">All time</SelectItem>
+                </SelectContent>
+              </Select>
+            </>
+          }
+        >
+          {drillRows.length === 0 ? (
+            <EmptyState icon={Users} title="No applicants in this selection." compact />
+          ) : (
+            <div className="max-h-96 space-y-1 overflow-y-auto scroll-thin pr-1">
+              {drillRows.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  className="flex min-h-[44px] w-full items-center gap-3 rounded-[12px] p-3 text-left transition-colors hover:bg-fog/60 focus-ring"
+                  onClick={() => navigate("candidate", { id: String(r.applicantId) })}
+                >
+                  <Monogram name={fullName(r.applicant)} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-ink">{fullName(r.applicant)}</p>
+                    <p className="truncate text-xs text-stone">
+                      {r.job.title} · Applied {formatDate(r.dateApplied)}
+                    </p>
+                  </div>
+                  <StatusPill status={getStatusMeta(r.status).label} variant={variantForStatus(r.status)} />
+                </button>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+
+        {/* 5. Recent activity (audit feed) */}
+        <SectionCard
+          title="Recent activity"
+          description={`${auditTotal} logged event${auditTotal === 1 ? "" : "s"}`}
+        >
+          {audit.length === 0 ? (
+            <EmptyState icon={Inbox} title="No audit events recorded yet." compact />
+          ) : (
+            <div className="max-h-96 space-y-1 overflow-y-auto scroll-thin pr-1">
+              {audit.map((a) => (
+                <div
+                  key={a.id}
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[12px] px-3 py-2.5 transition-colors hover:bg-fog/60"
+                >
+                  <span
+                    className={`${pillClass("neutral")} shrink-0 uppercase tracking-[0.06em]`}
+                    style={{ fontSize: "10px" }}
+                  >
+                    {humanize(a.action)}
+                  </span>
+                  <span className="max-w-[240px] truncate text-[13px] font-medium text-ink">
+                    {a.userLabel || "System"}
+                  </span>
+                  <span className="min-w-[160px] flex-1 truncate text-[13px] text-stone">
+                    {a.description || "—"}
+                  </span>
+                  <span className="num shrink-0 text-xs text-pebble">{timeAgo(a.timestamp)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </SectionCard>
       </div>
     </div>
   );

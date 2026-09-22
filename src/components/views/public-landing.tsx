@@ -4,12 +4,16 @@
 // RMIS — Public landing (spec §7.1): hero + CTAs, live snapshot panel
 // computed from GET /api/jobs, grid of the first 12 open positions, static
 // 3-step "How to apply" explainer. 30s silent poll + refetch on focus.
+// Presentation pass: hero gains a Dialog-style browser-frame product mockup
+// (lg+), EmptyState for the empty board, connector line on the how-to steps.
+// All data fetching, handlers, and copy are preserved exactly.
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Inbox } from "lucide-react";
 import { SiteHeader } from "@/components/shell/site-header";
 import { Footer } from "@/components/shell/footer";
+import { EmptyState } from "@/components/ui/shell";
 import { apiFetch, deadlineState, formatCurrency, formatDate } from "@/lib/client";
 import { divisionName } from "@/lib/constants";
 import { navigate } from "@/lib/router";
@@ -48,6 +52,52 @@ function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+// ── Hero product mockup (pure decoration — static divs only) ────────────────
+
+const MOCK_POSITIONS = [
+  { title: "Supervising Science Research Specialist", meta: "₱63,970/mo · SG 22 · Metals Processing" },
+  { title: "Engineer II", meta: "₱43,141/mo · SG 17 · Machining Division" },
+  { title: "Science Research Specialist I", meta: "₱38,413/mo · SG 13 · R&D Division" },
+] as const;
+
+function HeroMockup() {
+  return (
+    <div className="dlg-card rotate-1 overflow-hidden" aria-hidden="true">
+      {/* Browser chrome */}
+      <div className="flex items-center gap-2 border-b border-border bg-fog px-4 py-3">
+        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#c97b84]" />
+        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#f69251]" />
+        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#8b8b8b]" />
+        <span className="ml-2.5 min-w-0 flex-1 truncate rounded-full bg-white px-3.5 py-1.5 text-[11px] leading-none text-stone">
+          mirdc.gov.ph/careers
+        </span>
+      </div>
+
+      {/* Mini positions board */}
+      <div className="p-5">
+        <div className="flex items-center justify-between gap-3">
+          <p className="font-display text-[15px] text-ink">Open Positions</p>
+          <span className="rounded-full bg-fog px-2.5 py-1 text-[10px] font-medium text-stone">
+            3 open
+          </span>
+        </div>
+
+        <div className="mt-4 space-y-2.5">
+          {MOCK_POSITIONS.map((p) => (
+            <div key={p.title} className="rounded-[12px] border border-border bg-white p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <p className="truncate text-[13px] font-medium text-ink">{p.title}</p>
+                <span className="status-pill status-ok">Open</span>
+              </div>
+              <p className="num mt-1.5 text-[11px] text-stone">{p.meta}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Position card ───────────────────────────────────────────────────────────
 
 function LandingJobCard({ job }: { job: JobWire }) {
@@ -74,7 +124,7 @@ function LandingJobCard({ job }: { job: JobWire }) {
       </div>
 
       <h3 className="mt-3 font-display text-xl text-carbon">{job.title}</h3>
-      <p className="mt-1 text-sm text-stone">
+      <p className="num mt-1 text-sm text-stone">
         {salary != null ? `${formatCurrency(salary)}/mo` : "Competitive"}
       </p>
 
@@ -85,7 +135,7 @@ function LandingJobCard({ job }: { job: JobWire }) {
 
       <div className="mt-auto flex items-center justify-between gap-2 pt-4">
         {pos?.salaryGrade ? (
-          <span className="dlg-pill bg-fog px-3 py-1 text-xs font-medium text-graphite">
+          <span className="dlg-pill num bg-fog px-3 py-1 text-xs font-medium text-graphite">
             SG {pos.salaryGrade}
           </span>
         ) : (
@@ -101,6 +151,23 @@ function LandingJobCard({ job }: { job: JobWire }) {
     </article>
   );
 }
+
+// ── How-to-apply steps (copy preserved) ─────────────────────────────────────
+
+const APPLY_STEPS = [
+  {
+    title: "Browse positions",
+    body: "Review the open positions on the board and find the role that fits your qualifications.",
+  },
+  {
+    title: "Prepare requirements",
+    body: "Have your Personal Data Sheet (CS Form 212) and eligibility records ready before you start.",
+  },
+  {
+    title: "Submit before deadline",
+    body: "Create an account, complete your profile, and submit your application before the closing date.",
+  },
+] as const;
 
 // ── View ────────────────────────────────────────────────────────────────────
 
@@ -163,30 +230,38 @@ export default function PublicLanding() {
 
       <main className="flex-1">
         {/* Hero */}
-        <section className="mx-auto w-full max-w-[1200px] px-4 pb-12 pt-20 text-center sm:px-6 sm:pb-16 sm:pt-24">
-          <span className="dlg-pill inline-flex items-center bg-white px-3.5 py-1.5 text-xs font-medium text-graphite">
-            DOST-MIRDC · Careers
-          </span>
-          <h1 className="text-display-hero mx-auto mt-6 max-w-4xl">
-            Build a career that moves the nation forward.
-          </h1>
-          <p className="mx-auto mt-5 max-w-2xl text-[18px] leading-relaxed text-stone">
-            Explore open positions at the Metals Industry Research and Development Center and
-            submit your application online.
-          </p>
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <button
-              onClick={() => scrollToSection("positions-grid")}
-              className="dlg-cta min-h-[44px] px-7 text-sm"
-            >
-              Browse open positions
-            </button>
-            <button
-              onClick={() => scrollToSection("how-to-apply")}
-              className="dlg-ghost min-h-[44px] px-7 text-sm"
-            >
-              How to apply
-            </button>
+        <section className="mx-auto w-full max-w-[1200px] px-4 pb-12 pt-20 sm:px-6 sm:pb-16 sm:pt-24">
+          <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-12 lg:gap-10">
+            <div className="animate-in fade-in slide-in-from-bottom-2 text-center duration-300 lg:col-span-7 lg:text-left">
+              <span className="dlg-pill inline-flex items-center bg-white px-3.5 py-1.5 text-xs font-medium text-graphite shadow-dialog-subtle">
+                DOST-MIRDC · Careers
+              </span>
+              <h1 className="text-display-hero mx-auto mt-6 max-w-4xl lg:mx-0">
+                Build a career that moves the nation forward.
+              </h1>
+              <p className="mx-auto mt-5 max-w-2xl text-[18px] leading-relaxed text-stone lg:mx-0">
+                Explore open positions at the Metals Industry Research and Development Center and
+                submit your application online.
+              </p>
+              <div className="mt-8 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
+                <button
+                  onClick={() => scrollToSection("positions-grid")}
+                  className="dlg-cta min-h-[44px] px-7 text-sm"
+                >
+                  Browse open positions
+                </button>
+                <button
+                  onClick={() => scrollToSection("how-to-apply")}
+                  className="dlg-ghost min-h-[44px] px-7 text-sm"
+                >
+                  How to apply
+                </button>
+              </div>
+            </div>
+
+            <div className="hidden lg:col-span-5 lg:block">
+              <HeroMockup />
+            </div>
           </div>
         </section>
 
@@ -196,9 +271,9 @@ export default function PublicLanding() {
             {jobs === null && error === null ? (
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                 {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className="animate-pulse rounded-[12px] bg-fog p-5">
-                    <div className="h-3 w-20 rounded bg-white" />
-                    <div className="mt-3 h-7 w-24 rounded bg-white" />
+                  <div key={i} className="rounded-[12px] bg-fog p-4 sm:p-5">
+                    <div className="skel h-3 w-20" />
+                    <div className="skel mt-4 h-7 w-24" />
                   </div>
                 ))}
               </div>
@@ -216,26 +291,34 @@ export default function PublicLanding() {
               <>
                 <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                   <div className="rounded-[12px] bg-fog p-4 sm:p-5">
-                    <p className="text-xs text-pebble">Open positions</p>
-                    <p className="mt-1 font-display text-2xl text-carbon sm:text-3xl">
+                    <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-pebble">
+                      Open positions
+                    </p>
+                    <p className="num mt-1 font-display text-2xl text-carbon sm:text-3xl">
                       {metrics.open}
                     </p>
                   </div>
                   <div className="rounded-[12px] bg-fog p-4 sm:p-5">
-                    <p className="text-xs text-pebble">Hiring divisions</p>
-                    <p className="mt-1 font-display text-2xl text-carbon sm:text-3xl">
+                    <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-pebble">
+                      Hiring divisions
+                    </p>
+                    <p className="num mt-1 font-display text-2xl text-carbon sm:text-3xl">
                       {metrics.divisions}
                     </p>
                   </div>
                   <div className="rounded-[12px] bg-fog p-4 sm:p-5">
-                    <p className="text-xs text-pebble">Soonest deadline</p>
-                    <p className="mt-1 font-display text-2xl text-carbon sm:text-3xl">
+                    <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-pebble">
+                      Soonest deadline
+                    </p>
+                    <p className="num mt-1 font-display text-2xl text-carbon sm:text-3xl">
                       {metrics.soonest}
                     </p>
                   </div>
                   <div className="rounded-[12px] bg-fog p-4 sm:p-5">
-                    <p className="text-xs text-pebble">Salary range</p>
-                    <p className="mt-1 font-display text-2xl text-carbon sm:text-3xl">
+                    <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-pebble">
+                      Salary range
+                    </p>
+                    <p className="num mt-1 font-display text-2xl text-carbon sm:text-3xl">
                       {metrics.salary}
                     </p>
                   </div>
@@ -256,10 +339,10 @@ export default function PublicLanding() {
         {/* Positions grid */}
         <section
           id="positions-grid"
-          className="mx-auto w-full max-w-[1200px] scroll-mt-24 px-4 pt-12 sm:px-6 sm:pt-16"
+          className="mx-auto w-full max-w-[1200px] scroll-mt-28 px-4 pt-12 sm:px-6 sm:pt-16"
         >
           <div className="mb-6 max-w-2xl">
-            <h2 className="text-heading-lg">Open positions</h2>
+            <h2 className="text-heading-lg">Open Positions</h2>
             <p className="mt-3 text-sm leading-relaxed text-stone">
               The latest vacancies published by the Human Resources office. Applications are
               submitted online — the board refreshes automatically.
@@ -267,11 +350,12 @@ export default function PublicLanding() {
           </div>
 
           {gridJobs.length === 0 ? (
-            <div className="dlg-card p-10 text-center">
-              <p className="font-display text-xl text-carbon">No open positions right now</p>
-              <p className="mt-2 text-sm text-stone">
-                Check back soon or explore the full board for upcoming announcements.
-              </p>
+            <div className="dlg-card">
+              <EmptyState
+                icon={Inbox}
+                title="No open positions right now"
+                description="Check back soon or explore the full board for upcoming announcements."
+              />
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -297,31 +381,25 @@ export default function PublicLanding() {
         {/* How to apply */}
         <section
           id="how-to-apply"
-          className="mx-auto w-full max-w-[1200px] scroll-mt-24 px-4 py-12 sm:px-6 sm:py-16"
+          className="mx-auto w-full max-w-[1200px] scroll-mt-28 px-4 py-12 sm:px-6 sm:py-16"
         >
           <div className="dlg-card p-6 sm:p-8">
-            <h2 className="text-heading-lg">How to apply</h2>
+            <h2 className="text-heading-lg">How to Apply</h2>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-stone">
               Three steps from browsing to a submitted application.
             </p>
 
-            <div className="mt-8 grid grid-cols-1 gap-8 sm:grid-cols-3">
-              {[
-                {
-                  title: "Browse positions",
-                  body: "Review the open positions on the board and find the role that fits your qualifications.",
-                },
-                {
-                  title: "Prepare requirements",
-                  body: "Have your Personal Data Sheet (CS Form 212) and eligibility records ready before you start.",
-                },
-                {
-                  title: "Submit before deadline",
-                  body: "Create an account, complete your profile, and submit your application before the closing date.",
-                },
-              ].map((step, i) => (
-                <div key={step.title} className="flex gap-4">
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink text-sm font-medium text-white">
+            <div className="mt-8 grid grid-cols-1 gap-8 sm:grid-cols-3 lg:mt-10 lg:gap-10">
+              {APPLY_STEPS.map((step, i) => (
+                <div key={step.title} className="relative flex gap-4 lg:flex-col">
+                  {/* Connector line between numbered dots (lg+ only) */}
+                  {i > 0 && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute top-[18px] right-[calc(100%_-_18px)] hidden h-px w-[calc(100%_+_40px)] bg-[#ececec] lg:block"
+                    />
+                  )}
+                  <span className="relative z-10 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink text-sm font-medium text-white">
                     {i + 1}
                   </span>
                   <div>

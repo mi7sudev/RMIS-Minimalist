@@ -129,7 +129,7 @@ export default function FormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="dlg-card-plain max-h-[90vh] w-full overflow-y-auto scroll-thin sm:max-w-xl">
+      <DialogContent className="dlg-card-plain max-h-[90vh] w-full overflow-y-auto scroll-thin sm:max-w-2xl">
         <DialogHeader className="space-y-1 text-left">
           <DialogTitle className="font-display text-2xl text-ink">{title}</DialogTitle>
           {description && <DialogDescription className="text-sm text-stone">{description}</DialogDescription>}

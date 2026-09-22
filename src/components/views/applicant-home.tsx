@@ -1,14 +1,16 @@
 "use client";
 
 // ============================================================================
-// RMIS — Applicant home (spec §7.3): welcome header, "Complete Your Profile"
+// RMIS — Applicant home (spec §7.3): PageHeader, "Complete Your Profile"
 // banner while incomplete, open-positions pane (deadline not passed, newest
 // published first) and the persistent "Your Applications" journey list
-// (newest first) with 3-checkpoint timelines + next-step hints.
+// (newest first) with 3-checkpoint status timelines + next-step hints.
 // Data: parallel /api/applications + /api/jobs — 15 s silent poll + refetch on
 // focus (never flips skeletons or clobbers good data on transient failure).
 // Clicking a journey card opens the full Application detail modal (§7.7)
 // with Cancel Application while the journey is still at "Submitted".
+// Presentation pass: status-colored checkpoint timeline (.stage-dot),
+// StatusPill stage/deadline badges, EmptyState + Skeleton primitives.
 // ============================================================================
 
 import { useCallback, useEffect, useState } from "react";
@@ -19,10 +21,9 @@ import {
   BadgeCheck,
   Briefcase,
   CalendarDays,
-  Check,
+  Inbox,
   MapPin,
   RefreshCw,
-  X,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -35,9 +36,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { EmptyState, PageHeader, SkeletonKpis, SkeletonRows, StatusPill } from "@/components/ui/shell";
 import { apiFetch, deadlineState, formatCurrency, formatDate, humanize } from "@/lib/client";
 import { navigate, type ApplicationWire, type JobWire, type PositionWire } from "@/lib/router";
 import { currentStageLabel, stageForStatus } from "@/lib/status";
+import { cn } from "@/lib/utils";
 import { useSession } from "@/components/session-provider";
 
 // ── Small helpers ───────────────────────────────────────────────────────────
@@ -54,10 +57,16 @@ function notRequired(v: string | null | undefined): boolean {
   return s === "" || s === "n/a" || s === "na" || s === "none" || s === "none required" || s === "not required";
 }
 
-function stagePillClass(label: string): string {
-  if (label === "Not Selected") return "bg-dusty-rose/10 text-dusty-rose";
-  if (label === "Shortlisted") return "bg-ink text-white";
-  return "bg-fog text-graphite";
+/** Applicant-facing stage label → functional status variant (§2 status system). */
+const STAGE_VARIANT: Record<string, "ok" | "warn" | "bad" | "info"> = {
+  Submitted: "info",
+  "In Review": "warn",
+  Shortlisted: "ok",
+  "Not Selected": "bad",
+};
+
+function stageVariant(label: string): "ok" | "warn" | "bad" | "info" | "neutral" {
+  return STAGE_VARIANT[label] ?? "neutral";
 }
 
 /** §7.3 Next Step hint paragraph per pipeline stage. */
@@ -72,18 +81,28 @@ function nextStepHint(stage: string): string {
 
 type CheckpointState = "done" | "current" | "pending" | "failed";
 
+/** Status-colored checkpoint dot: done = ok dot + ok ring, current = warn dot
+ *  + pulsing ring, failed = bad dot, future = neutral fog dot. */
 function CheckpointDot({ state }: { state: CheckpointState }) {
-  const cls =
+  const ring =
     state === "done"
-      ? "bg-ink text-white"
+      ? "bg-[var(--ok-bg)]"
       : state === "current"
-        ? "bg-ink/20 text-ink animate-pulse"
+        ? "bg-[var(--warn-bg)] animate-pulse"
         : state === "failed"
-          ? "bg-dusty-rose text-white"
-          : "bg-fog border border-border text-pebble";
+          ? "bg-[var(--bad-bg)]"
+          : "bg-transparent";
+  const dot =
+    state === "done"
+      ? "dot-ok"
+      : state === "current"
+        ? "dot-warn"
+        : state === "failed"
+          ? "dot-bad"
+          : "dot-neutral";
   return (
-    <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] leading-none ${cls}`}>
-      {state === "done" ? <Check className="h-2.5 w-2.5" /> : state === "failed" ? <X className="h-2.5 w-2.5" /> : null}
+    <span className={cn("inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full", ring)}>
+      <span className={cn("stage-dot", dot)} />
     </span>
   );
 }
@@ -93,37 +112,41 @@ function JourneyTimeline({ status }: { status: string }) {
   const stage = stageForStatus(status);
   const decided = stage === "Shortlisted" || stage === "Rejected";
 
-  const steps: { label: string; state: CheckpointState; lineBefore: boolean }[] = [
-    { label: "Submitted", state: "done", lineBefore: false },
+  const steps: { label: string; state: CheckpointState }[] = [
+    { label: "Submitted", state: "done" },
     {
       label: "Review",
       state: stage === "Under Review" ? "current" : decided ? "done" : "pending",
-      lineBefore: true,
     },
     {
       label:
         stage === "Shortlisted" ? "Shortlisted" : stage === "Rejected" ? "Not Shortlisted" : "Awaiting the shortlist decision",
       state: stage === "Shortlisted" ? "done" : stage === "Rejected" ? "failed" : "pending",
-      lineBefore: decided,
     },
   ];
 
   return (
     <div className="mt-3 grid grid-cols-3 gap-1">
-      {steps.map((s, i) => (
-        <div key={`${s.label}-${i}`} className="flex flex-col items-center gap-1.5 text-center">
-          <div className="flex w-full items-center">
-            <div className={`h-px flex-1 ${i === 0 ? "bg-transparent" : s.lineBefore ? "bg-ink" : "bg-border"}`} />
-            <CheckpointDot state={s.state} />
-            <div
-              className={`h-px flex-1 ${i === steps.length - 1 ? "bg-transparent" : steps[i].state === "done" ? "bg-ink" : "bg-border"}`}
-            />
+      {steps.map((s, i) => {
+        const reached = s.state !== "pending";
+        return (
+          <div key={`${s.label}-${i}`} className="flex flex-col items-center gap-1.5 text-center">
+            <div className="flex w-full items-center">
+              <div className={cn("h-px flex-1", i === 0 ? "bg-transparent" : reached ? "bg-[var(--ok)]" : "bg-divider")} />
+              <CheckpointDot state={s.state} />
+              <div
+                className={cn(
+                  "h-px flex-1",
+                  i === steps.length - 1 ? "bg-transparent" : steps[i + 1].state !== "pending" ? "bg-[var(--ok)]" : "bg-divider"
+                )}
+              />
+            </div>
+            <span className={cn("text-[10px] leading-tight", s.state === "current" ? "font-medium text-ink" : "text-stone")}>
+              {s.label}
+            </span>
           </div>
-          <span className={`text-[10px] leading-tight ${s.state === "current" ? "font-medium text-ink" : "text-stone"}`}>
-            {s.label}
-          </span>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -139,13 +162,13 @@ function ApplicationJourneyCard({ app, index, onOpen }: { app: ApplicationWire; 
     <button
       type="button"
       onClick={onOpen}
-      className="dlg-card min-h-[44px] w-full p-4 text-left transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-ink"
+      className="dlg-card-plain focus-ring min-h-[44px] w-full border border-border p-4 text-left transition-shadow duration-200 hover:border-ink/10 hover:shadow-dialog-subtle"
     >
       <div className="flex items-start justify-between gap-3">
-        <span className="font-display text-lg leading-none text-pebble">{String(index + 1).padStart(2, "0")}</span>
-        <span className={`rounded-full px-3 py-1 text-xs font-medium ${stagePillClass(label)}`}>{label}</span>
+        <span className="num font-display text-lg leading-none text-pebble">{String(index + 1).padStart(2, "0")}</span>
+        <StatusPill status={label} variant={stageVariant(label)} />
       </div>
-      <h4 className="mt-2 font-display text-base leading-snug text-ink">{app.job?.title ?? "Position"}</h4>
+      <h3 className="mt-2 font-display text-base leading-snug text-ink">{app.job?.title ?? "Position"}</h3>
       <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone">
         {place && (
           <span className="inline-flex items-center gap-1">
@@ -153,7 +176,7 @@ function ApplicationJourneyCard({ app, index, onOpen }: { app: ApplicationWire; 
           </span>
         )}
         <span className="inline-flex items-center gap-1">
-          <CalendarDays className="h-3 w-3" /> Applied {formatDate(app.dateApplied)}
+          <CalendarDays className="h-3 w-3" /> Applied <span className="num">{formatDate(app.dateApplied)}</span>
         </span>
       </p>
       <JourneyTimeline status={app.status} />
@@ -223,7 +246,6 @@ function ApplicationDetailModal({
   const [cancelling, setCancelling] = useState(false);
   const job = application.job ?? null;
   const position = job?.position ?? null;
-  const stage = stageForStatus(application.status);
   const label = currentStageLabel(application.status);
   const cancellable = label === "Submitted";
   const dl = deadlineState(job?.deadlineDate ?? null);
@@ -262,8 +284,8 @@ function ApplicationDetailModal({
         <div className="p-6">
           <DialogHeader className="space-y-2 text-left">
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded-full px-3 py-1 text-xs font-medium ${stagePillClass(label)}`}>{label}</span>
-              <span className="rounded-full bg-fog px-3 py-1 text-xs font-medium text-graphite">
+              <StatusPill status={label} variant={stageVariant(label)} />
+              <span className="num rounded-full bg-fog px-3 py-1 text-xs font-medium text-graphite">
                 Application #{application.id}
               </span>
             </div>
@@ -279,7 +301,9 @@ function ApplicationDetailModal({
             </span>
             <div>
               <p className="text-sm font-medium text-ink">Successfully Applied</p>
-              <p className="text-xs text-stone">Applied {formatDate(application.dateApplied)}</p>
+              <p className="text-xs text-stone">
+                Applied <span className="num">{formatDate(application.dateApplied)}</span>
+              </p>
             </div>
           </div>
 
@@ -288,7 +312,7 @@ function ApplicationDetailModal({
             {facts.map(([k, v]) => (
               <div key={k} className="rounded-[12px] bg-fog p-3">
                 <p className="text-[11px] text-pebble">{k}</p>
-                <p className="mt-0.5 truncate text-sm text-ink" title={v}>
+                <p className="num mt-0.5 truncate text-sm text-ink" title={v}>
                   {v}
                 </p>
               </div>
@@ -309,7 +333,7 @@ function ApplicationDetailModal({
                 type="button"
                 onClick={() => setConfirmOpen(true)}
                 disabled={cancelling}
-                className="min-h-[44px] rounded-full border border-dusty-rose/40 bg-white px-6 py-2.5 text-sm font-medium text-dusty-rose transition-colors hover:bg-dusty-rose/10 disabled:opacity-50"
+                className="min-h-[44px] rounded-full border border-[var(--bad)]/30 bg-white px-6 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
               >
                 Cancel Application
               </button>
@@ -331,14 +355,14 @@ function ApplicationDetailModal({
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel className="dlg-ghost min-h-[44px] border-0 px-5 py-2.5 text-sm">Keep it</AlertDialogCancel>
+              <AlertDialogCancel className="dlg-ghost min-h-[44px] px-5 py-2.5 text-sm">Keep it</AlertDialogCancel>
               <AlertDialogAction
                 onClick={(e) => {
                   e.preventDefault();
                   void cancelApplication();
                 }}
                 disabled={cancelling}
-                className="min-h-[44px] rounded-full bg-dusty-rose px-5 py-2.5 text-sm font-medium text-white hover:bg-dusty-rose/90 disabled:opacity-50"
+                className="min-h-[44px] rounded-full border border-[var(--bad)]/30 bg-white px-5 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
               >
                 {cancelling ? "Cancelling…" : "Cancel Application"}
               </AlertDialogAction>
@@ -355,18 +379,25 @@ function ApplicationDetailModal({
 function OpenJobCard({ job }: { job: JobWire }) {
   const dl = deadlineState(job.deadlineDate);
   const applied = (job.applications?.length ?? 0) > 0;
+  const urgent = dl.closingSoon && !dl.overdue;
   return (
-    <div className="dlg-card flex flex-col p-6">
+    <div className="dlg-card-plain flex flex-col border border-border p-6 transition-shadow duration-200 hover:border-ink/10 hover:shadow-dialog-subtle">
       <div className="flex items-start justify-between gap-2">
-        <h4 className="font-display text-base leading-snug text-ink">{humanize(job.title)}</h4>
-        {applied && <span className="shrink-0 rounded-full bg-ink px-3 py-1 text-xs font-medium text-white">Applied</span>}
+        <h3 className="font-display text-base leading-snug text-ink">{humanize(job.title)}</h3>
+        {applied && <StatusPill status="Applied" variant="info" className="shrink-0" />}
       </div>
       <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-stone">
         {job.position?.placeOfAssignment && <span>{job.position.placeOfAssignment}</span>}
         {job.positionType && <span>· {humanize(job.positionType)}</span>}
-        {job.position?.salaryAmount != null && <span>· {formatCurrency(job.position.salaryAmount)}</span>}
-        <span className={dl.overdue ? "text-dusty-rose" : ""}>· {dl.label}</span>
+        {job.position?.salaryAmount != null && (
+          <span>
+            · <span className="num">{formatCurrency(job.position.salaryAmount)}</span>
+          </span>
+        )}
       </p>
+      <div className="mt-3">
+        <span className={cn("status-pill num", urgent ? "status-bad" : "status-neutral")}>{dl.label}</span>
+      </div>
       <div className="mt-4 flex-1" />
       <button
         type="button"
@@ -431,20 +462,16 @@ export default function ApplicantHome() {
   const profileComplete = user?.applicant?.isProfileComplete ?? false;
 
   return (
-    <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6 lg:py-8">
-      {/* Welcome header (§7.3) */}
-      <header className="mb-6">
-        <h1 className="font-display text-3xl text-ink">
-          Welcome Back, {user?.firstName || "there"}
-        </h1>
-        <p className="mt-1 text-sm text-stone">
-          Track your applications and discover the latest openings across DOST-MIRDC.
-        </p>
-      </header>
+    <div>
+      {/* Page header (§3 PageHeader pattern) */}
+      <PageHeader
+        title="My Application"
+        description="Track your applications and discover the latest openings across DOST-MIRDC."
+      />
 
       {/* Complete Your Profile banner while incomplete */}
       {!profileComplete && (
-        <div className="dlg-card mb-6 flex flex-col gap-3 border border-dashed border-divider p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="dlg-card mt-6 flex flex-col gap-3 border border-dashed border-divider p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
             <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fog text-ink">
               <AlertCircle className="h-4 w-4" />
@@ -468,8 +495,8 @@ export default function ApplicantHome() {
 
       {/* Error state with retry */}
       {error && apps === null && (
-        <div className="dlg-card flex flex-col items-center gap-3 p-8 text-center">
-          <AlertCircle className="h-6 w-6 text-dusty-rose" />
+        <div className="dlg-card mt-6 flex flex-col items-center gap-3 p-8 text-center">
+          <AlertCircle className="h-6 w-6 text-[var(--bad)]" />
           <p className="text-sm text-stone">{error}</p>
           <button type="button" onClick={() => void reload(false)} className="dlg-ghost min-h-[44px] px-6 py-2.5 text-sm">
             <RefreshCw className="mr-2 inline h-3.5 w-3.5" /> Retry
@@ -478,19 +505,16 @@ export default function ApplicantHome() {
       )}
 
       {loading ? (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start">
-          <div className="grid gap-4 sm:grid-cols-2">
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="dlg-card h-44 animate-pulse p-6" />
-            ))}
-          </div>
+        /* First-load skeletons — never stale data, never a blank pane. */
+        <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start">
+          <SkeletonKpis count={4} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 [&>div]:h-44" />
           <div className="space-y-4">
-            <div className="dlg-card h-40 animate-pulse p-4" />
-            <div className="dlg-card h-40 animate-pulse p-4" />
+            <SkeletonRows rows={1} rowClassName="h-44" />
+            <SkeletonRows rows={1} rowClassName="h-44" />
           </div>
         </div>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start">
+        <div className="mt-6 grid animate-in fade-in slide-in-from-bottom-2 duration-300 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start">
           {/* LEFT — Open positions */}
           <section className="lg:col-start-1 lg:row-start-1">
             <div className="mb-4 flex items-center justify-between">
@@ -498,15 +522,27 @@ export default function ApplicantHome() {
               <button
                 type="button"
                 onClick={() => navigate("jobs")}
-                className="inline-flex min-h-[44px] items-center text-sm text-stone underline-offset-4 hover:text-ink hover:underline"
+                className="focus-ring inline-flex min-h-[44px] items-center text-sm text-stone underline-offset-4 hover:text-ink hover:underline"
               >
                 View All
               </button>
             </div>
             {openJobs.length === 0 ? (
-              <div className="dlg-card flex flex-col items-center gap-2 p-8 text-center">
-                <Briefcase className="h-6 w-6 text-pebble" />
-                <p className="text-sm text-stone">No open positions right now — check back soon.</p>
+              <div className="dlg-card-plain border border-border">
+                <EmptyState
+                  icon={Briefcase}
+                  title="No open positions right now"
+                  description="New openings appear here as soon as they are published."
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => navigate("jobs")}
+                      className="dlg-ghost inline-flex min-h-[44px] items-center px-5 py-2 text-sm"
+                    >
+                      Browse All Jobs
+                    </button>
+                  }
+                />
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
@@ -521,12 +557,21 @@ export default function ApplicantHome() {
           <section className="order-first lg:order-none lg:sticky lg:top-6 lg:col-start-2 lg:row-start-1 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto scroll-thin">
             <h2 className="mb-4 font-display text-xl text-ink">Your Applications</h2>
             {sortedApps.length === 0 ? (
-              <div className="dlg-card flex flex-col items-center gap-3 p-8 text-center">
-                <Briefcase className="h-6 w-6 text-pebble" />
-                <p className="text-sm text-stone">No applications yet</p>
-                <button type="button" onClick={() => navigate("jobs")} className="dlg-cta min-h-[44px] px-6 py-2.5 text-sm">
-                  Browse Positions
-                </button>
+              <div className="dlg-card-plain border border-border">
+                <EmptyState
+                  icon={Inbox}
+                  title="No applications yet"
+                  description="Applications you submit are tracked here with live status updates."
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => navigate("jobs")}
+                      className="dlg-cta inline-flex min-h-[44px] items-center px-6 py-2.5 text-sm"
+                    >
+                      Browse Positions
+                    </button>
+                  }
+                />
               </div>
             ) : (
               <div className="space-y-4">

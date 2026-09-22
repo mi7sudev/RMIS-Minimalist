@@ -8,6 +8,8 @@
 // is replaced by a locked strip whose only way back is "Clear Forms &
 // Re-upload" → confirm → POST /api/applicant/profile/clear (files stay).
 // Extraction errors show the server message + file name + Try Again.
+// Presentation pass: SectionCard shell, #dcdcdc dashed dropzone, quiet .num
+// extraction-result rows, AI-assisted source pill. Pipeline behavior intact.
 // ============================================================================
 
 import { useMemo, useRef, useState } from "react";
@@ -23,9 +25,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { SectionCard } from "@/components/ui/shell";
 import { apiFetch } from "@/lib/client";
 import { EXTRACTABLE_CATEGORIES } from "@/lib/validation";
 import type { DocumentWire } from "@/lib/router";
+import { cn } from "@/lib/utils";
 import { useSession } from "@/components/session-provider";
 
 const EXTRACTABLE = EXTRACTABLE_CATEGORIES as readonly string[];
@@ -67,6 +71,7 @@ export default function PdsUploadCard({
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<{ message: string; fileName: string } | null>(null);
+  const [lastApply, setLastApply] = useState<AutoApplyResponse | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -78,8 +83,24 @@ export default function PdsUploadCard({
   );
   const busy = phase !== "idle";
 
+  /** Quiet .num rows describing what the last auto-apply filled, per section. */
+  const applyRows = useMemo(() => {
+    if (!lastApply) return [];
+    const rows: [string, number][] = [
+      ["Personal details", lastApply.applied.personal],
+      ["Education entries", lastApply.applied.education],
+      ["Work experience entries", lastApply.applied.work],
+      ["Training entries", lastApply.applied.training],
+      ["Eligibility entries", lastApply.applied.eligibility],
+      ["Awards", lastApply.applied.awards],
+      ["Existing personal values replaced", lastApply.replaced.personal],
+    ];
+    return rows.filter(([, n]) => n > 0);
+  }, [lastApply]);
+
   const runPipeline = async (file: File) => {
     setError(null);
+    setLastApply(null);
     try {
       // 1 — Upload (category PDS).
       setPhase("uploading");
@@ -124,6 +145,7 @@ export default function PdsUploadCard({
             ? `${applied.totalReplaced} existing value${applied.totalReplaced === 1 ? " was" : "s were"} replaced. Review each section before applying.`
             : "Review each section before applying.",
       });
+      setLastApply(applied);
       setPhase("idle");
       setProgress(0);
       await onProfileReplaced();
@@ -147,6 +169,7 @@ export default function PdsUploadCard({
         description: "Your forms are empty again — upload your PDS to auto-fill them.",
       });
       setClearOpen(false);
+      setLastApply(null);
       await onProfileReplaced();
       await refresh();
     } catch (e) {
@@ -159,21 +182,16 @@ export default function PdsUploadCard({
   const pickFile = () => inputRef.current?.click();
 
   return (
-    <div className="dlg-card p-6">
-      <div className="mb-4 flex items-center gap-3">
-        <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-fog text-ink">
-          <CloudUpload className="h-4 w-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="font-display text-lg leading-tight text-ink">AI-Assisted PDS Auto-Fill</h3>
-          <p className="text-xs text-stone">Upload your accomplished Civil Service Form 212 and we fill your profile.</p>
-        </div>
-      </div>
-
+    <SectionCard
+      icon={CloudUpload}
+      title="AI-Assisted PDS Auto-Fill"
+      description="Upload your accomplished Civil Service Form 212 and we fill your profile."
+      actions={<span className="status-pill status-info">AI-assisted</span>}
+    >
       {/* Phase progress — thin bar, ink fill */}
       {busy && (
         <div className="mb-4">
-          <div className="h-1 w-full overflow-hidden rounded-full bg-fog">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-fog">
             <div className="h-full rounded-full bg-ink transition-all duration-500" style={{ width: `${progress}%` }} />
           </div>
           <p className="mt-2 flex items-center gap-2 text-xs text-stone">
@@ -183,7 +201,7 @@ export default function PdsUploadCard({
       )}
 
       {error && (
-        <div className="mb-4 rounded-[12px] border border-dusty-rose/30 bg-dusty-rose/10 p-4">
+        <div className="mb-4 rounded-[12px] border border-[var(--bad)]/30 bg-white p-4">
           <p className="text-sm text-ink">{error.message}</p>
           <p className="mt-0.5 text-xs text-stone">{error.fileName}</p>
           <button
@@ -193,6 +211,21 @@ export default function PdsUploadCard({
           >
             <RefreshCcw className="h-3.5 w-3.5" /> Try Again
           </button>
+        </div>
+      )}
+
+      {/* Extraction result — quiet rows with tabular counts */}
+      {!busy && applyRows.length > 0 && (
+        <div className="mb-4 rounded-[12px] bg-fog p-4">
+          <p className="text-xs font-medium text-graphite">Extraction applied to your profile</p>
+          <dl className="mt-2 divide-y divide-border">
+            {applyRows.map(([label, count]) => (
+              <div key={label} className="flex items-baseline justify-between gap-4 py-1.5 first:pt-0 last:pb-0">
+                <dt className="text-xs text-stone">{label}</dt>
+                <dd className="num text-xs font-medium text-ink">{count}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
       )}
 
@@ -214,7 +247,7 @@ export default function PdsUploadCard({
             type="button"
             onClick={() => setClearOpen(true)}
             disabled={clearing}
-            className="min-h-[44px] w-fit shrink-0 rounded-full border border-dusty-rose/40 bg-white px-5 py-2.5 text-sm font-medium text-dusty-rose transition-colors hover:bg-dusty-rose/10 disabled:opacity-50"
+            className="min-h-[44px] w-fit shrink-0 rounded-full border border-[var(--bad)]/30 bg-white px-5 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
           >
             {clearing ? "Clearing…" : "Clear Forms & Re-upload"}
           </button>
@@ -236,9 +269,10 @@ export default function PdsUploadCard({
               const f = e.dataTransfer.files?.[0];
               if (f && !busy) void runPipeline(f);
             }}
-            className={`flex min-h-[140px] w-full flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed p-6 text-center transition-colors disabled:opacity-60 ${
-              dragOver ? "border-ink bg-fog" : "border-divider bg-white hover:bg-fog"
-            }`}
+            className={cn(
+              "focus-ring flex min-h-[140px] w-full flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-[#dcdcdc] bg-white p-6 text-center transition-colors hover:bg-fog disabled:opacity-60",
+              dragOver && "border-ink bg-fog"
+            )}
           >
             <span className="text-sm font-medium text-ink">Upload PDS — CS Form 212</span>
             <span className="text-xs text-pebble">XLSX, PDF, DOCX or image · up to 10 MB</span>
@@ -267,20 +301,20 @@ export default function PdsUploadCard({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="dlg-ghost min-h-[44px] border-0 px-5 py-2.5 text-sm">Keep my data</AlertDialogCancel>
+            <AlertDialogCancel className="dlg-ghost min-h-[44px] px-5 py-2.5 text-sm">Keep my data</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
                 void clearProfile();
               }}
               disabled={clearing}
-              className="min-h-[44px] rounded-full bg-dusty-rose px-5 py-2.5 text-sm font-medium text-white hover:bg-dusty-rose/90 disabled:opacity-50"
+              className="min-h-[44px] rounded-full border border-[var(--bad)]/30 bg-white px-5 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
             >
               {clearing ? "Clearing…" : "Clear Everything"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </SectionCard>
   );
 }

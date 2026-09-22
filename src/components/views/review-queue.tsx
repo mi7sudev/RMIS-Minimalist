@@ -6,12 +6,15 @@
 // applications). 15 s silent poll + focus refresh + manual refresh.
 // "Qualified only" lens, stage tabs (list), bulk regret letters with confirm.
 // Card / row review actions open the ReviewWorkspace in a Dialog.
+// Enterprise polish pass: PageHeader toolbar, stage-dot kanban columns with
+// scroll-thin bodies, StatusPill/VerdictPill footers, table-card list with
+// hover quick actions, skeleton loading. Handlers unchanged.
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
-  AlertTriangle, Eye, LayoutGrid, List, MailX, RefreshCw, UserRound,
+  AlertTriangle, ArrowUpRight, Inbox, LayoutGrid, List, MailX, RefreshCw, UserRound,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -21,11 +24,12 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState, PageHeader, SkeletonKanban, SkeletonRows } from "@/components/ui/shell";
 import { apiFetch, formatDate, fullName, humanize } from "@/lib/client";
 import { PIPELINE_STAGES, stageForStatus, type StageKey } from "@/lib/status";
+import { dotClass, variantForCompletion, type StatusVariant } from "@/lib/status-ui";
 import { navigate } from "@/lib/router";
-import { ReviewWorkspace, StatusPill } from "@/components/views/review-workspace";
+import { ReviewWorkspace, StatusPill, VerdictPill } from "@/components/views/review-workspace";
 
 // ── Wire shapes ─────────────────────────────────────────────────────────────
 
@@ -80,22 +84,19 @@ type RegretSummary = {
 const ghostBtn =
   "dlg-ghost inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 
-function verdictChip(verdict: string | undefined): { label: string; cls: string } | null {
-  switch (verdict) {
-    case "ALL_MET":
-      return { label: "Qualified", cls: "bg-ink text-white" };
-    case "PARTIAL":
-      return { label: "Partial", cls: "bg-fog text-ink" };
-    case "NONE_MET":
-      return { label: "Not qualified", cls: "bg-dusty-rose/15 text-dusty-rose" };
-    case "NEEDS_REVIEW":
-      return { label: "Verify", cls: "bg-fog text-ink" };
-    case "NO_REQUIREMENTS":
-      return { label: "No reqs", cls: "bg-fog text-stone" };
-    default:
-      return null;
-  }
-}
+const iconBtn =
+  "focus-ring inline-flex h-9 w-9 items-center justify-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink";
+
+const cardCls =
+  "rounded-[12px] border border-border bg-white transition-all duration-200 hover:border-ink/10 hover:shadow-dialog-subtle";
+
+/** Stage → stage-dot variant (Applicants column is neutral). */
+const STAGE_DOT: Record<StageKey, StatusVariant> = {
+  "Applied": "info",
+  "Under Review": "warn",
+  "Shortlisted": "ok",
+  "Rejected": "bad",
+};
 
 function Monogram({ name, className = "" }: { name: string; className?: string }) {
   const initials = name
@@ -105,16 +106,13 @@ function Monogram({ name, className = "" }: { name: string; className?: string }
     .map((w) => w[0]?.toUpperCase() ?? "")
     .join("");
   return (
-    <span className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-fog text-xs font-medium text-ink ${className}`}>
+    <span
+      aria-hidden
+      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-fog text-xs font-medium text-ink ${className}`}
+    >
       {initials || "?"}
     </span>
   );
-}
-
-function CardVerdictChip({ row }: { row: QueueRow }) {
-  const chip = verdictChip(row.match?.verdict);
-  if (!chip) return null;
-  return <span className={`rounded-full px-2 py-0.5 text-xs shrink-0 ${chip.cls}`}>{chip.label}</span>;
 }
 
 function useFocusRefresh(fn: () => void) {
@@ -127,6 +125,31 @@ function useFocusRefresh(fn: () => void) {
       document.removeEventListener("visibilitychange", onFocus);
     };
   }, [fn]);
+}
+
+function KanbanColumn({
+  label,
+  dot,
+  count,
+  children,
+}: {
+  label: string;
+  dot: StatusVariant;
+  count: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="w-[260px] min-w-[260px] shrink-0 snap-start lg:w-auto lg:min-w-0">
+      <div className="flex items-center justify-between gap-2 px-1 pb-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={dotClass(dot)} aria-hidden />
+          <h2 className="truncate text-[13px] font-medium text-ink">{label}</h2>
+        </div>
+        <span className="status-pill status-neutral num shrink-0">{count}</span>
+      </div>
+      <div className="max-h-[calc(100vh-330px)] min-h-[200px] space-y-3 overflow-y-auto scroll-thin">{children}</div>
+    </div>
+  );
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
@@ -229,55 +252,46 @@ export default function ReviewQueue() {
 
   return (
     <div className="space-y-6">
-      {/* Toolbar */}
-      <div className="dlg-card p-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-        <div className="flex items-center gap-2">
-          <h1 className="font-display text-2xl text-ink">Review queue</h1>
-          <span className="rounded-full bg-fog text-ink text-xs px-2.5 py-1">
-            {filtered.length} application{filtered.length === 1 ? "" : "s"}
-          </span>
-        </div>
-
-        <label className="flex items-center gap-2 text-sm text-stone cursor-pointer">
-          <Switch checked={qualifiedOnly} onCheckedChange={setQualifiedOnly} aria-label="Qualified only" />
-          Qualified only
-        </label>
-
-        <div className="flex items-center gap-1 rounded-full bg-fog p-1">
-          <button
-            type="button"
-            className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium ${mode === "kanban" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
-            onClick={() => setMode("kanban")}
-            aria-pressed={mode === "kanban"}
-          >
-            <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
-            Kanban
-          </button>
-          <button
-            type="button"
-            className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium ${mode === "list" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
-            onClick={() => setMode("list")}
-            aria-pressed={mode === "list"}
-          >
-            <List className="h-3.5 w-3.5" aria-hidden />
-            List
-          </button>
-        </div>
-
-        {mode === "list" && listStage === "Rejected" && rejectedIds.length > 0 && (
-          <button type="button" className={ghostBtn + " text-dusty-rose"} onClick={() => setRegretOpen(true)}>
-            <MailX className="h-4 w-4" aria-hidden />
-            Send regret letters ({rejectedIds.length})
-          </button>
-        )}
-
-        <div className="ml-auto flex items-center gap-3">
-          <button type="button" className={ghostBtn} onClick={manualRefresh}>
-            <RefreshCw className={`h-4 w-4 ${spin ? "animate-spin" : ""}`} aria-hidden />
-            Refresh
-          </button>
-        </div>
-      </div>
+      {/* Header + toolbar */}
+      <PageHeader
+        title="Review Queue"
+        description="Screen applications, verify minimum qualifications, and advance candidates through the pipeline."
+        actions={
+          <>
+            <span className="status-pill status-neutral num">
+              {filtered.length} application{filtered.length === 1 ? "" : "s"}
+            </span>
+            <label className="focus-ring inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-full border border-border bg-white px-3.5 text-sm text-stone transition-colors hover:border-ink/10">
+              <Switch checked={qualifiedOnly} onCheckedChange={setQualifiedOnly} aria-label="Qualified only" />
+              Qualified only
+            </label>
+            <div className="flex items-center gap-1 rounded-full bg-fog p-1" role="group" aria-label="View mode">
+              <button
+                type="button"
+                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${mode === "kanban" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
+                onClick={() => setMode("kanban")}
+                aria-pressed={mode === "kanban"}
+              >
+                <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
+                Kanban
+              </button>
+              <button
+                type="button"
+                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${mode === "list" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
+                onClick={() => setMode("list")}
+                aria-pressed={mode === "list"}
+              >
+                <List className="h-3.5 w-3.5" aria-hidden />
+                List
+              </button>
+            </div>
+            <button type="button" className={ghostBtn} onClick={manualRefresh}>
+              <RefreshCw className={`h-4 w-4 ${spin ? "animate-spin" : ""}`} aria-hidden />
+              Refresh
+            </button>
+          </>
+        }
+      />
 
       {/* Stage tabs (list mode only) */}
       {mode === "list" && (
@@ -289,22 +303,33 @@ export default function ReviewQueue() {
               <button
                 key={s}
                 type="button"
-                className={`inline-flex min-h-[36px] items-center gap-2 rounded-full px-3.5 text-xs font-medium ${active ? "bg-ink text-white" : "dlg-ghost"}`}
+                className={`inline-flex min-h-[36px] items-center gap-2 rounded-full px-3.5 text-xs font-medium transition-colors ${active ? "bg-ink text-white" : "dlg-ghost"}`}
                 onClick={() => setListStage(s)}
                 aria-pressed={active}
               >
+                {s !== "All" && <span className={dotClass(STAGE_DOT[s])} aria-hidden />}
                 {s}
-                <span className={`rounded-full px-1.5 ${active ? "bg-white/20" : "bg-fog"}`}>{count}</span>
+                <span className={`num rounded-full px-1.5 ${active ? "bg-white/20" : "bg-fog"}`}>{count}</span>
               </button>
             );
           })}
+          {listStage === "Rejected" && rejectedIds.length > 0 && (
+            <button
+              type="button"
+              className={ghostBtn + " border-[var(--bad)]/30 text-[var(--bad)]"}
+              onClick={() => setRegretOpen(true)}
+            >
+              <MailX className="h-4 w-4" aria-hidden />
+              Send regret letters ({rejectedIds.length})
+            </button>
+          )}
         </div>
       )}
 
       {/* Error */}
       {error && (
-        <div className="dlg-card p-8 text-center space-y-4">
-          <AlertTriangle className="h-8 w-8 text-dusty-rose mx-auto" aria-hidden />
+        <div className="dlg-card space-y-4 p-8 text-center">
+          <AlertTriangle className="mx-auto h-8 w-8 text-[var(--bad)]" aria-hidden />
           <p className="text-sm text-stone">{error}</p>
           <button type="button" className={ghostBtn} onClick={() => void load()}>
             Retry
@@ -314,102 +339,88 @@ export default function ReviewQueue() {
 
       {/* Loading skeleton */}
       {!error && (queue === null || roster === null) && (
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Skeleton key={i} className="h-48 rounded-[12px]" />
-            ))}
-          </div>
-        </div>
+        mode === "kanban" ? <SkeletonKanban columns={5} /> : <SkeletonRows rows={8} rowClassName="h-16" />
       )}
 
       {/* Kanban */}
       {!error && queue !== null && roster !== null && mode === "kanban" && (
-        <div className="flex gap-4 overflow-x-auto pb-2 lg:grid lg:grid-cols-5 lg:overflow-visible">
+        <div className="flex snap-x snap-proximity gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-5 lg:overflow-visible lg:pb-0">
           {/* Applicants column (roster) */}
-          <div className="w-[260px] shrink-0 lg:w-auto lg:min-w-0">
-            <div className="flex items-center justify-between px-1 pb-2">
-              <h2 className="text-sm font-medium text-ink">Applicants</h2>
-              <span className="rounded-full bg-fog text-stone text-xs px-2 py-0.5">{rosterCards.length}</span>
-            </div>
-            <div className="space-y-2">
-              {rosterCards.length === 0 ? (
-                <p className="text-xs text-pebble px-1 py-3">No registered applicants waiting to apply.</p>
-              ) : (
-                rosterCards.map((r) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    className="dlg-card-plain border border-[#ececec] rounded-[12px] p-3 w-full text-left hover:shadow-md transition-shadow min-h-[44px]"
-                    onClick={() => navigate("candidate", { id: String(r.id) })}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-sm text-ink truncate">{fullName(r)}</span>
-                      <UserRound className="h-4 w-4 text-pebble shrink-0" aria-hidden />
-                    </div>
-                    <p className="text-xs text-stone mt-1 truncate">{r.emailAddress || "No email on record"}</p>
-                    <p className="text-xs text-pebble mt-0.5">
-                      {r.isProfileComplete ? "Profile complete" : "Profile incomplete"}
-                    </p>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
+          <KanbanColumn label="Applicants" dot="neutral" count={rosterCards.length}>
+            {rosterCards.length === 0 ? (
+              <EmptyState icon={Inbox} title="No applicants" description="Registered applicants waiting to apply appear here." compact />
+            ) : (
+              rosterCards.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  className={cardCls + " focus-ring w-full cursor-pointer p-4 text-left"}
+                  onClick={() => navigate("candidate", { id: String(r.id) })}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="min-w-0 truncate text-sm font-medium text-ink">{fullName(r)}</p>
+                    <UserRound className="h-4 w-4 shrink-0 text-pebble" aria-hidden />
+                  </div>
+                  <p className="mt-1 truncate text-xs text-stone">{r.emailAddress || "No email on record"}</p>
+                  <div className="mt-2.5">
+                    <StatusPill
+                      status={r.isProfileComplete ? "Profile complete" : "Profile incomplete"}
+                      variant={variantForCompletion(r.isProfileComplete)}
+                    />
+                  </div>
+                </button>
+              ))
+            )}
+          </KanbanColumn>
 
           {/* Pipeline columns */}
           {PIPELINE_STAGES.map((stage) => {
             const rows = kanbanColumns[stage];
             return (
-              <div key={stage} className="w-[260px] shrink-0 lg:w-auto lg:min-w-0">
-                <div className="flex items-center justify-between px-1 pb-2">
-                  <h2 className="text-sm font-medium text-ink">{stage}</h2>
-                  <span className="rounded-full bg-fog text-stone text-xs px-2 py-0.5">{rows.length}</span>
-                </div>
-                <div className="space-y-2">
-                  {rows.length === 0 ? (
-                    <p className="text-xs text-pebble px-1 py-3">No applications in this stage.</p>
-                  ) : (
-                    rows.map((row) => {
-                      const position = row.job.position?.positionTitle || row.job.title;
-                      const place = row.job.position?.placeOfAssignment ?? null;
-                      return (
-                        <div
-                          key={row.id}
-                          role="button"
-                          tabIndex={0}
-                          className="dlg-card-plain border border-[#ececec] rounded-[12px] p-3 cursor-pointer hover:shadow-md transition-shadow"
-                          onClick={() => setSelectedId(row.id)}
-                          onKeyDown={(e) => e.key === "Enter" && setSelectedId(row.id)}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <span className="text-sm text-ink truncate">{fullName(row.applicant)}</span>
-                            <button
-                              type="button"
-                              className="shrink-0 -mt-0.5 -mr-0.5 p-1.5 rounded-full text-pebble hover:text-ink hover:bg-fog"
-                              aria-label="Open profile"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigate("candidate", { id: String(row.applicantId) });
-                              }}
-                            >
-                              <UserRound className="h-4 w-4" aria-hidden />
-                            </button>
-                          </div>
-                          <p className="text-xs text-stone mt-1 truncate">
-                            {[humanize(position), place].filter(Boolean).join(" · ")}
-                          </p>
-                          <p className="text-xs text-pebble mt-0.5">Applied {formatDate(row.dateApplied)}</p>
-                          <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                            <StatusPill status={row.status} />
-                            <CardVerdictChip row={row} />
-                          </div>
+              <KanbanColumn key={stage} label={stage} dot={STAGE_DOT[stage]} count={rows.length}>
+                {rows.length === 0 ? (
+                  <EmptyState icon={Inbox} title="No applications" description="Nothing in this stage right now." compact />
+                ) : (
+                  rows.map((row) => {
+                    const position = row.job.position?.positionTitle || row.job.title;
+                    const place = row.job.position?.placeOfAssignment ?? null;
+                    return (
+                      <div
+                        key={row.id}
+                        role="button"
+                        tabIndex={0}
+                        className={cardCls + " focus-ring cursor-pointer p-4"}
+                        onClick={() => setSelectedId(row.id)}
+                        onKeyDown={(e) => e.key === "Enter" && setSelectedId(row.id)}
+                        aria-label={`Review application from ${fullName(row.applicant)}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="min-w-0 truncate text-sm font-medium text-ink">{fullName(row.applicant)}</p>
+                          <button
+                            type="button"
+                            className={iconBtn + " -mr-1.5 -mt-1 h-8 w-8 shrink-0"}
+                            aria-label={`Open ${fullName(row.applicant)}'s profile`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate("candidate", { id: String(row.applicantId) });
+                            }}
+                          >
+                            <UserRound className="h-4 w-4" aria-hidden />
+                          </button>
                         </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
+                        <p className="mt-1 truncate text-xs text-stone">
+                          {[humanize(position), place].filter(Boolean).join(" · ")}
+                        </p>
+                        <p className="num mt-0.5 text-xs text-pebble">Applied {formatDate(row.dateApplied)}</p>
+                        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                          <StatusPill status={row.status} />
+                          <VerdictPill verdict={row.match?.verdict} />
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </KanbanColumn>
             );
           })}
         </div>
@@ -419,46 +430,80 @@ export default function ReviewQueue() {
       {!error && queue !== null && roster !== null && mode === "list" && (
         <div className="space-y-3">
           {listRows.length === 0 ? (
-            <div className="dlg-card p-8 text-center">
-              <p className="text-sm text-pebble">No applications {listStage === "All" ? "in the queue" : `in the ${listStage} stage`} yet.</p>
+            <div className="dlg-card py-6">
+              <EmptyState
+                icon={Inbox}
+                title="No applications in the queue"
+                description={listStage === "All" ? "Applications appear here once candidates apply." : `No applications in the ${listStage} stage yet.`}
+              />
             </div>
           ) : (
-            listRows.map((row, i) => {
-              const decided = stageForStatus(row.status) === "Shortlisted" || stageForStatus(row.status) === "Rejected";
-              const position = row.job.position?.positionTitle || row.job.title;
-              const place = row.job.position?.placeOfAssignment ?? null;
-              return (
-                <div
-                  key={row.id}
-                  className="dlg-card-plain border border-[#ececec] rounded-[12px] p-4 flex flex-wrap items-center gap-3 sm:flex-nowrap"
-                >
-                  <span className="text-xs text-pebble w-6 shrink-0 tabular-nums">{i + 1}</span>
-                  <Monogram name={fullName(row.applicant)} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm text-ink truncate">{fullName(row.applicant)}</span>
-                      <StatusPill status={row.status} />
-                    </div>
-                    <p className="text-xs text-stone mt-0.5 truncate">
-                      {[humanize(position), place].filter(Boolean).join(" · ")} · Applied {formatDate(row.dateApplied)}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button type="button" className={ghostBtn} onClick={() => setSelectedId(row.id)}>
-                      <Eye className="h-4 w-4" aria-hidden />
-                      {decided ? "View Decision" : "Review"}
-                    </button>
-                    <button
-                      type="button"
-                      className={ghostBtn}
-                      onClick={() => navigate("candidate", { id: String(row.applicantId) })}
-                    >
-                      Profile
-                    </button>
-                  </div>
-                </div>
-              );
-            })
+            <div className="dlg-card overflow-hidden">
+              <div className="overflow-x-auto scroll-thin">
+                <table className="w-full min-w-[760px] border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left">
+                      <th scope="col" className="px-5 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Candidate</th>
+                      <th scope="col" className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Position</th>
+                      <th scope="col" className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Applied</th>
+                      <th scope="col" className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Status</th>
+                      <th scope="col" className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Verdict</th>
+                      <th scope="col" className="px-4 py-3"><span className="sr-only">Open</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {listRows.map((row) => {
+                      const decided = stageForStatus(row.status) === "Shortlisted" || stageForStatus(row.status) === "Rejected";
+                      const position = row.job.position?.positionTitle || row.job.title;
+                      const place = row.job.position?.placeOfAssignment ?? null;
+                      const name = fullName(row.applicant);
+                      return (
+                        <tr key={row.id} className="group/row border-b border-border transition-colors last:border-0 hover:bg-fog/60">
+                          <td className="px-5 py-3">
+                            <div className="flex items-center gap-3">
+                              <Monogram name={name} />
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-ink">{name}</p>
+                                <p className="truncate text-xs text-stone">{row.applicant.emailAddress || "No email on record"}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="max-w-[220px] px-4 py-3">
+                            <p className="truncate text-[13px] text-ink">{humanize(position)}</p>
+                            <p className="truncate text-xs text-stone">{place || "—"}</p>
+                          </td>
+                          <td className="num whitespace-nowrap px-4 py-3 text-[13px] text-stone">{formatDate(row.dateApplied)}</td>
+                          <td className="px-4 py-3"><StatusPill status={row.status} /></td>
+                          <td className="px-4 py-3"><VerdictPill verdict={row.match?.verdict} /></td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100 max-lg:opacity-100">
+                              <button
+                                type="button"
+                                className={iconBtn}
+                                aria-label={decided ? `View decision for ${name}` : `Review application from ${name}`}
+                                title={decided ? "View decision" : "Review"}
+                                onClick={() => setSelectedId(row.id)}
+                              >
+                                <ArrowUpRight className="h-4 w-4" aria-hidden />
+                              </button>
+                              <button
+                                type="button"
+                                className={iconBtn}
+                                aria-label={`Open ${name}'s profile`}
+                                title="Open profile"
+                                onClick={() => navigate("candidate", { id: String(row.applicantId) })}
+                              >
+                                <UserRound className="h-4 w-4" aria-hidden />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -493,7 +538,7 @@ export default function ReviewQueue() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-dusty-rose/10 text-dusty-rose hover:bg-dusty-rose/20"
+              className="border border-[var(--bad)]/30 bg-[var(--bad-bg)] text-[var(--bad)] hover:bg-[var(--bad-bg)]/80"
               onClick={(e) => {
                 e.preventDefault();
                 void sendRegrets();

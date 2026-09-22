@@ -8,12 +8,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Search, Send, ShieldCheck, Users } from "lucide-react";
+import { Mail, Pencil, Search, Send, ShieldCheck, Trash2, Users } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -24,15 +22,17 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { EmptyState, PageHeader, SkeletonRows, StatusPill } from "@/components/ui/shell";
 import { apiFetch, formatDateTime, humanize, timeAgo } from "@/lib/client";
 import { useHashRoute, navigate } from "@/lib/router";
-import { ghostBtn, ctaBtn } from "@/components/views/recruitment";
+import { pillClass } from "@/lib/status-ui";
+import { ghostBtn, ctaBtn, iconBtn, iconBtnBad } from "@/components/views/recruitment";
 
 const TABS = [
   { key: "users", label: "Users & Roles", icon: Users },
   { key: "audit", label: "Audit Log", icon: ShieldCheck },
   { key: "sms", label: "SMS Gateway", icon: Send },
-  { key: "email", label: "Email Notices", icon: Send },
+  { key: "email", label: "Email Notices", icon: Mail },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -54,14 +54,6 @@ type UserRow = {
   createdAt: string;
   applicant?: { id: number; isProfileComplete: boolean } | null;
 };
-
-function RolePill({ role }: { role: string }) {
-  return (
-    <span className="inline-flex items-center rounded-full bg-fog px-2.5 py-1 text-xs font-medium text-graphite">
-      {role}
-    </span>
-  );
-}
 
 function UsersPanel() {
   const [rows, setRows] = useState<UserRow[] | null>(null);
@@ -143,7 +135,9 @@ function UsersPanel() {
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-stone">{total} account{total === 1 ? "" : "s"}</p>
+        <p className="text-sm text-stone">
+          <span className="num">{total}</span> account{total === 1 ? "" : "s"}
+        </p>
         <button type="button" className={ctaBtn} onClick={() => setCreateOpen(true)}>Create User</button>
       </div>
 
@@ -164,37 +158,57 @@ function UsersPanel() {
       </div>
 
       <div className="dlg-card overflow-hidden">
-        <div className="max-h-96 overflow-y-auto scroll-thin">
-          <table className="w-full text-sm">
-            <thead className="bg-fog text-left text-xs text-stone">
+        <div className="max-h-96 overflow-x-auto overflow-y-auto scroll-thin">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead className="sticky top-0 z-10 bg-fog text-left text-xs font-medium uppercase tracking-[0.08em] text-stone">
               <tr>
-                <th className="px-4 py-3 font-medium">User</th>
-                <th className="px-4 py-3 font-medium">Role</th>
-                <th className="px-4 py-3 font-medium">Active</th>
-                <th className="px-4 py-3 font-medium text-right">Actions</th>
+                <th className="px-5 py-3">User</th>
+                <th className="px-4 py-3">Role</th>
+                <th className="px-4 py-3">Active</th>
+                <th className="px-5 py-3 text-right"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
               {rows === null && (
-                <tr><td colSpan={4} className="p-4"><Skeleton className="h-16 w-full bg-fog" /></td></tr>
+                <tr><td colSpan={4} className="p-4"><SkeletonRows rows={4} rowClassName="h-12" /></td></tr>
               )}
               {rows?.length === 0 && (
-                <tr><td colSpan={4} className="p-8 text-center text-sm text-pebble">No accounts match your filters.</td></tr>
+                <tr>
+                  <td colSpan={4} className="p-6">
+                    <EmptyState icon={Users} title="No accounts match your filters." compact />
+                  </td>
+                </tr>
               )}
               {rows?.map((u) => (
-                <tr key={u.id} className="border-t border-border">
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-ink">{[u.firstName, u.lastName].filter(Boolean).join(" ") || u.username}</p>
-                    <p className="text-xs text-pebble">{u.email} · @{u.username}</p>
+                <tr key={u.id} className="group/row border-t border-border transition-colors hover:bg-fog/60">
+                  <td className="px-5 py-3">
+                    <p className="text-sm font-medium text-ink">{[u.firstName, u.lastName].filter(Boolean).join(" ") || u.username}</p>
+                    <p className="num text-xs text-pebble">{u.email} · @{u.username}</p>
                   </td>
-                  <td className="px-4 py-3"><RolePill role={u.role} /></td>
+                  <td className="px-4 py-3"><span className={pillClass("neutral")}>{u.role}</span></td>
                   <td className="px-4 py-3">
                     <Switch checked={!u.blocked} disabled={busyId === u.id} onCheckedChange={() => void toggleActive(u)} aria-label={`Toggle ${u.username}`} />
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex justify-end gap-2">
-                      <button type="button" className="dlg-ghost inline-flex min-h-[36px] items-center rounded-full px-3 text-xs" onClick={() => setEditUser(u)}>Edit</button>
-                      <button type="button" className="inline-flex min-h-[36px] items-center rounded-full border border-dusty-rose/40 bg-dusty-rose/10 px-3 text-xs font-medium text-dusty-rose" onClick={() => setHardTarget(u)}>Delete</button>
+                  <td className="px-5 py-3">
+                    <div className="flex justify-end gap-1.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100 max-lg:opacity-100">
+                      <button
+                        type="button"
+                        className={iconBtn}
+                        aria-label={`Edit ${u.username}`}
+                        title="Edit"
+                        onClick={() => setEditUser(u)}
+                      >
+                        <Pencil className="h-4 w-4" aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        className={iconBtnBad}
+                        aria-label={`Delete ${u.username}`}
+                        title="Delete"
+                        onClick={() => setHardTarget(u)}
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -207,7 +221,7 @@ function UsersPanel() {
       {pages > 1 && (
         <div className="flex items-center justify-center gap-2">
           <button type="button" className={ghostBtn} disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</button>
-          <span className="text-sm text-stone">Page {page} of {pages}</span>
+          <span className="num text-sm text-stone">Page {page} of {pages}</span>
           <button type="button" className={ghostBtn} disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</button>
         </div>
       )}
@@ -242,7 +256,12 @@ function UsersPanel() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="dlg-ghost rounded-full">Cancel</AlertDialogCancel>
-            <AlertDialogAction className="rounded-full bg-dusty-rose text-white hover:bg-dusty-rose/90" onClick={() => void confirmHardDelete()}>Delete forever</AlertDialogAction>
+            <AlertDialogAction
+              className="rounded-full border border-[var(--bad)]/30 bg-white text-[var(--bad)] hover:bg-[var(--bad-bg)]"
+              onClick={() => void confirmHardDelete()}
+            >
+              Delete forever
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -283,12 +302,12 @@ function CreateUserDialog({ open, onOpenChange, onCreated }: { open: boolean; on
           <div>
             <Label className={labelCls()}>Username *</Label>
             <Input className="dlg-input min-h-[44px]" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
-            {usernameError && <p className="mt-1 text-xs text-dusty-rose">{usernameError}</p>}
+            {usernameError && <p className="mt-1 text-xs text-[var(--bad)]">{usernameError}</p>}
           </div>
           <div>
             <Label className={labelCls()}>Password *</Label>
             <Input type="password" className="dlg-input min-h-[44px]" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
-            {passwordError && <p className="mt-1 text-xs text-dusty-rose">{passwordError}</p>}
+            {passwordError && <p className="mt-1 text-xs text-[var(--bad)]">{passwordError}</p>}
           </div>
           <div>
             <Label className={labelCls()}>Role</Label>
@@ -368,7 +387,7 @@ function EditUserDialog({ user, onOpenChange, onSaved }: { user: UserRow; onOpen
           <div>
             <Label className={labelCls()}>Reset password</Label>
             <Input type="password" className="dlg-input min-h-[44px]" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Leave blank to keep current" />
-            {form.password.length > 0 && form.password.length < 6 && <p className="mt-1 text-xs text-dusty-rose">Password must be at least 6 characters</p>}
+            {form.password.length > 0 && form.password.length < 6 && <p className="mt-1 text-xs text-[var(--bad)]">Password must be at least 6 characters</p>}
           </div>
         </div>
         <DialogFooter className="flex-col gap-3 sm:flex-row">
@@ -436,14 +455,15 @@ function AuditPanel() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div className="dlg-card p-4">
-          <p className="text-xs text-pebble">Total events</p>
-          <p className="font-display text-3xl text-ink tabular-nums">{summary?.totalEvents ?? "—"}</p>
-        </div>
-        {(["ADMIN", "EVALUATOR", "APPLICANT"] as const).map((r) => (
-          <div key={r} className="dlg-card p-4">
-            <p className="text-xs text-pebble">{humanize(r)}</p>
-            <p className="font-display text-3xl text-ink tabular-nums">{summary?.byRole?.[r] ?? 0}</p>
+        {(
+          [
+            ["Total events", summary?.totalEvents],
+            ...(["ADMIN", "EVALUATOR", "APPLICANT"] as const).map((r) => [humanize(r), summary?.byRole?.[r] ?? 0] as const),
+          ] as [string, number | undefined][]
+        ).map(([label, value]) => (
+          <div key={label} className="dlg-card p-4">
+            <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-stone">{label}</p>
+            <p className="num mt-2 text-[28px] font-medium leading-none text-ink">{value ?? "—"}</p>
           </div>
         ))}
       </div>
@@ -463,39 +483,31 @@ function AuditPanel() {
       </div>
 
       <div className="dlg-card overflow-hidden">
-        <div className="max-h-96 overflow-y-auto scroll-thin">
-          <table className="w-full text-sm">
-            <thead className="bg-fog text-left text-xs text-stone">
-              <tr>
-                <th className="px-4 py-3 font-medium">Actor</th>
-                <th className="px-4 py-3 font-medium">Action</th>
-                <th className="px-4 py-3 font-medium">Detail</th>
-                <th className="px-4 py-3 font-medium">When</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows === null && <tr><td colSpan={4} className="p-4"><Skeleton className="h-16 w-full bg-fog" /></td></tr>}
-              {rows?.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-sm text-pebble">No audit events match.</td></tr>}
-              {rows?.map((r) => (
-                <tr key={r.id} className="border-t border-border align-top">
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-ink">{r.userLabel ?? "System"}</p>
-                    {r.userRole && <p className="text-xs text-pebble">{r.userRole}</p>}
-                  </td>
-                  <td className="px-4 py-3"><span className="inline-flex rounded-full bg-fog px-2.5 py-1 text-xs font-medium text-graphite">{humanize(r.action)}</span></td>
-                  <td className="px-4 py-3 text-stone">{r.description ?? "—"}</td>
-                  <td className="px-4 py-3 text-xs text-pebble">{timeAgo(r.timestamp)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="max-h-96 overflow-y-auto scroll-thin p-2">
+          {rows === null && <div className="p-2"><SkeletonRows rows={6} rowClassName="h-11" /></div>}
+          {rows?.length === 0 && <EmptyState icon={ShieldCheck} title="No audit events match." compact />}
+          {rows?.map((r) => (
+            <div key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[12px] px-3 py-2.5 transition-colors hover:bg-fog/60">
+              <span className="num w-24 shrink-0 text-xs text-pebble" title={formatDateTime(r.timestamp)}>
+                {timeAgo(r.timestamp)}
+              </span>
+              <span className="w-44 shrink-0 truncate">
+                <span className="text-[13px] font-medium text-ink">{r.userLabel ?? "System"}</span>
+                {r.userRole ? <span className="num ml-1.5 text-[11px] text-pebble">{r.userRole}</span> : null}
+              </span>
+              <span className={`${pillClass("neutral")} shrink-0 uppercase tracking-[0.04em]`} style={{ fontSize: "10px" }}>
+                {humanize(r.action)}
+              </span>
+              <span className="min-w-[200px] flex-1 truncate text-[13px] text-stone">{r.description ?? "—"}</span>
+            </div>
+          ))}
         </div>
       </div>
 
       {pages > 1 && (
         <div className="flex items-center justify-center gap-2">
           <button type="button" className={ghostBtn} disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</button>
-          <span className="text-sm text-stone">Page {page} of {pages}</span>
+          <span className="num text-sm text-stone">Page {page} of {pages}</span>
           <button type="button" className={ghostBtn} disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</button>
         </div>
       )}
@@ -524,13 +536,14 @@ type MsgPanelData = {
   logs: MsgLog[];
 };
 
+/** Delivery status → functional status tone pill. */
 function StatusChip({ status }: { status: string }) {
-  const cls =
-    status === "sent" ? "bg-ink text-white"
-    : status === "failed" ? "bg-dusty-rose/15 text-dusty-rose"
-    : status === "skipped" ? "bg-fog text-pebble"
-    : "bg-fog text-stone";
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${cls}`}>{status}</span>;
+  const variant =
+    status === "sent" ? "ok"
+    : status === "failed" ? "bad"
+    : status === "mock" ? "warn"
+    : "neutral";
+  return <StatusPill status={status} variant={variant} />;
 }
 
 function MessagingPanel({ kind }: { kind: "sms" | "email" }) {
@@ -582,18 +595,20 @@ function MessagingPanel({ kind }: { kind: "sms" | "email" }) {
       <div className="dlg-card p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-xs text-pebble">Active provider</p>
-            <p className="font-display text-xl text-ink">{humanize(data?.provider ?? "…")}</p>
+            <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Active provider</p>
+            <p className="num mt-1 text-xl font-medium text-ink">{humanize(data?.provider ?? "…")}</p>
           </div>
-          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${data?.provider === "mock" ? "bg-fog text-stone" : "bg-ink text-white"}`}>
-            {data?.provider === "mock" ? "Mock mode — messages are logged only" : data?.configured ? "Configured" : "Not configured"}
-          </span>
+          {data?.provider === "mock" ? (
+            <StatusPill status="Mock mode — messages are logged only" variant="neutral" />
+          ) : (
+            <StatusPill status={data?.configured ? "Configured" : "Not configured"} variant={data?.configured ? "ok" : "warn"} />
+          )}
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {tiles.map(([label, value]) => (
             <div key={label} className="rounded-[12px] bg-fog p-3">
-              <p className="text-xs text-pebble">{label}</p>
-              <p className="font-display text-2xl text-ink tabular-nums">{value ?? "—"}</p>
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-stone">{label}</p>
+              <p className="num mt-1 text-xl font-medium text-ink">{value ?? "—"}</p>
             </div>
           ))}
         </div>
@@ -623,25 +638,36 @@ function MessagingPanel({ kind }: { kind: "sms" | "email" }) {
       </div>
 
       <div className="dlg-card overflow-hidden">
-        <div className="max-h-96 overflow-y-auto scroll-thin">
-          <table className="w-full text-sm">
-            <thead className="bg-fog text-left text-xs text-stone">
+        <div className="max-h-96 overflow-x-auto overflow-y-auto scroll-thin">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead className="sticky top-0 z-10 bg-fog text-left text-xs font-medium uppercase tracking-[0.08em] text-stone">
               <tr>
-                <th className="px-4 py-3 font-medium">To</th>
-                <th className="px-4 py-3 font-medium">{kind === "sms" ? "Message" : "Subject"}</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">When</th>
+                <th className="px-5 py-3">To</th>
+                <th className="px-4 py-3">{kind === "sms" ? "Message" : "Subject"}</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-5 py-3 text-right">When</th>
               </tr>
             </thead>
             <tbody>
-              {data === null && <tr><td colSpan={4} className="p-4"><Skeleton className="h-16 w-full bg-fog" /></td></tr>}
-              {data?.logs.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-sm text-pebble">Nothing sent yet.</td></tr>}
+              {data === null && <tr><td colSpan={4} className="p-4"><SkeletonRows rows={4} rowClassName="h-12" /></td></tr>}
+              {data?.logs.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="p-6">
+                    <EmptyState icon={Send} title="Nothing sent yet." compact />
+                  </td>
+                </tr>
+              )}
               {data?.logs.map((l) => (
-                <tr key={l.id} className="border-t border-border align-top">
-                  <td className="px-4 py-3 font-medium text-ink">{l.to}</td>
+                <tr key={l.id} className="border-t border-border align-top transition-colors hover:bg-fog/60">
+                  <td className="px-5 py-3 font-medium text-ink">{l.to}</td>
                   <td className="max-w-[280px] truncate px-4 py-3 text-stone">{l.subject ?? l.message ?? "—"}</td>
-                  <td className="px-4 py-3"><StatusChip status={l.status} />{l.error && <p className="mt-1 text-xs text-pebble">{l.error}</p>}</td>
-                  <td className="px-4 py-3 text-xs text-pebble">{timeAgo(l.createdAt)}</td>
+                  <td className="px-4 py-3">
+                    <StatusChip status={l.status} />
+                    {l.error && <p className="mt-1 text-xs text-pebble">{l.error}</p>}
+                  </td>
+                  <td className="num px-5 py-3 text-right text-xs text-pebble" title={formatDateTime(l.createdAt)}>
+                    {timeAgo(l.createdAt)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -661,32 +687,39 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="font-display text-heading-md text-carbon">Settings</h1>
-        <p className="mt-1 text-sm text-stone">Manage accounts, review the audit trail, and configure notification channels.</p>
-      </header>
+      <PageHeader
+        title="Settings"
+        description="Manage accounts, review the audit trail, and configure notification channels."
+      />
 
-      <div className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => navigate("settings", { tab: t.key })}
-            className={`inline-flex min-h-[44px] items-center gap-2 whitespace-nowrap rounded-full px-4 text-sm transition-colors lg:w-full lg:justify-start ${
-              tab === t.key ? "bg-ink text-white" : "text-stone hover:bg-white"
-            }`}
-            aria-current={tab === t.key ? "page" : undefined}
-          >
-            <t.icon className="h-4 w-4" aria-hidden />
-            {t.label}
-          </button>
-        ))}
+      <div className="grid gap-6 lg:grid-cols-[240px_1fr] lg:items-start">
+        {/* Left vertical tab rail (white card); horizontal scroll pills on mobile */}
+        <nav className="dlg-card p-2 lg:sticky lg:top-6" aria-label="Settings sections">
+          <div className="flex gap-1 overflow-x-auto scroll-thin lg:flex-col lg:overflow-visible">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => navigate("settings", { tab: t.key })}
+                aria-current={tab === t.key ? "page" : undefined}
+                className={`focus-ring inline-flex h-11 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-full px-4 text-sm transition-colors ${
+                  tab === t.key ? "bg-ink text-white" : "text-stone hover:bg-fog hover:text-ink"
+                }`}
+              >
+                <t.icon className="h-4 w-4 shrink-0" aria-hidden />
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </nav>
+
+        <div className="min-w-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          {tab === "users" && <UsersPanel />}
+          {tab === "audit" && <AuditPanel />}
+          {tab === "sms" && <MessagingPanel kind="sms" />}
+          {tab === "email" && <MessagingPanel kind="email" />}
+        </div>
       </div>
-
-      {tab === "users" && <UsersPanel />}
-      {tab === "audit" && <AuditPanel />}
-      {tab === "sms" && <MessagingPanel kind="sms" />}
-      {tab === "email" && <MessagingPanel kind="email" />}
     </div>
   );
 }

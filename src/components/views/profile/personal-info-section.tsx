@@ -12,9 +12,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Check, Loader2 } from "lucide-react";
+import { Loader2, UserRound } from "lucide-react";
 import { apiFetch } from "@/lib/client";
 import { CIVIL_STATUS_OPTIONS } from "@/lib/constants";
+import { SectionCard } from "@/components/ui/shell";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -195,7 +196,7 @@ function GroupHeading({ n, title, done, total }: { n: string; title: string; don
         {title}
       </h3>
       <span className="rounded-full bg-fog px-3 py-1 text-xs font-medium text-graphite">
-        {done} of {total} completed
+        <span className="num">{done}</span> of <span className="num">{total}</span> completed
       </span>
     </div>
   );
@@ -218,12 +219,12 @@ function RefRow({
   return (
     <div className="dlg-card-plain rounded-[12px] border border-border p-4">
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-xs font-medium text-graphite">Reference {index + 1}</p>
+        <p className="text-xs font-medium text-graphite">Reference <span className="num">{index + 1}</span></p>
         <button
           type="button"
           onClick={onRemove}
           disabled={!canRemove}
-          className="min-h-[44px] px-3 text-xs text-stone underline-offset-4 hover:text-dusty-rose hover:underline disabled:opacity-40"
+          className="focus-ring min-h-[44px] px-3 text-xs text-stone underline-offset-4 hover:text-[var(--bad)] hover:underline disabled:opacity-40"
         >
           Remove
         </button>
@@ -356,26 +357,23 @@ export default function PersonalInfoSection({
 
   const saveIndicator =
     saveState === "saving" ? (
-      <span className="inline-flex items-center gap-1.5 text-xs text-stone">
+      <span className="inline-flex items-center gap-1.5 text-xs leading-none text-stone">
         <Loader2 className="h-3 w-3 animate-spin" /> Saving…
       </span>
     ) : saveState === "saved" ? (
-      <span className="inline-flex items-center gap-1.5 text-xs text-graphite">
-        <Check className="h-3 w-3" /> Changes saved
-      </span>
+      <span className="text-xs leading-none text-[var(--ok)]">Saved ✓</span>
     ) : saveState === "error" ? (
-      <span className="text-xs text-dusty-rose">Save failed — click Save Changes</span>
+      <span className="text-xs leading-none text-[var(--bad)]">Save failed — click Save Changes</span>
     ) : saveState === "dirty" ? (
-      <span className="text-xs text-pebble">Unsaved changes</span>
+      <span className="text-xs leading-none text-pebble">Unsaved changes</span>
     ) : null;
 
   return (
-    <div className="dlg-card p-6">
-      <div className="mb-6 flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="font-display text-2xl text-ink">01 · Personal Information</h2>
-          <p className="mt-0.5 text-sm text-stone">Changes save automatically as you type.</p>
-        </div>
+    <SectionCard
+      icon={UserRound}
+      title="Personal Information"
+      description="Changes save automatically as you type."
+      actions={
         <div className="flex items-center gap-3">
           {saveIndicator}
           <button
@@ -387,7 +385,8 @@ export default function PersonalInfoSection({
             Save Changes
           </button>
         </div>
-      </div>
+      }
+    >
 
       {/* Group 1 — Identity */}
       <section className="space-y-4">
@@ -520,6 +519,6 @@ export default function PersonalInfoSection({
           + Add Character Reference
         </button>
       </section>
-    </div>
+    </SectionCard>
   );
 }

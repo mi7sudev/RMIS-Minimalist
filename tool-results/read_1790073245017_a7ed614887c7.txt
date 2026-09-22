@@ -1,0 +1,1145 @@
+     1→"use client";
+     2→
+     3→// ============================================================================
+     4→// RMIS — Evaluator review workspace (spec §7.9, §9.3).
+     5→// Default export = smart wrapper: with an `applicationId` prop it renders the
+     6→// workspace body (used inside the review-queue modal); without one it reads
+     7→// the deep-link `#/evaluator-review?id=<applicationId>` from useHashRoute and
+     8→// renders page-style with a close action back to the review queue.
+     9→// LEFT = frozen-snapshot dossier, RIGHT = decision rail (requirements match,
+    10→// credentials, state banner, decisions, notices, direct email).
+    11→// ============================================================================
+    12→
+    13→import { useCallback, useEffect, useRef, useState } from "react";
+    14→import { toast } from "sonner";
+    15→import {
+    16→  AlertTriangle, Check, FileText, HelpCircle, Mail, Paperclip, Send, X,
+    17→} from "lucide-react";
+    18→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    19→import {
+    20→  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    21→} from "@/components/ui/dialog";
+    22→import {
+    23→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    24→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    25→} from "@/components/ui/alert-dialog";
+    26→import { Input } from "@/components/ui/input";
+    27→import { Label } from "@/components/ui/label";
+    28→import { Skeleton } from "@/components/ui/skeleton";
+    29→import { Textarea } from "@/components/ui/textarea";
+    30→import { apiFetch, formatDate, formatDateTime, fullName, timeAgo } from "@/lib/client";
+    31→import { getStatusMeta, stageForStatus, type Tone } from "@/lib/status";
+    32→import { navigate, useHashRoute } from "@/lib/router";
+    33→import type { RequirementsReport } from "@/lib/requirements";
+    34→
+    35→// ── Wire shapes (GET /api/evaluator/applications/[id]) ──────────────────────
+    36→
+    37→type SnapRow = Record<string, unknown>;
+    38→
+    39→type ReviewPayload = {
+    40→  id: number;
+    41→  status: string;
+    42→  reason: string | null;
+    43→  dateApplied: string;
+    44→  applicantId: number;
+    45→  jobId: number;
+    46→  job: {
+    47→    id: number;
+    48→    title: string;
+    49→    positionType: string | null;
+    50→    position: {
+    51→      positionTitle: string;
+    52→      placeOfAssignment: string | null;
+    53→      itemNumber: string | null;
+    54→    } | null;
+    55→  };
+    56→  applicant: {
+    57→    id: number;
+    58→    firstName: string | null;
+    59→    lastName: string | null;
+    60→    emailAddress: string | null;
+    61→    contactNumber: string | null;
+    62→    gender: string | null;
+    63→    isProfileComplete: boolean;
+    64→  };
+    65→  snapshots: {
+    66→    profile: SnapRow | null;
+    67→    educations: SnapRow[];
+    68→    experiences: SnapRow[];
+    69→    trainings: SnapRow[];
+    70→    eligibilities: SnapRow[];
+    71→    awards: SnapRow[];
+    72→    documents: unknown[];
+    73→  };
+    74→  requirements: RequirementsReport;
+    75→};
+    76→
+    77→type NoticeRow = {
+    78→  id: number;
+    79→  type: "regret" | "interview" | "skills_exam";
+    80→  subject: string;
+    81→  status: string;
+    82→  to: string;
+    83→  sentAt: string;
+    84→};
+    85→
+    86→type DirectEmailRow = {
+    87→  id: number;
+    88→  to: string;
+    89→  subject: string;
+    90→  status: string;
+    91→  provider: string;
+    92→  error: string | null;
+    93→  attachments: string | null;
+    94→  createdAt: string;
+    95→};
+    96→
+    97→type NoticeSendResult = {
+    98→  type: string;
+    99→  email: { status: string; to?: string; error?: string | null };
+   100→  sms: { status: string; to?: string; error?: string | null };
+   101→};
+   102→
+   103→// ── Small shared visuals ────────────────────────────────────────────────────
+   104→
+   105→export function toneClass(tone: Tone): string {
+   106→  if (tone === "success") return "bg-ink text-white";
+   107→  if (tone === "danger") return "bg-dusty-rose/15 text-dusty-rose";
+   108→  if (tone === "primary" || tone === "info") return "bg-fog text-ink";
+   109→  return "bg-fog text-stone";
+   110→}
+   111→
+   112→export function StatusPill({ status, className = "" }: { status: string | null | undefined; className?: string }) {
+   113→  const meta = getStatusMeta(status);
+   114→  return (
+   115→    <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium ${toneClass(meta.tone)} ${className}`}>
+   116→      {meta.label}
+   117→    </span>
+   118→  );
+   119→}
+   120→
+   121→const ghostBtn =
+   122→  "dlg-ghost inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+   123→const ctaBtn =
+   124→  "dlg-cta inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-5 text-sm transition-all disabled:cursor-not-allowed disabled:opacity-50";
+   125→
+   126→function str(v: unknown): string {
+   127→  if (v === null || v === undefined) return "";
+   128→  if (typeof v === "boolean") return v ? "Yes" : "No";
+   129→  const s = String(v).trim();
+   130→  return s;
+   131→}
+   132→
+   133→function LedgerRow({ label, value }: { label: string; value: string }) {
+   134→  return (
+   135→    <div className="flex items-start justify-between gap-4 py-2 border-b border-[#ececec] last:border-0">
+   136→      <span className="text-xs text-pebble shrink-0 pt-0.5">{label}</span>
+   137→      <span className="text-sm text-ink text-right break-words">{value || "—"}</span>
+   138→    </div>
+   139→  );
+   140→}
+   141→
+   142→function EmptyNote({ children }: { children: React.ReactNode }) {
+   143→  return <p className="text-sm text-pebble py-6 text-center">{children}</p>;
+   144→}
+   145→
+   146→function snapshotDisplayDate(v: unknown): string {
+   147→  const s = str(v);
+   148→  if (!s) return "";
+   149→  const d = new Date(s);
+   150→  return Number.isNaN(d.getTime()) ? s : formatDate(d);
+   151→}
+   152→
+   153→// ── Verdict chip (requirements report) ──────────────────────────────────────
+   154→
+   155→function verdictMeta(verdict: string): { chip: string; cls: string; meaning: string } {
+   156→  switch (verdict) {
+   157→    case "ALL_MET":
+   158→      return { chip: "Qualified", cls: "bg-ink text-white", meaning: "Meets the minimum requirements" };
+   159→    case "PARTIAL":
+   160→      return { chip: "Partial", cls: "bg-fog text-ink", meaning: "Partially meets the minimum requirements" };
+   161→    case "NONE_MET":
+   162→      return { chip: "Not qualified", cls: "bg-dusty-rose/15 text-dusty-rose", meaning: "Does not meet the minimum requirements" };
+   163→    case "NEEDS_REVIEW":
+   164→      return { chip: "Verify", cls: "bg-fog text-ink", meaning: "Needs manual verification" };
+   165→    case "NO_REQUIREMENTS":
+   166→      return { chip: "No reqs", cls: "bg-fog text-stone", meaning: "No published requirements" };
+   167→    default:
+   168→      return { chip: verdict, cls: "bg-fog text-stone", meaning: "" };
+   169→  }
+   170→}
+   171→
+   172→// ── Snapshot tab renderers ──────────────────────────────────────────────────
+   173→
+   174→function EducationCards({ rows }: { rows: SnapRow[] }) {
+   175→  if (!rows.length) return <EmptyNote>No education entries on file.</EmptyNote>;
+   176→  return (
+   177→    <div className="space-y-3">
+   178→      {rows.map((r, i) => (
+   179→        <div key={i} className="bg-fog rounded-[12px] p-4">
+   180→          <div className="flex items-start justify-between gap-3">
+   181→            <p className="text-sm text-ink">{str(r.degree) || str(r.course) || str(r.specifyOthers) || "—"}</p>
+   182→            {r.ongoing === true && (
+   183→              <span className="rounded-full bg-fog text-stone text-xs px-2 py-0.5 shrink-0">Ongoing</span>
+   184→            )}
+   185→          </div>
+   186→          <p className="text-xs text-stone mt-1">
+   187→            {[str(r.educationLevel), str(r.schoolName)].filter(Boolean).join(" · ") || "—"}
+   188→          </p>
+   189→          <p className="text-xs text-pebble mt-0.5">
+   190→            {[str(r.yearFrom) && `${str(r.yearFrom)}–${str(r.yearTo) || (r.ongoing ? "Present" : "")}`, str(r.yearGraduated) && `Graduated ${str(r.yearGraduated)}`, str(r.unitsEarned) && `${str(r.unitsEarned)} units`]
+   191→              .filter(Boolean)
+   192→              .join(" · ") || "—"}
+   193→          </p>
+   194→          {str(r.awards) && <p className="text-xs text-stone mt-1">Honors: {str(r.awards)}</p>}
+   195→        </div>
+   196→      ))}
+   197→    </div>
+   198→  );
+   199→}
+   200→
+   201→function ExperienceCards({ rows }: { rows: SnapRow[] }) {
+   202→  if (!rows.length) return <EmptyNote>No work experience entries on file.</EmptyNote>;
+   203→  return (
+   204→    <div className="space-y-3">
+   205→      {rows.map((r, i) => (
+   206→        <div key={i} className="bg-fog rounded-[12px] p-4">
+   207→          <div className="flex items-start justify-between gap-3">
+   208→            <p className="text-sm text-ink">{str(r.positionTitle) || "—"}</p>
+   209→            {r.isPresentWork === true && (
+   210→              <span className="rounded-full bg-ink text-white text-xs px-2 py-0.5 shrink-0">Present</span>
+   211→            )}
+   212→          </div>
+   213→          <p className="text-xs text-stone mt-1">{str(r.employerName) || "—"}</p>
+   214→          <p className="text-xs text-pebble mt-0.5">
+   215→            {[
+   216→              (str(r.dateFrom) || str(r.dateTo)) &&
+   217→                `${snapshotDisplayDate(r.dateFrom) || "—"} – ${r.isPresentWork ? "Present" : snapshotDisplayDate(r.dateTo) || "—"}`,
+   218→              str(r.statusOfEmployment),
+   219→            ]
+   220→              .filter(Boolean)
+   221→              .join(" · ") || "—"}
+   222→          </p>
+   223→        </div>
+   224→      ))}
+   225→    </div>
+   226→  );
+   227→}
+   228→
+   229→function TrainingCards({ rows }: { rows: SnapRow[] }) {
+   230→  if (!rows.length) return <EmptyNote>No training entries on file.</EmptyNote>;
+   231→  return (
+   232→    <div className="space-y-3">
+   233→      {rows.map((r, i) => (
+   234→        <div key={i} className="bg-fog rounded-[12px] p-4">
+   235→          <p className="text-sm text-ink">{str(r.title) || "—"}</p>
+   236→          <p className="text-xs text-stone mt-1">
+   237→            {[str(r.typeOfTraining), str(r.numberHours) && `${str(r.numberHours)} hrs`, str(r.hourDecimal) && `${str(r.hourDecimal)} hrs`]
+   238→              .filter(Boolean)
+   239→              .join(" · ") || "—"}
+   240→          </p>
+   241→          <p className="text-xs text-pebble mt-0.5">
+   242→            {snapshotDisplayDate(r.dateFrom) || snapshotDisplayDate(r.dateTo)
+   243→              ? `${snapshotDisplayDate(r.dateFrom) || "—"} – ${snapshotDisplayDate(r.dateTo) || "—"}`
+   244→              : "—"}
+   245→          </p>
+   246→        </div>
+   247→      ))}
+   248→    </div>
+   249→  );
+   250→}
+   251→
+   252→function EligibilityCards({ rows }: { rows: SnapRow[] }) {
+   253→  if (!rows.length) return <EmptyNote>No eligibility records on file.</EmptyNote>;
+   254→  return (
+   255→    <div className="space-y-3">
+   256→      {rows.map((r, i) => (
+   257→        <div key={i} className="bg-fog rounded-[12px] p-4">
+   258→          <p className="text-sm text-ink">{str(r.title) || str(r.eligibilityTitle) || "—"}</p>
+   259→          <p className="text-xs text-stone mt-1">
+   260→            {[str(r.rating) && `Rating: ${str(r.rating)}`, snapshotDisplayDate(r.examDate), str(r.examPlace), str(r.licenseNumber) && `License ${str(r.licenseNumber)}`]
+   261→              .filter(Boolean)
+   262→              .join(" · ") || "—"}
+   263→          </p>
+   264→        </div>
+   265→      ))}
+   266→    </div>
+   267→  );
+   268→}
+   269→
+   270→function AwardCards({ rows }: { rows: SnapRow[] }) {
+   271→  if (!rows.length) return <EmptyNote>No awards or accomplishments on file.</EmptyNote>;
+   272→  return (
+   273→    <div className="space-y-3">
+   274→      {rows.map((r, i) => (
+   275→        <div key={i} className="bg-fog rounded-[12px] p-4">
+   276→          <p className="text-sm text-ink">{str(r.details) || "—"}</p>
+   277→          <p className="text-xs text-stone mt-1">
+   278→            {[str(r.recognitionType), str(r.scope), str(r.provider), snapshotDisplayDate(r.dateGranted)]
+   279→              .filter(Boolean)
+   280→              .join(" · ") || "—"}
+   281→          </p>
+   282→        </div>
+   283→      ))}
+   284→    </div>
+   285→  );
+   286→}
+   287→
+   288→// ── Decision rail pieces ────────────────────────────────────────────────────
+   289→
+   290→function RequirementsMatchPanel({ report }: { report: RequirementsReport }) {
+   291→  const vm = verdictMeta(report.verdict);
+   292→  return (
+   293→    <div className="dlg-card p-4">
+   294→      <div className="flex items-center justify-between gap-3">
+   295→        <h3 className="font-display text-lg text-ink">Requirements match</h3>
+   296→        <span className={`rounded-full px-2.5 py-1 text-xs font-medium shrink-0 ${vm.cls}`}>{vm.chip}</span>
+   297→      </div>
+   298→      <p className="text-xs text-stone mt-1">{vm.meaning}</p>
+   299→      <p className="text-sm text-ink mt-2">
+   300→        {report.metCount} of {report.requiredCount} standards met
+   301→      </p>
+   302→      {report.checks.length > 0 && (
+   303→        <div className="mt-3 space-y-3 max-h-96 overflow-y-auto scroll-thin pr-1">
+   304→          {report.checks.map((c, i) => (
+   305→            <div key={i} className="bg-fog rounded-[12px] p-3">
+   306→              <p className="text-sm text-ink line-clamp-2">{c.standard || "—"}</p>
+   307→              <div className="flex items-center gap-1.5 mt-1.5">
+   308→                {c.status === "MET" && (
+   309→                  <>
+   310→                    <Check className="h-3.5 w-3.5 text-ink" aria-hidden />
+   311→                    <span className="text-xs font-medium text-ink">Met</span>
+   312→                  </>
+   313→                )}
+   314→                {c.status === "NOT_MET" && (
+   315→                  <>
+   316→                    <X className="h-3.5 w-3.5 text-dusty-rose" aria-hidden />
+   317→                    <span className="text-xs font-medium text-dusty-rose">Not met</span>
+   318→                  </>
+   319→                )}
+   320→                {c.status === "REVIEW" && (
+   321→                  <>
+   322→                    <HelpCircle className="h-3.5 w-3.5 text-stone" aria-hidden />
+   323→                    <span className="text-xs font-medium text-stone">Verify manually</span>
+   324→                  </>
+   325→                )}
+   326→                {c.status === "NOT_REQUIRED" && <span className="text-xs font-medium text-pebble">Not required</span>}
+   327→                <span className="text-[10px] uppercase tracking-wide text-pebble ml-auto">{c.dimension}</span>
+   328→              </div>
+   329→              {c.shortfall && <p className="text-xs text-dusty-rose mt-1">{c.shortfall}</p>}
+   330→              <p className="text-xs text-stone mt-1.5 line-clamp-2">{c.applicantSummary || "No applicant data on file."}</p>
+   331→            </div>
+   332→          ))}
+   333→        </div>
+   334→      )}
+   335→    </div>
+   336→  );
+   337→}
+   338→
+   339→function CredentialsRow({ payload }: { payload: ReviewPayload }) {
+   340→  const p = payload.snapshots.profile;
+   341→  const personalCount = p ? Object.values(p).filter((v) => v !== null && v !== "" && v !== undefined).length : 0;
+   342→  const items: [string, number][] = [
+   343→    ["Personal", personalCount],
+   344→    ["Education", payload.snapshots.educations.length],
+   345→    ["Work", payload.snapshots.experiences.length],
+   346→    ["Training", payload.snapshots.trainings.length],
+   347→    ["Eligibility", payload.snapshots.eligibilities.length],
+   348→    ["Awards", payload.snapshots.awards.length],
+   349→  ];
+   350→  return (
+   351→    <div className="dlg-card p-4">
+   352→      <h3 className="font-display text-lg text-ink">Credentials on file</h3>
+   353→      <div className="flex flex-wrap gap-2 mt-2">
+   354→        {items.map(([label, n]) => (
+   355→          <span key={label} className="rounded-full bg-fog text-ink text-xs px-2.5 py-1">
+   356→            {label}: {n}
+   357→          </span>
+   358→        ))}
+   359→      </div>
+   360→    </div>
+   361→  );
+   362→}
+   363→
+   364→function stateBanner(stage: string): { text: string; cls: string } {
+   365→  if (stage === "Shortlisted") return { text: "Applicant has been notified.", cls: "text-ink" };
+   366→  if (stage === "Rejected") return { text: "Applicant was not shortlisted.", cls: "text-dusty-rose" };
+   367→  if (stage === "Under Review") return { text: "Review in progress.", cls: "text-ink" };
+   368→  return { text: "Awaiting review.", cls: "text-stone" };
+   369→}
+   370→
+   371→// ── Notice form dialog (interview / skills exam) ────────────────────────────
+   372→
+   373→function NoticeFormDialog({
+   374→  applicationId,
+   375→  kind,
+   376→  onClose,
+   377→  onSent,
+   378→}: {
+   379→  applicationId: number;
+   380→  kind: "interview" | "skills_exam";
+   381→  onClose: () => void;
+   382→  onSent: () => void;
+   383→}) {
+   384→  const [examType, setExamType] = useState("");
+   385→  const [date, setDate] = useState("");
+   386→  const [time, setTime] = useState("");
+   387→  const [venue, setVenue] = useState("");
+   388→  const [contact, setContact] = useState("");
+   389→  const [notes, setNotes] = useState("");
+   390→  const [busy, setBusy] = useState(false);
+   391→
+   392→  const ready = date.trim() !== "" && time.trim() !== "" && venue.trim() !== "";
+   393→
+   394→  const submit = async () => {
+   395→    setBusy(true);
+   396→    try {
+   397→      const res = await apiFetch<NoticeSendResult>(`/api/evaluator/applications/${applicationId}/notice`, {
+   398→        method: "POST",
+   399→        body: {
+   400→          type: kind,
+   401→          date: date || undefined,
+   402→          time: time || undefined,
+   403→          venue: venue || undefined,
+   404→          contact: contact || undefined,
+   405→          notes: notes || undefined,
+   406→          examType: kind === "skills_exam" ? examType || undefined : undefined,
+   407→        },
+   408→      });
+   409→      const label = kind === "interview" ? "Interview invitation" : "Skills-exam notice";
+   410→      toast.success(`${label} sent`, {
+   411→        description: `Email: ${res.email?.status ?? "unknown"} · SMS: ${res.sms?.status ?? "unknown"}`,
+   412→      });
+   413→      onSent();
+   414→      onClose();
+   415→    } catch (e) {
+   416→      toast.error(e instanceof Error ? e.message : "Failed to send the notice");
+   417→    } finally {
+   418→      setBusy(false);
+   419→    }
+   420→  };
+   421→
+   422→  return (
+   423→    <Dialog open onOpenChange={(v) => !v && onClose()}>
+   424→      <DialogContent className="sm:max-w-md">
+   425→        <DialogHeader>
+   426→          <DialogTitle className="font-display text-xl">
+   427→            {kind === "interview" ? "Send interview invitation" : "Send skills-exam notice"}
+   428→          </DialogTitle>
+   429→          <DialogDescription>
+   430→            The notice fans out as an email plus a companion SMS to the applicant.
+   431→          </DialogDescription>
+   432→        </DialogHeader>
+   433→        <div className="space-y-4">
+   434→          {kind === "skills_exam" && (
+   435→            <div className="space-y-1.5">
+   436→              <Label htmlFor="notice-exam-type" className="text-xs text-stone">
+   437→                Exam type
+   438→              </Label>
+   439→              <Input
+   440→                id="notice-exam-type"
+   441→                className="dlg-input"
+   442→                value={examType}
+   443→                onChange={(e) => setExamType(e.target.value)}
+   444→                placeholder="e.g. Encoding / trade test"
+   445→              />
+   446→            </div>
+   447→          )}
+   448→          <div className="grid grid-cols-2 gap-3">
+   449→            <div className="space-y-1.5">
+   450→              <Label htmlFor="notice-date" className="text-xs text-stone">
+   451→                Date *
+   452→              </Label>
+   453→              <Input id="notice-date" type="date" className="dlg-input" value={date} onChange={(e) => setDate(e.target.value)} />
+   454→            </div>
+   455→            <div className="space-y-1.5">
+   456→              <Label htmlFor="notice-time" className="text-xs text-stone">
+   457→                Time *
+   458→              </Label>
+   459→              <Input id="notice-time" type="time" className="dlg-input" value={time} onChange={(e) => setTime(e.target.value)} />
+   460→            </div>
+   461→          </div>
+   462→          <div className="space-y-1.5">
+   463→            <Label htmlFor="notice-venue" className="text-xs text-stone">
+   464→              Venue *
+   465→            </Label>
+   466→            <Input
+   467→              id="notice-venue"
+   468→              className="dlg-input"
+   469→              value={venue}
+   470→              onChange={(e) => setVenue(e.target.value)}
+   471→              placeholder="Building / room"
+   472→            />
+   473→          </div>
+   474→          <div className="space-y-1.5">
+   475→            <Label htmlFor="notice-contact" className="text-xs text-stone">
+   476→              HR contact
+   477→            </Label>
+   478→            <Input
+   479→              id="notice-contact"
+   480→              className="dlg-input"
+   481→              value={contact}
+   482→              onChange={(e) => setContact(e.target.value)}
+   483→              placeholder="Name / number for questions"
+   484→            />
+   485→          </div>
+   486→          <div className="space-y-1.5">
+   487→            <Label htmlFor="notice-notes" className="text-xs text-stone">
+   488→              Notes
+   489→            </Label>
+   490→            <Textarea id="notice-notes" className="dlg-input min-h-[80px]" value={notes} onChange={(e) => setNotes(e.target.value)} />
+   491→          </div>
+   492→        </div>
+   493→        <DialogFooter>
+   494→          <button type="button" className={ghostBtn} onClick={onClose}>
+   495→            Cancel
+   496→          </button>
+   497→          <button type="button" className={ctaBtn} disabled={!ready || busy} onClick={() => void submit()}>
+   498→            <Send className="h-4 w-4" aria-hidden />
+   499→            {busy ? "Sending…" : "Send notice"}
+   500→          </button>
+   501→        </DialogFooter>
+   502→      </DialogContent>
+   503→    </Dialog>
+   504→  );
+   505→}
+   506→
+   507→// ── Direct email card ───────────────────────────────────────────────────────
+   508→
+   509→function parseAttachments(json: string | null): { name: string; bytes: number }[] {
+   510→  if (!json) return [];
+   511→  try {
+   512→    const parsed: unknown = JSON.parse(json);
+   513→    return Array.isArray(parsed) ? (parsed as { name: string; bytes: number }[]) : [];
+   514→  } catch {
+   515→    return [];
+   516→  }
+   517→}
+   518→
+   519→function DirectEmailCard({
+   520→  applicationId,
+   521→  emails,
+   522→  onSent,
+   523→}: {
+   524→  applicationId: number;
+   525→  emails: DirectEmailRow[] | null;
+   526→  onSent: () => void;
+   527→}) {
+   528→  const [subject, setSubject] = useState("");
+   529→  const [message, setMessage] = useState("");
+   530→  const [files, setFiles] = useState<File[]>([]);
+   531→  const [busy, setBusy] = useState(false);
+   532→  const fileRef = useRef<HTMLInputElement>(null);
+   533→
+   534→  const pickFiles = (list: FileList | null) => {
+   535→    if (!list) return;
+   536→    const next = Array.from(list);
+   537→    if (next.length + files.length > 3) {
+   538→      toast.error("A maximum of 3 attachments is allowed");
+   539→      return;
+   540→    }
+   541→    if (next.some((f) => f.size > 5 * 1024 * 1024)) {
+   542→      toast.error("Each attachment must be 5 MB or smaller");
+   543→      return;
+   544→    }
+   545→    setFiles((prev) => [...prev, ...next].slice(0, 3));
+   546→    if (fileRef.current) fileRef.current.value = "";
+   547→  };
+   548→
+   549→  const send = async () => {
+   550→    if (!message.trim()) return;
+   551→    setBusy(true);
+   552→    try {
+   553→      const fd = new FormData();
+   554→      fd.set("subject", subject.trim());
+   555→      fd.set("message", message.trim());
+   556→      for (const f of files) fd.append("attachments", f);
+   557→      const res = await apiFetch<{ email: { status: string; error?: string | null }; attachments: number }>(
+   558→        `/api/evaluator/applications/${applicationId}/email`,
+   559→        { method: "POST", formData: fd }
+   560→      );
+   561→      if (res.email?.status === "failed") {
+   562→        toast.error("Email delivery failed", { description: res.email.error ?? undefined });
+   563→      } else {
+   564→        toast.success(`Direct email ${res.email?.status}`, {
+   565→          description: res.attachments ? `${res.attachments} attachment(s) included.` : undefined,
+   566→        });
+   567→      }
+   568→      setSubject("");
+   569→      setMessage("");
+   570→      setFiles([]);
+   571→      onSent();
+   572→    } catch (e) {
+   573→      toast.error(e instanceof Error ? e.message : "Failed to send the email");
+   574→    } finally {
+   575→      setBusy(false);
+   576→    }
+   577→  };
+   578→
+   579→  return (
+   580→    <div className="dlg-card p-4">
+   581→      <div className="flex items-center gap-2">
+   582→        <Mail className="h-4 w-4 text-stone" aria-hidden />
+   583→        <h3 className="font-display text-lg text-ink">Direct email</h3>
+   584→      </div>
+   585→      <p className="text-xs text-stone mt-1">Recipient is resolved from the applicant record — attachments ≤ 3 files × 5 MB.</p>
+   586→      <div className="space-y-3 mt-3">
+   587→        <Input
+   588→          className="dlg-input"
+   589→          placeholder="Subject"
+   590→          value={subject}
+   591→          maxLength={200}
+   592→          onChange={(e) => setSubject(e.target.value)}
+   593→          aria-label="Email subject"
+   594→        />
+   595→        <Textarea
+   596→          className="dlg-input min-h-[100px]"
+   597→          placeholder="Message *"
+   598→          value={message}
+   599→          maxLength={5000}
+   600→          onChange={(e) => setMessage(e.target.value)}
+   601→          aria-label="Email message"
+   602→        />
+   603→        <div>
+   604→          <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-full border border-[#ececec] bg-white px-4 text-sm hover:bg-fog">
+   605→            <Paperclip className="h-4 w-4" aria-hidden />
+   606→            Attach files
+   607→            <input
+   608→              ref={fileRef}
+   609→              type="file"
+   610→              multiple
+   611→              className="hidden"
+   612→              onChange={(e) => pickFiles(e.target.files)}
+   613→              aria-label="Attach files"
+   614→            />
+   615→          </label>
+   616→          {files.length > 0 && (
+   617→            <ul className="mt-2 space-y-1">
+   618→              {files.map((f) => (
+   619→                <li key={f.name} className="flex items-center justify-between gap-2 text-xs text-stone">
+   620→                  <span className="truncate">{f.name}</span>
+   621→                  <button
+   622→                    type="button"
+   623→                    className="text-dusty-rose shrink-0"
+   624→                    onClick={() => setFiles((prev) => prev.filter((x) => x !== f))}
+   625→                  >
+   626→                    Remove
+   627→                  </button>
+   628→                </li>
+   629→              ))}
+   630→            </ul>
+   631→          )}
+   632→        </div>
+   633→        <button type="button" className={ctaBtn + " w-full"} disabled={!message.trim() || busy} onClick={() => void send()}>
+   634→          <Send className="h-4 w-4" aria-hidden />
+   635→          {busy ? "Sending…" : "Send email"}
+   636→        </button>
+   637→      </div>
+   638→      <div className="mt-4 border-t border-[#ececec] pt-3">
+   639→        <p className="text-xs font-medium text-stone">History</p>
+   640→        <div className="mt-2 max-h-48 overflow-y-auto scroll-thin space-y-1.5">
+   641→          {emails === null ? (
+   642→            <p className="text-xs text-pebble">Loading…</p>
+   643→          ) : emails.length === 0 ? (
+   644→            <p className="text-xs text-pebble">No direct emails sent yet.</p>
+   645→          ) : (
+   646→            emails.map((m) => {
+   647→              const atts = parseAttachments(m.attachments);
+   648→              return (
+   649→                <div key={m.id} className="flex items-center justify-between gap-2 text-xs">
+   650→                  <span className="truncate text-ink">{m.subject || "(no subject)"}</span>
+   651→                  <span className="shrink-0 flex items-center gap-2 text-pebble">
+   652→                    {atts.length > 0 && <span>{atts.length} att.</span>}
+   653→                    <span>{timeAgo(m.createdAt)}</span>
+   654→                    <span className={`rounded-full px-2 py-0.5 ${m.status === "sent" || m.status === "mock" ? "bg-fog text-ink" : "bg-dusty-rose/15 text-dusty-rose"}`}>
+   655→                      {m.status}
+   656→                    </span>
+   657→                  </span>
+   658→                </div>
+   659→              );
+   660→            })
+   661→          )}
+   662→        </div>
+   663→      </div>
+   664→    </div>
+   665→  );
+   666→}
+   667→
+   668→// ── The workspace BODY (shared by modal + page) ─────────────────────────────
+   669→
+   670→export function ReviewWorkspace({
+   671→  applicationId,
+   672→  onClose,
+   673→  onDecided,
+   674→}: {
+   675→  applicationId: number;
+   676→  onClose?: () => void;
+   677→  onDecided?: () => void;
+   678→}) {
+   679→  const [payload, setPayload] = useState<ReviewPayload | null>(null);
+   680→  const [notices, setNotices] = useState<NoticeRow[] | null>(null);
+   681→  const [emails, setEmails] = useState<DirectEmailRow[] | null>(null);
+   682→  const [error, setError] = useState<string | null>(null);
+   683→  const [remarks, setRemarks] = useState("");
+   684→  const [confirmAction, setConfirmAction] = useState<{ status: string; title: string; description: string; destructive?: boolean } | null>(null);
+   685→  const [busy, setBusy] = useState(false);
+   686→  const [noticeKind, setNoticeKind] = useState<"interview" | "skills_exam" | null>(null);
+   687→  const [regretOpen, setRegretOpen] = useState(false);
+   688→  const [regretBusy, setRegretBusy] = useState(false);
+   689→  const [tab, setTab] = useState("profile");
+   690→
+   691→  const load = useCallback(
+   692→    async (silent = false) => {
+   693→      if (!silent) setError(null);
+   694→      try {
+   695→        const [p, n, m] = await Promise.all([
+   696→          apiFetch<ReviewPayload>(`/api/evaluator/applications/${applicationId}`),
+   697→          apiFetch<{ notices: NoticeRow[] }>(`/api/evaluator/applications/${applicationId}/notice`),
+   698→          apiFetch<{ directEmails: DirectEmailRow[] }>(`/api/evaluator/applications/${applicationId}/email`),
+   699→        ]);
+   700→        setPayload(p);
+   701→        setNotices(n.notices);
+   702→        setEmails(m.directEmails);
+   703→      } catch (e) {
+   704→        if (!silent) setError(e instanceof Error ? e.message : "Failed to load the application");
+   705→      }
+   706→    },
+   707→    [applicationId]
+   708→  );
+   709→
+   710→  useEffect(() => {
+   711→    void load();
+   712→  }, [load]);
+   713→
+   714→  const refetch = useCallback(() => void load(true), [load]);
+   715→
+   716→  const stage = payload ? stageForStatus(payload.status) : "Applied";
+   717→  const applicantName = payload ? fullName(payload.applicant) : "Applicant";
+   718→  const email = payload?.applicant.emailAddress ?? null;
+   719→
+   720→  const decide = async (status: string) => {
+   721→    setBusy(true);
+   722→    try {
+   723→      await apiFetch(`/api/evaluator/applications/${applicationId}`, {
+   724→        method: "PATCH",
+   725→        body: { status, reason: remarks.trim() || undefined },
+   726→      });
+   727→      const label = getStatusMeta(status).label;
+   728→      const silentRevert = status === "Applied";
+   729→      if (silentRevert) {
+   730→        toast.info("Returned to the review queue", { description: "No notification was sent to the applicant." });
+   731→      } else {
+   732→        toast.success(`Applicant marked as ${label}`, {
+   733→          description: email ? `A notification email was sent to ${email}.` : "No email on record — HR will contact the applicant directly.",
+   734→        });
+   735→      }
+   736→      setConfirmAction(null);
+   737→      setRemarks("");
+   738→      onDecided?.();
+   739→      await load(true);
+   740→    } catch (e) {
+   741→      toast.error(e instanceof Error ? e.message : "Failed to update the application");
+   742→    } finally {
+   743→      setBusy(false);
+   744→    }
+   745→  };
+   746→
+   747→  const sendRegret = async () => {
+   748→    setRegretBusy(true);
+   749→    try {
+   750→      const res = await apiFetch<NoticeSendResult>(`/api/evaluator/applications/${applicationId}/notice`, {
+   751→        method: "POST",
+   752→        body: { type: "regret" },
+   753→      });
+   754→      toast.success("Regret letter sent", {
+   755→        description: `Email: ${res.email?.status ?? "unknown"} · SMS: ${res.sms?.status ?? "unknown"}`,
+   756→      });
+   757→      setRegretOpen(false);
+   758→      await load(true);
+   759→    } catch (e) {
+   760→      toast.error(e instanceof Error ? e.message : "Failed to send the regret letter");
+   761→    } finally {
+   762→      setRegretBusy(false);
+   763→    }
+   764→  };
+   765→
+   766→  const openConfirm = (status: string) => {
+   767→    const label = getStatusMeta(status).label;
+   768→    const consequence = email
+   769→      ? `An email will be sent to ${email}.`
+   770→      : "No email on record — HR will contact the applicant directly.";
+   771→    setConfirmAction({
+   772→      status,
+   773→      title: `Mark as ${label}?`,
+   774→      description: `${consequence}${remarks.trim() ? ` Remarks will be included: “${remarks.trim()}”` : ""}`,
+   775→      destructive: status === "Rejected",
+   776→    });
+   777→  };
+   778→
+   779→  const regretAlreadySent = (notices ?? []).some((n) => n.type === "regret" && (n.status === "sent" || n.status === "mock"));
+   780→  const noticeLabel: Record<NoticeRow["type"], string> = {
+   781→    regret: "Regret letter",
+   782→    interview: "Interview invitation",
+   783→    skills_exam: "Skills-exam notice",
+   784→  };
+   785→
+   786→  if (error) {
+   787→    return (
+   788→      <div className="dlg-card p-8 text-center space-y-4">
+   789→        <AlertTriangle className="h-8 w-8 text-dusty-rose mx-auto" aria-hidden />
+   790→        <p className="text-sm text-stone">{error}</p>
+   791→        <div className="flex items-center justify-center gap-3">
+   792→          <button type="button" className={ghostBtn} onClick={() => void load()}>
+   793→            Retry
+   794→          </button>
+   795→          {onClose && (
+   796→            <button type="button" className={ghostBtn} onClick={onClose}>
+   797→              Close
+   798→            </button>
+   799→          )}
+   800→        </div>
+   801→      </div>
+   802→    );
+   803→  }
+   804→
+   805→  if (!payload) {
+   806→    return (
+   807→      <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+   808→        <div className="dlg-card p-6 space-y-4">
+   809→          <Skeleton className="h-8 w-1/2" />
+   810→          <Skeleton className="h-4 w-1/3" />
+   811→          <Skeleton className="h-64 w-full" />
+   812→        </div>
+   813→        <div className="space-y-4">
+   814→          <Skeleton className="h-40 w-full" />
+   815→          <Skeleton className="h-64 w-full" />
+   816→        </div>
+   817→      </div>
+   818→    );
+   819→  }
+   820→
+   821→  const p = payload.snapshots.profile ?? {};
+   822→  const characterRefs = Array.isArray(p.characterReferences) ? (p.characterReferences as SnapRow[]) : [];
+   823→  const banner = stateBanner(stage);
+   824→  const positionTitle = payload.job.position?.positionTitle || payload.job.title;
+   825→  const place = payload.job.position?.placeOfAssignment ?? null;
+   826→
+   827→  return (
+   828→    <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+   829→      {/* ── LEFT: frozen dossier ── */}
+   830→      <div className="dlg-card p-6 space-y-4">
+   831→        <div className="flex flex-wrap items-start justify-between gap-3">
+   832→          <div>
+   833→            <h2 className="font-display text-2xl text-ink">{applicantName}</h2>
+   834→            <p className="text-sm text-stone mt-1">
+   835→              {[positionTitle, place].filter(Boolean).join(" · ")} · Applied {formatDate(payload.dateApplied)}
+   836→            </p>
+   837→          </div>
+   838→          <div className="flex items-center gap-2">
+   839→            <StatusPill status={payload.status} />
+   840→            <button
+   841→              type="button"
+   842→              className="text-sm text-ink underline underline-offset-4 min-h-[44px] inline-flex items-center"
+   843→              onClick={() => navigate("candidate", { id: String(payload.applicant.id) })}
+   844→            >
+   845→              View full profile
+   846→            </button>
+   847→          </div>
+   848→        </div>
+   849→
+   850→        <Tabs value={tab} onValueChange={setTab}>
+   851→          <TabsList className="flex-wrap h-auto">
+   852→            <TabsTrigger value="profile">Profile</TabsTrigger>
+   853→            <TabsTrigger value="education">Education</TabsTrigger>
+   854→            <TabsTrigger value="experience">Experience</TabsTrigger>
+   855→            <TabsTrigger value="training">Training</TabsTrigger>
+   856→            <TabsTrigger value="eligibility">Eligibility</TabsTrigger>
+   857→            <TabsTrigger value="awards">Awards</TabsTrigger>
+   858→            <TabsTrigger value="documents">Documents</TabsTrigger>
+   859→          </TabsList>
+   860→
+   861→          <TabsContent value="profile" className="mt-4">
+   862→            <div className="bg-fog rounded-[12px] p-4">
+   863→              <LedgerRow label="Email" value={str(p.emailAddress) || str(payload.applicant.emailAddress)} />
+   864→              <LedgerRow label="Mobile" value={str(p.mobileNumber) || str(p.contactNumber)} />
+   865→              <LedgerRow label="Other phone" value={[str(p.contactNumberSec), str(p.telephoneNumber)].filter(Boolean).join(" · ")} />
+   866→              <LedgerRow label="Gender" value={str(p.gender)} />
+   867→              <LedgerRow label="Civil status" value={str(p.civilStatus)} />
+   868→              <LedgerRow label="Birth date" value={snapshotDisplayDate(p.birthDate)} />
+   869→              <LedgerRow label="Birth place" value={str(p.birthPlace)} />
+   870→              <LedgerRow label="Address" value={str(p.presentAddress)} />
+   871→            </div>
+   872→            <div className="mt-4">
+   873→              <p className="text-xs font-medium text-stone">Character references</p>
+   874→              {characterRefs.length === 0 ? (
+   875→                <p className="text-sm text-pebble mt-1">None on file.</p>
+   876→              ) : (
+   877→                <ul className="mt-1 space-y-1">
+   878→                  {characterRefs.map((r, i) => (
+   879→                    <li key={i} className="text-sm text-ink">
+   880→                      {[str(r.name), str(r.address), str(r.telephone) || str(r.contactNumber)].filter(Boolean).join(" · ") || "—"}
+   881→                    </li>
+   882→                  ))}
+   883→                </ul>
+   884→              )}
+   885→            </div>
+   886→          </TabsContent>
+   887→          <TabsContent value="education" className="mt-4">
+   888→            <EducationCards rows={payload.snapshots.educations} />
+   889→          </TabsContent>
+   890→          <TabsContent value="experience" className="mt-4">
+   891→            <ExperienceCards rows={payload.snapshots.experiences} />
+   892→          </TabsContent>
+   893→          <TabsContent value="training" className="mt-4">
+   894→            <TrainingCards rows={payload.snapshots.trainings} />
+   895→          </TabsContent>
+   896→          <TabsContent value="eligibility" className="mt-4">
+   897→            <EligibilityCards rows={payload.snapshots.eligibilities} />
+   898→          </TabsContent>
+   899→          <TabsContent value="awards" className="mt-4">
+   900→            <AwardCards rows={payload.snapshots.awards} />
+   901→          </TabsContent>
+   902→          <TabsContent value="documents" className="mt-4">
+   903→            <div className="bg-fog rounded-[12px] p-6 text-center">
+   904→              <FileText className="h-6 w-6 text-pebble mx-auto" aria-hidden />
+   905→              <p className="text-sm text-stone mt-2">Supporting documents are verified in person at the next stage.</p>
+   906→            </div>
+   907→          </TabsContent>
+   908→        </Tabs>
+   909→      </div>
+   910→
+   911→      {/* ── RIGHT: decision rail ── */}
+   912→      <div className="space-y-4 self-start lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto scroll-thin">
+   913→        <RequirementsMatchPanel report={payload.requirements} />
+   914→        <CredentialsRow payload={payload} />
+   915→
+   916→        <div className={`bg-fog rounded-[12px] p-4 text-sm ${banner.cls}`}>
+   917→          <StatusPill status={payload.status} className="mr-2" />
+   918→          {banner.text}
+   919→        </div>
+   920→
+   921→        {(stage === "Applied" || stage === "Under Review") && (
+   922→          <div className="dlg-card p-4 space-y-3">
+   923→            <h3 className="font-display text-lg text-ink">Decision</h3>
+   924→            <Textarea
+   925→              className="dlg-input min-h-[80px]"
+   926→              placeholder="Remarks (optional) — included as the reason"
+   927→              value={remarks}
+   928→              maxLength={500}
+   929→              onChange={(e) => setRemarks(e.target.value)}
+   930→              aria-label="Remarks"
+   931→            />
+   932→            <div className="space-y-2">
+   933→              {stage === "Applied" && (
+   934→                <button type="button" className={ghostBtn + " w-full"} onClick={() => openConfirm("Under Review")}>
+   935→                  Start Review
+   936→                </button>
+   937→              )}
+   938→              <button type="button" className={ctaBtn + " w-full"} onClick={() => openConfirm("Shortlisted")}>
+   939→                Shortlist
+   940→              </button>
+   941→              <button
+   942→                type="button"
+   943→                className={ghostBtn + " w-full text-dusty-rose"}
+   944→                onClick={() => openConfirm("Rejected")}
+   945→              >
+   946→                Not Qualified
+   947→              </button>
+   948→            </div>
+   949→            <p className="text-xs text-pebble">
+   950→              {email ? `Decisions email ${email}.` : "No email on record for this applicant."}
+   951→            </p>
+   952→          </div>
+   953→        )}
+   954→
+   955→        {(stage === "Shortlisted" || stage === "Rejected") && (
+   956→          <div className="dlg-card p-4 space-y-3">
+   957→            <h3 className="font-display text-lg text-ink">Revise decision</h3>
+   958→            <p className="text-xs text-pebble">Changing the decision notifies the applicant.</p>
+   959→            <button
+   960→              type="button"
+   961→              className={ghostBtn + " w-full"}
+   962→              onClick={() =>
+   963→                stage === "Shortlisted"
+   964→                  ? setConfirmAction({
+   965→                      status: "Rejected",
+   966→                      title: "Mark as Not Qualified?",
+   967→                      description: email
+   968→                        ? `The decision will be flipped and a regret letter will be emailed to ${email}.`
+   969→                        : "The decision will be flipped. No email on record — HR will contact the applicant directly.",
+   970→                      destructive: true,
+   971→                    })
+   972→                  : setConfirmAction({
+   973→                      status: "Shortlisted",
+   974→                      title: "Mark as Shortlisted?",
+   975→                      description: email
+   976→                        ? `The decision will be flipped and the shortlist notice will be emailed to ${email}.`
+   977→                        : "The decision will be flipped. No email on record — HR will contact the applicant directly.",
+   978→                    })
+   979→              }
+   980→            >
+   981→              {stage === "Shortlisted" ? "Flip to Not Qualified" : "Flip to Shortlisted"}
+   982→            </button>
+   983→            <button
+   984→              type="button"
+   985→              className={ghostBtn + " w-full"}
+   986→              onClick={() =>
+   987→                setConfirmAction({
+   988→                  status: "Applied",
+   989→                  title: "Return to review queue?",
+   990→                  description: "This reverts the application to Applied and does NOT notify the applicant.",
+   991→                })
+   992→              }
+   993→            >
+   994→              Return to Review
+   995→            </button>
+   996→          </div>
+   997→        )}
+   998→
+   999→        {/* Notices */}
+  1000→        <div className="dlg-card p-4 space-y-3">
+  1001→          <h3 className="font-display text-lg text-ink">Notices</h3>
+  1002→          <div className="max-h-48 overflow-y-auto scroll-thin space-y-1.5">
+  1003→            {notices === null ? (
+  1004→              <p className="text-xs text-pebble">Loading…</p>
+  1005→            ) : notices.length === 0 ? (
+  1006→              <p className="text-xs text-pebble">No notices sent yet.</p>
+  1007→            ) : (
+  1008→              notices.map((n) => (
+  1009→                <div key={n.id} className="flex items-center justify-between gap-2 text-xs">
+  1010→                  <span className="truncate text-ink">{noticeLabel[n.type] ?? n.type}</span>
+  1011→                  <span className="shrink-0 flex items-center gap-2 text-pebble">
+  1012→                    <span>{formatDateTime(n.sentAt)}</span>
+  1013→                    <span className="rounded-full bg-fog px-2 py-0.5 text-ink">{n.status}</span>
+  1014→                  </span>
+  1015→                </div>
+  1016→              ))
+  1017→            )}
+  1018→          </div>
+  1019→          {stage === "Shortlisted" && (
+  1020→            <div className="space-y-2">
+  1021→              <button type="button" className={ghostBtn + " w-full"} onClick={() => setNoticeKind("interview")}>
+  1022→                Send Interview Invitation
+  1023→              </button>
+  1024→              <button type="button" className={ghostBtn + " w-full"} onClick={() => setNoticeKind("skills_exam")}>
+  1025→                Send Skills-Exam Notice
+  1026→              </button>
+  1027→            </div>
+  1028→          )}
+  1029→          {stage === "Rejected" && (
+  1030→            <button
+  1031→              type="button"
+  1032→              className={ghostBtn + " w-full text-dusty-rose"}
+  1033→              disabled={regretAlreadySent || regretBusy}
+  1034→              onClick={() => setRegretOpen(true)}
+  1035→            >
+  1036→              {regretAlreadySent ? "Regret letter sent" : regretBusy ? "Sending…" : "Send Regret Letter"}
+  1037→            </button>
+  1038→          )}
+  1039→        </div>
+  1040→
+  1041→        <DirectEmailCard applicationId={applicationId} emails={emails} onSent={refetch} />
+  1042→      </div>
+  1043→
+  1044→      {/* Decision confirm */}
+  1045→      <AlertDialog open={confirmAction !== null} onOpenChange={(v) => !v && setConfirmAction(null)}>
+  1046→        <AlertDialogContent>
+  1047→          <AlertDialogHeader>
+  1048→            <AlertDialogTitle>{confirmAction?.title}</AlertDialogTitle>
+  1049→            <AlertDialogDescription>{confirmAction?.description}</AlertDialogDescription>
+  1050→          </AlertDialogHeader>
+  1051→          <AlertDialogFooter>
+  1052→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1053→            <AlertDialogAction
+  1054→              className={confirmAction?.destructive ? "bg-dusty-rose/10 text-dusty-rose hover:bg-dusty-rose/20" : ""}
+  1055→              onClick={(e) => {
+  1056→                e.preventDefault();
+  1057→                if (confirmAction) void decide(confirmAction.status);
+  1058→              }}
+  1059→            >
+  1060→              {busy ? "Working…" : "Confirm"}
+  1061→            </AlertDialogAction>
+  1062→          </AlertDialogFooter>
+  1063→        </AlertDialogContent>
+  1064→      </AlertDialog>
+  1065→
+  1066→      {/* Regret confirm */}
+  1067→      <AlertDialog open={regretOpen} onOpenChange={setRegretOpen}>
+  1068→        <AlertDialogContent>
+  1069→          <AlertDialogHeader>
+  1070→            <AlertDialogTitle>Send the regret letter?</AlertDialogTitle>
+  1071→            <AlertDialogDescription>
+  1072→              {email
+  1073→                ? `A formal regret letter will be emailed to ${email}.`
+  1074→                : "No email on record — the send will be logged as skipped and HR will contact the applicant directly."}
+  1075→            </AlertDialogDescription>
+  1076→          </AlertDialogHeader>
+  1077→          <AlertDialogFooter>
+  1078→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1079→            <AlertDialogAction
+  1080→              className="bg-dusty-rose/10 text-dusty-rose hover:bg-dusty-rose/20"
+  1081→              onClick={(e) => {
+  1082→                e.preventDefault();
+  1083→                void sendRegret();
+  1084→              }}
+  1085→            >
+  1086→              Send regret letter
+  1087→            </AlertDialogAction>
+  1088→          </AlertDialogFooter>
+  1089→        </AlertDialogContent>
+  1090→      </AlertDialog>
+  1091→
+  1092→      {/* Notice form */}
+  1093→      {noticeKind && (
+  1094→        <NoticeFormDialog
+  1095→          applicationId={applicationId}
+  1096→          kind={noticeKind}
+  1097→          onClose={() => setNoticeKind(null)}
+  1098→          onSent={refetch}
+  1099→        />
+  1100→      )}
+  1101→    </div>
+  1102→  );
+  1103→}
+  1104→
+  1105→// ── Deep-link page (default export, prop-detection wrapper) ─────────────────
+  1106→
+  1107→function ReviewWorkspacePage() {
+  1108→  const { params } = useHashRoute();
+  1109→  const id = Number(params.id);
+  1110→  const valid = Number.isInteger(id) && id > 0;
+  1111→  const close = useCallback(() => navigate("review-queue"), []);
+  1112→
+  1113→  return (
+  1114→    <div className="space-y-4">
+  1115→      <div className="flex flex-wrap items-center justify-between gap-3">
+  1116→        <button type="button" className={ghostBtn} onClick={close}>
+  1117→          ← Back to review queue
+  1118→        </button>
+  1119→        <h1 className="font-display text-2xl text-ink">Review workspace</h1>
+  1120→      </div>
+  1121→      {valid ? (
+  1122→        <ReviewWorkspace applicationId={id} onClose={close} />
+  1123→      ) : (
+  1124→        <div className="dlg-card p-8 text-center space-y-3">
+  1125→          <p className="text-sm text-stone">No application selected. Open a review from the queue.</p>
+  1126→          <button type="button" className={ctaBtn} onClick={close}>
+  1127→            Go to review queue
+  1128→          </button>
+  1129→        </div>
+  1130→      )}
+  1131→    </div>
+  1132→  );
+  1133→}
+  1134→
+  1135→export default function ReviewWorkspaceRoute(props: {
+  1136→  applicationId?: number;
+  1137→  onClose?: () => void;
+  1138→  onDecided?: () => void;
+  1139→}) {
+  1140→  if (typeof props.applicationId === "number") {
+  1141→    return <ReviewWorkspace applicationId={props.applicationId} onClose={props.onClose} onDecided={props.onDecided} />;
+  1142→  }
+  1143→  return <ReviewWorkspacePage />;
+  1144→}
+  1145→

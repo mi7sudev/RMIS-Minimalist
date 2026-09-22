@@ -2,9 +2,10 @@
 
 // ============================================================================
 // RMIS — Desktop left navigation rail (spec §13 view registry, §7.10 nav
-// config). Collapsed = w-16 icon-only with tooltips; expanded = w-64 with
-// labels + collapse toggle (persisted in localStorage "rmis.rail-expanded").
-// Active view = filled ink pill. Bottom: user dropdown with sign out.
+// config). Enterprise pattern (Workday/Linear): LABELED w-64 rail by default;
+// user may collapse to w-16 icon-only (persisted in localStorage
+// "rmis.rail-expanded"). Active view = filled ink pill. Bottom: user dropdown
+// with sign out.
 // ============================================================================
 
 import { useEffect, useState } from "react";
@@ -123,11 +124,12 @@ export function displayNameOf(user: SessionUser): string {
 
 export function NavRail({ view }: { view: string }) {
   const { user } = useSession();
-  const [expanded, setExpanded] = useState(false);
+  // Enterprise default: labeled rail. localStorage "0" opts out.
+  const [expanded, setExpanded] = useState(true);
 
   useEffect(() => {
     try {
-      setExpanded(window.localStorage.getItem("rmis.rail-expanded") === "1");
+      setExpanded(window.localStorage.getItem("rmis.rail-expanded") !== "0");
     } catch {
       /* storage unavailable */
     }
@@ -144,6 +146,8 @@ export function NavRail({ view }: { view: string }) {
       return next;
     });
   };
+
+  // Pending counts badge placeholder (kept for future socket push).
 
   if (!user) return null;
   const groups = NAV_CONFIG[user.role] ?? [];
@@ -188,11 +192,18 @@ export function NavRail({ view }: { view: string }) {
                     <button
                       onClick={() => navigate(item.view)}
                       aria-current={active ? "page" : undefined}
-                      className={`flex min-h-[44px] w-full items-center gap-3 rounded-full text-sm ${
+                      className={`group relative flex min-h-[44px] w-full items-center gap-3 rounded-full text-sm transition-colors duration-150 ${
                         expanded ? "px-3.5" : "justify-center px-0"
-                      } ${active ? "bg-ink text-white" : "text-stone hover:bg-fog hover:text-ink"}`}
+                      } ${
+                        active
+                          ? "bg-ink text-white"
+                          : "text-stone hover:bg-fog hover:text-ink"
+                      }`}
                     >
-                      <item.icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                      <item.icon
+                        className={`h-[18px] w-[18px] shrink-0 ${active ? "" : "text-graphite group-hover:text-ink"}`}
+                        aria-hidden="true"
+                      />
                       {expanded && <span className="truncate">{item.label}</span>}
                     </button>
                   );

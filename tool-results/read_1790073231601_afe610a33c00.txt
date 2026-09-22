@@ -1,0 +1,646 @@
+     1→"use client";
+     2→
+     3→// ============================================================================
+     4→// RMIS — HR recruitment list + job form (spec §7.10). Filterable, sortable,
+     5→// paginated postings table (10/page, 30 s silent poll). JobFormDialog handles
+     6→// create + edit: plain-text rich sections (HTML companions generated with
+     7→// textToHtml), qualification vitals (write-through to the position master),
+     8→// and publish/deadline/processing dates.
+     9→// ============================================================================
+    10→
+    11→import { useCallback, useEffect, useMemo, useState } from "react";
+    12→import { toast } from "sonner";
+    13→import { AlertTriangle, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+    14→import { Input } from "@/components/ui/input";
+    15→import { Label } from "@/components/ui/label";
+    16→import { Skeleton } from "@/components/ui/skeleton";
+    17→import { Textarea } from "@/components/ui/textarea";
+    18→import {
+    19→  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    20→} from "@/components/ui/dialog";
+    21→import {
+    22→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    23→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    24→} from "@/components/ui/alert-dialog";
+    25→import {
+    26→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    27→} from "@/components/ui/select";
+    28→import { apiFetch, deadlineState, formatCurrency, formatDate } from "@/lib/client";
+    29→import type { JobWire } from "@/lib/router";
+    30→import { navigate } from "@/lib/router";
+    31→import { textToHtml } from "@/lib/sanitize";
+    32→import {
+    33→  CSC_EDUCATION_FIRST_LEVEL, CSC_EDUCATION_HIGHER_LEVEL, CSC_ELIGIBILITY_REGISTRY,
+    34→  DIVISIONS, POSITION_TYPES,
+    35→} from "@/lib/constants";
+    36→
+    37→// ── Shared visuals ──────────────────────────────────────────────────────────
+    38→
+    39→export const ghostBtn =
+    40→  "dlg-ghost inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+    41→export const ctaBtn =
+    42→  "dlg-cta inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-5 text-sm transition-all disabled:cursor-not-allowed disabled:opacity-50";
+    43→
+    44→function OpenClosedPill({ active }: { active: boolean }) {
+    45→  return (
+    46→    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${active ? "bg-ink text-white" : "bg-fog text-stone"}`}>
+    47→      {active ? "OPEN" : "CLOSED"}
+    48→    </span>
+    49→  );
+    50→}
+    51→
+    52→function isOpenJob(j: JobWire): boolean {
+    53→  return j.isActive && !deadlineState(j.deadlineDate).overdue;
+    54→}
+    55→
+    56→// ── Job form dialog (create + edit) — named export, reused by job-workspace ─
+    57→
+    58→function Field({
+    59→  id,
+    60→  label,
+    61→  required,
+    62→  error,
+    63→  children,
+    64→}: {
+    65→  id: string;
+    66→  label: string;
+    67→  required?: boolean;
+    68→  error?: string | null;
+    69→  children: React.ReactNode;
+    70→}) {
+    71→  return (
+    72→    <div className="space-y-1.5">
+    73→      <Label htmlFor={id} className="text-xs text-stone">
+    74→        {label}
+    75→        {required ? " *" : ""}
+    76→      </Label>
+    77→      {children}
+    78→      {error && <p className="text-xs text-dusty-rose">{error}</p>}
+    79→    </div>
+    80→  );
+    81→}
+    82→
+    83→export function JobFormDialog({
+    84→  open,
+    85→  onOpenChange,
+    86→  job,
+    87→  onSaved,
+    88→}: {
+    89→  open: boolean;
+    90→  onOpenChange: (v: boolean) => void;
+    91→  job?: JobWire | null;
+    92→  onSaved: () => void;
+    93→}) {
+    94→  const editing = job != null;
+    95→  const [title, setTitle] = useState("");
+    96→  const [positionType, setPositionType] = useState("");
+    97→  const [vacancy, setVacancy] = useState("1");
+    98→  const [division, setDivision] = useState("");
+    99→  const [education, setEducation] = useState("");
+   100→  const [experience, setExperience] = useState("");
+   101→  const [training, setTraining] = useState("");
+   102→  const [eligibility, setEligibility] = useState("");
+   103→  const [license, setLicense] = useState("");
+   104→  const [brief, setBrief] = useState("");
+   105→  const [duties, setDuties] = useState("");
+   106→  const [compensation, setCompensation] = useState("");
+   107→  const [otherQuals, setOtherQuals] = useState("");
+   108→  const [publishDate, setPublishDate] = useState("");
+   109→  const [deadlineDate, setDeadlineDate] = useState("");
+   110→  const [processingDate, setProcessingDate] = useState("");
+   111→  const [errors, setErrors] = useState<{ title?: string | null; vacancy?: string | null }>({});
+   112→  const [busy, setBusy] = useState(false);
+   113→
+   114→  const prefill = useCallback(() => {
+   115→    setErrors({});
+   116→    if (!job) {
+   117→      setTitle("");
+   118→      setPositionType("");
+   119→      setVacancy("1");
+   120→      setDivision("");
+   121→      setEducation("");
+   122→      setExperience("");
+   123→      setTraining("");
+   124→      setEligibility("");
+   125→      setLicense("");
+   126→      setBrief("");
+   127→      setDuties("");
+   128→      setCompensation("");
+   129→      setOtherQuals("");
+   130→      setPublishDate(new Date().toISOString().slice(0, 10));
+   131→      setDeadlineDate("");
+   132→      setProcessingDate("");
+   133→      return;
+   134→    }
+   135→    setTitle(job.title ?? "");
+   136→    setPositionType(job.positionType ?? "");
+   137→    setVacancy(String(job.numberOfVacancy ?? 1));
+   138→    setDivision(job.position?.division ?? "");
+   139→    setEducation(job.position?.cscEducation ?? "");
+   140→    setExperience(job.position?.cscWorkExperience ?? "");
+   141→    setTraining(job.position?.cscTraining ?? "");
+   142→    setEligibility(job.position?.cscEligibilityGroup ?? job.position?.cscEligibility ?? "");
+   143→    setLicense(job.position?.license ?? "");
+   144→    setBrief(job.briefDescription ?? "");
+   145→    setDuties(job.dutiesResponsibilities ?? "");
+   146→    setCompensation(job.compensationPackage ?? "");
+   147→    setOtherQuals(job.otherQualifications ?? "");
+   148→    setPublishDate(job.publishDate ? job.publishDate.slice(0, 10) : "");
+   149→    setDeadlineDate(job.deadlineDate ? job.deadlineDate.slice(0, 10) : "");
+   150→    setProcessingDate(job.processingDate ? job.processingDate.slice(0, 10) : "");
+   151→  }, [job]);
+   152→
+   153→  useEffect(() => {
+   154→    if (open) prefill();
+   155→  }, [open, prefill]);
+   156→
+   157→  const opt = (v: string) => {
+   158→    const t = v.trim();
+   159→    return t === "" ? undefined : t;
+   160→  };
+   161→
+   162→  const submit = async () => {
+   163→    const nextErrors: { title?: string | null; vacancy?: string | null } = {};
+   164→    if (!title.trim()) nextErrors.title = "Title is required";
+   165→    const vacancyNum = Number(vacancy);
+   166→    if (!Number.isInteger(vacancyNum) || vacancyNum < 1) nextErrors.vacancy = "Vacancies must be a whole number of at least 1";
+   167→    setErrors(nextErrors);
+   168→    if (Object.keys(nextErrors).length > 0) return;
+   169→
+   170→    setBusy(true);
+   171→    try {
+   172→      const body = {
+   173→        title: title.trim(),
+   174→        positionType: opt(positionType),
+   175→        numberOfVacancy: vacancyNum,
+   176→        division: opt(division),
+   177→        education: opt(education),
+   178→        experience: opt(experience),
+   179→        training: opt(training),
+   180→        eligibility: opt(eligibility),
+   181→        license: opt(license),
+   182→        briefDescription: opt(brief),
+   183→        briefDescriptionHtml: textToHtml(brief) || undefined,
+   184→        dutiesResponsibilities: opt(duties),
+   185→        dutiesHtml: textToHtml(duties) || undefined,
+   186→        compensationPackage: opt(compensation),
+   187→        compensationHtml: textToHtml(compensation) || undefined,
+   188→        otherQualifications: opt(otherQuals),
+   189→        otherQualificationsHtml: textToHtml(otherQuals) || undefined,
+   190→        publishDate: publishDate || undefined,
+   191→        deadlineDate: deadlineDate || undefined,
+   192→        processingDate: processingDate || undefined,
+   193→      };
+   194→      if (editing) {
+   195→        await apiFetch(`/api/jobs/${job.id}`, { method: "PATCH", body });
+   196→        toast.success("Job posting updated");
+   197→      } else {
+   198→        await apiFetch("/api/jobs", { method: "POST", body });
+   199→        toast.success("Job posting created and published");
+   200→      }
+   201→      onOpenChange(false);
+   202→      onSaved();
+   203→    } catch (e) {
+   204→      toast.error(e instanceof Error ? e.message : "Failed to save the job posting");
+   205→    } finally {
+   206→      setBusy(false);
+   207→    }
+   208→  };
+   209→
+   210→  return (
+   211→    <Dialog open={open} onOpenChange={onOpenChange}>
+   212→      <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto scroll-thin">
+   213→        <DialogHeader>
+   214→          <DialogTitle className="font-display text-xl">{editing ? "Edit job posting" : "Create job posting"}</DialogTitle>
+   215→          <DialogDescription>
+   216→            {editing
+   217→              ? "Updates are saved to the posting; qualification vitals write through to the position master."
+   218→              : "The posting is published immediately; qualification vitals create or update the linked position."}
+   219→          </DialogDescription>
+   220→        </DialogHeader>
+   221→
+   222→        <div className="space-y-4">
+   223→          <Field id="job-title" label="Title" required error={errors.title}>
+   224→            <Input
+   225→              id="job-title"
+   226→              className="dlg-input"
+   227→              value={title}
+   228→              maxLength={200}
+   229→              onChange={(e) => setTitle(e.target.value)}
+   230→              placeholder="e.g. Science Research Specialist I"
+   231→            />
+   232→          </Field>
+   233→
+   234→          <div className="grid gap-4 sm:grid-cols-2">
+   235→            <Field id="job-type" label="Position type">
+   236→              <Input
+   237→                id="job-type"
+   238→                className="dlg-input"
+   239→                list="rmis-position-types"
+   240→                value={positionType}
+   241→                maxLength={100}
+   242→                onChange={(e) => setPositionType(e.target.value)}
+   243→                placeholder="Select or type"
+   244→              />
+   245→              <datalist id="rmis-position-types">
+   246→                {POSITION_TYPES.map((t) => (
+   247→                  <option key={t} value={t} />
+   248→                ))}
+   249→              </datalist>
+   250→            </Field>
+   251→            <Field id="job-vacancy" label="Number of vacancies" required error={errors.vacancy}>
+   252→              <Input
+   253→                id="job-vacancy"
+   254→                type="number"
+   255→                min={1}
+   256→                max={99}
+   257→                className="dlg-input"
+   258→                value={vacancy}
+   259→                onChange={(e) => setVacancy(e.target.value)}
+   260→              />
+   261→            </Field>
+   262→          </div>
+   263→
+   264→          <Field id="job-division" label="Division">
+   265→            <Input
+   266→              id="job-division"
+   267→              className="dlg-input"
+   268→              list="rmis-divisions"
+   269→              value={division}
+   270→              maxLength={100}
+   271→              onChange={(e) => setDivision(e.target.value)}
+   272→              placeholder="Official code or custom"
+   273→            />
+   274→            <datalist id="rmis-divisions">
+   275→              {DIVISIONS.map((d) => (
+   276→                <option key={d.code} value={d.code}>
+   277→                  {d.name}
+   278→                </option>
+   279→              ))}
+   280→              <option value="Others">Others — type your own</option>
+   281→            </datalist>
+   282→          </Field>
+   283→
+   284→          <div className="bg-fog rounded-[12px] p-4 space-y-4">
+   285→            <p className="text-xs font-medium text-stone">Qualification vitals (write-through to the position master)</p>
+   286→            <Field id="job-education" label="Education (CSC standard)">
+   287→              <Input
+   288→                id="job-education"
+   289→                className="dlg-input"
+   290→                list="rmis-education-options"
+   291→                value={education}
+   292→                maxLength={1000}
+   293→                onChange={(e) => setEducation(e.target.value)}
+   294→                placeholder="Select from CSC MC 07 options or type"
+   295→              />
+   296→              <datalist id="rmis-education-options">
+   297→                {[...CSC_EDUCATION_FIRST_LEVEL, ...CSC_EDUCATION_HIGHER_LEVEL].map((t) => (
+   298→                  <option key={t} value={t} />
+   299→                ))}
+   300→              </datalist>
+   301→            </Field>
+   302→            <div className="grid gap-4 sm:grid-cols-2">
+   303→              <Field id="job-experience" label="Experience">
+   304→                <Input
+   305→                  id="job-experience"
+   306→                  className="dlg-input"
+   307→                  value={experience}
+   308→                  maxLength={500}
+   309→                  onChange={(e) => setExperience(e.target.value)}
+   310→                  placeholder='e.g. 1 year of relevant experience'
+   311→                />
+   312→              </Field>
+   313→              <Field id="job-training" label="Training">
+   314→                <Input
+   315→                  id="job-training"
+   316→                  className="dlg-input"
+   317→                  value={training}
+   318→                  maxLength={500}
+   319→                  onChange={(e) => setTraining(e.target.value)}
+   320→                  placeholder='e.g. 8 hours of relevant training'
+   321→                />
+   322→              </Field>
+   323→            </div>
+   324→            <Field id="job-eligibility" label="Eligibility">
+   325→              <Input
+   326→                id="job-eligibility"
+   327→                className="dlg-input"
+   328→                list="rmis-eligibility-options"
+   329→                value={eligibility}
+   330→                maxLength={500}
+   331→                onChange={(e) => setEligibility(e.target.value)}
+   332→                placeholder="CSC registry entry or custom"
+   333→              />
+   334→              <datalist id="rmis-eligibility-options">
+   335→                {CSC_ELIGIBILITY_REGISTRY.map((r) => (
+   336→                  <option key={r.name} value={r.name}>
+   337→                    {r.description}
+   338→                  </option>
+   339→                ))}
+   340→              </datalist>
+   341→            </Field>
+   342→            <Field id="job-license" label="License / special skill">
+   343→              <Input
+   344→                id="job-license"
+   345→                className="dlg-input"
+   346→                value={license}
+   347→                maxLength={500}
+   348→                onChange={(e) => setLicense(e.target.value)}
+   349→              />
+   350→            </Field>
+   351→          </div>
+   352→
+   353→          <div className="space-y-4">
+   354→            <Field id="job-brief" label="Brief description">
+   355→              <Textarea id="job-brief" className="dlg-input min-h-[80px]" value={brief} maxLength={5000} onChange={(e) => setBrief(e.target.value)} />
+   356→            </Field>
+   357→            <Field id="job-duties" label="Duties & responsibilities">
+   358→              <Textarea id="job-duties" className="dlg-input min-h-[100px]" value={duties} maxLength={8000} onChange={(e) => setDuties(e.target.value)} />
+   359→            </Field>
+   360→            <Field id="job-compensation" label="Compensation package">
+   361→              <Textarea id="job-compensation" className="dlg-input min-h-[80px]" value={compensation} maxLength={4000} onChange={(e) => setCompensation(e.target.value)} />
+   362→            </Field>
+   363→            <Field id="job-quals" label="Other qualifications">
+   364→              <Textarea id="job-quals" className="dlg-input min-h-[80px]" value={otherQuals} maxLength={4000} onChange={(e) => setOtherQuals(e.target.value)} />
+   365→            </Field>
+   366→          </div>
+   367→
+   368→          <div className="grid gap-4 sm:grid-cols-3">
+   369→            <Field id="job-publish" label="Publish date">
+   370→              <Input id="job-publish" type="date" className="dlg-input" value={publishDate} onChange={(e) => setPublishDate(e.target.value)} />
+   371→            </Field>
+   372→            <Field id="job-deadline" label="Deadline">
+   373→              <Input id="job-deadline" type="date" className="dlg-input" value={deadlineDate} onChange={(e) => setDeadlineDate(e.target.value)} />
+   374→            </Field>
+   375→            <Field id="job-processing" label="Processing date">
+   376→              <Input id="job-processing" type="date" className="dlg-input" value={processingDate} onChange={(e) => setProcessingDate(e.target.value)} />
+   377→            </Field>
+   378→          </div>
+   379→        </div>
+   380→
+   381→        <DialogFooter>
+   382→          <button type="button" className={ghostBtn} onClick={() => onOpenChange(false)}>
+   383→            Cancel
+   384→          </button>
+   385→          <button type="button" className={ctaBtn} disabled={busy} onClick={() => void submit()}>
+   386→            {busy ? "Saving…" : editing ? "Save changes" : "Create & publish"}
+   387→          </button>
+   388→        </DialogFooter>
+   389→      </DialogContent>
+   390→    </Dialog>
+   391→  );
+   392→}
+   393→
+   394→// ── Recruitment list ────────────────────────────────────────────────────────
+   395→
+   396→const PAGE_SIZE = 10;
+   397→
+   398→export default function Recruitment() {
+   399→  const [jobs, setJobs] = useState<JobWire[] | null>(null);
+   400→  const [error, setError] = useState<string | null>(null);
+   401→  const [search, setSearch] = useState("");
+   402→  const [debouncedSearch, setDebouncedSearch] = useState("");
+   403→  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">("all");
+   404→  const [sortBy, setSortBy] = useState<"recent" | "deadline" | "applications">("recent");
+   405→  const [page, setPage] = useState(1);
+   406→  const [formOpen, setFormOpen] = useState(false);
+   407→  const [spin, setSpin] = useState(false);
+   408→
+   409→  const load = useCallback(async (silent = false) => {
+   410→    if (!silent) setError(null);
+   411→    try {
+   412→      const data = await apiFetch<JobWire[]>("/api/jobs?limit=200");
+   413→      setJobs(data);
+   414→    } catch (e) {
+   415→      if (!silent) setError(e instanceof Error ? e.message : "Failed to load job postings");
+   416→    }
+   417→  }, []);
+   418→
+   419→  useEffect(() => {
+   420→    void load();
+   421→  }, [load]);
+   422→
+   423→  // 30 s silent poll + refetch-on-focus.
+   424→  useEffect(() => {
+   425→    const id = setInterval(() => {
+   426→      if (!document.hidden) void load(true);
+   427→    }, 30_000);
+   428→    return () => clearInterval(id);
+   429→  }, [load]);
+   430→  useEffect(() => {
+   431→    const onFocus = () => void load(true);
+   432→    window.addEventListener("focus", onFocus);
+   433→    document.addEventListener("visibilitychange", onFocus);
+   434→    return () => {
+   435→      window.removeEventListener("focus", onFocus);
+   436→      document.removeEventListener("visibilitychange", onFocus);
+   437→    };
+   438→  }, [load]);
+   439→
+   440→  // Debounced search (350 ms).
+   441→  useEffect(() => {
+   442→    const t = setTimeout(() => {
+   443→      setDebouncedSearch(search.trim().toLowerCase());
+   444→      setPage(1);
+   445→    }, 350);
+   446→    return () => clearTimeout(t);
+   447→  }, [search]);
+   448→
+   449→  const filtered = useMemo(() => {
+   450→    let rows = jobs ?? [];
+   451→    if (debouncedSearch) {
+   452→      rows = rows.filter((j) => {
+   453→        const hay = [
+   454→          j.title,
+   455→          j.position?.itemNumber,
+   456→          j.position?.placeOfAssignment,
+   457→          j.positionType,
+   458→        ]
+   459→          .filter(Boolean)
+   460→          .join(" ")
+   461→          .toLowerCase();
+   462→        return hay.includes(debouncedSearch);
+   463→      });
+   464→    }
+   465→    if (statusFilter === "open") rows = rows.filter(isOpenJob);
+   466→    else if (statusFilter === "closed") rows = rows.filter((j) => !isOpenJob(j));
+   467→    const sorted = [...rows];
+   468→    if (sortBy === "recent") {
+   469→      sorted.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+   470→    } else if (sortBy === "deadline") {
+   471→      sorted.sort((a, b) => {
+   472→        const av = a.deadlineDate ? new Date(a.deadlineDate).getTime() : Number.POSITIVE_INFINITY;
+   473→        const bv = b.deadlineDate ? new Date(b.deadlineDate).getTime() : Number.POSITIVE_INFINITY;
+   474→        return av - bv;
+   475→      });
+   476→    } else {
+   477→      sorted.sort((a, b) => b.applicationCount - a.applicationCount);
+   478→    }
+   479→    return sorted;
+   480→  }, [jobs, debouncedSearch, statusFilter, sortBy]);
+   481→
+   482→  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+   483→  const safePage = Math.min(page, totalPages);
+   484→  const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+   485→
+   486→  const manualRefresh = useCallback(() => {
+   487→    setSpin(true);
+   488→    void load(true).finally(() => setTimeout(() => setSpin(false), 500));
+   489→  }, [load]);
+   490→
+   491→  return (
+   492→    <div className="space-y-6">
+   493→      <div className="flex flex-wrap items-center gap-3">
+   494→        <h1 className="font-display text-2xl text-ink">Recruitment</h1>
+   495→        <span className="rounded-full bg-fog text-ink text-xs px-2.5 py-1">
+   496→          {filtered.length} posting{filtered.length === 1 ? "" : "s"}
+   497→        </span>
+   498→        <div className="ml-auto flex items-center gap-2">
+   499→          <button type="button" className={ghostBtn} onClick={manualRefresh}>
+   500→            <RefreshCw className={`h-4 w-4 ${spin ? "animate-spin" : ""}`} aria-hidden />
+   501→            Refresh
+   502→          </button>
+   503→          <button type="button" className={ctaBtn} onClick={() => setFormOpen(true)}>
+   504→            <Plus className="h-4 w-4" aria-hidden />
+   505→            Create Job
+   506→          </button>
+   507→        </div>
+   508→      </div>
+   509→
+   510→      {/* Filter bar */}
+   511→      <div className="dlg-card p-4 grid gap-3 sm:grid-cols-[1fr_180px_200px]">
+   512→        <Input
+   513→          className="dlg-input"
+   514→          placeholder="Search title, item no., or place…"
+   515→          value={search}
+   516→          onChange={(e) => setSearch(e.target.value)}
+   517→          aria-label="Search job postings"
+   518→        />
+   519→        <Select
+   520→          value={statusFilter}
+   521→          onValueChange={(v) => {
+   522→            setStatusFilter(v as typeof statusFilter);
+   523→            setPage(1);
+   524→          }}
+   525→        >
+   526→          <SelectTrigger className="dlg-input min-h-[44px] w-full" aria-label="Status filter">
+   527→            <SelectValue />
+   528→          </SelectTrigger>
+   529→          <SelectContent>
+   530→            <SelectItem value="all">All statuses</SelectItem>
+   531→            <SelectItem value="open">Open</SelectItem>
+   532→            <SelectItem value="closed">Closed</SelectItem>
+   533→          </SelectContent>
+   534→        </Select>
+   535→        <Select
+   536→          value={sortBy}
+   537→          onValueChange={(v) => {
+   538→            setSortBy(v as typeof sortBy);
+   539→            setPage(1);
+   540→          }}
+   541→        >
+   542→          <SelectTrigger className="dlg-input min-h-[44px] w-full" aria-label="Sort">
+   543→            <SelectValue />
+   544→          </SelectTrigger>
+   545→          <SelectContent>
+   546→            <SelectItem value="recent">Recently posted</SelectItem>
+   547→            <SelectItem value="deadline">Deadline</SelectItem>
+   548→            <SelectItem value="applications">Applications</SelectItem>
+   549→          </SelectContent>
+   550→        </Select>
+   551→      </div>
+   552→
+   553→      {error ? (
+   554→        <div className="dlg-card p-8 text-center space-y-4">
+   555→          <AlertTriangle className="h-8 w-8 text-dusty-rose mx-auto" aria-hidden />
+   556→          <p className="text-sm text-stone">{error}</p>
+   557→          <button type="button" className={ghostBtn} onClick={() => void load()}>
+   558→            Retry
+   559→          </button>
+   560→        </div>
+   561→      ) : jobs === null ? (
+   562→        <div className="dlg-card p-6 space-y-3">
+   563→          {Array.from({ length: 6 }).map((_, i) => (
+   564→            <Skeleton key={i} className="h-12 w-full rounded-[12px]" />
+   565→          ))}
+   566→        </div>
+   567→      ) : pageRows.length === 0 ? (
+   568→        <div className="dlg-card p-10 text-center space-y-3">
+   569→          <p className="text-sm text-pebble">No job postings match the current filters.</p>
+   570→          <button type="button" className={ctaBtn} onClick={() => setFormOpen(true)}>
+   571→            <Plus className="h-4 w-4" aria-hidden />
+   572→            Create Job
+   573→          </button>
+   574→        </div>
+   575→      ) : (
+   576→        <div className="dlg-card overflow-x-auto">
+   577→          <table className="w-full text-sm">
+   578→            <thead>
+   579→              <tr className="border-b border-[#ececec] text-left text-xs text-pebble">
+   580→                <th className="px-5 py-3 font-medium">Position</th>
+   581→                <th className="px-4 py-3 font-medium">Vacancies</th>
+   582→                <th className="px-4 py-3 font-medium">Monthly salary</th>
+   583→                <th className="px-4 py-3 font-medium">Applications</th>
+   584→                <th className="px-4 py-3 font-medium">Deadline</th>
+   585→                <th className="px-5 py-3 font-medium">Status</th>
+   586→              </tr>
+   587→            </thead>
+   588→            <tbody>
+   589→              {pageRows.map((j) => {
+   590→                const dl = deadlineState(j.deadlineDate);
+   591→                return (
+   592→                  <tr
+   593→                    key={j.id}
+   594→                    className="border-b border-[#ececec] last:border-0 cursor-pointer hover:bg-fog/60 transition-colors"
+   595→                    onClick={() => navigate("job", { id: String(j.id) })}
+   596→                  >
+   597→                    <td className="px-5 py-3.5">
+   598→                      <p className="text-ink">{j.title}</p>
+   599→                      <p className="text-xs text-stone mt-0.5">
+   600→                        {[j.positionType, j.position?.itemNumber, j.position?.placeOfAssignment].filter(Boolean).join(" · ") || "—"}
+   601→                      </p>
+   602→                    </td>
+   603→                    <td className="px-4 py-3.5 text-stone tabular-nums">{j.numberOfVacancy}</td>
+   604→                    <td className="px-4 py-3.5 text-stone tabular-nums">
+   605→                      {j.position?.salaryAmount != null ? formatCurrency(j.position.salaryAmount) : "—"}
+   606→                    </td>
+   607→                    <td className="px-4 py-3.5 text-stone tabular-nums">{j.applicationCount}</td>
+   608→                    <td className={`px-4 py-3.5 ${dl.overdue ? "text-dusty-rose" : "text-stone"}`}>
+   609→                      {formatDate(j.deadlineDate)}
+   610→                    </td>
+   611→                    <td className="px-5 py-3.5">
+   612→                      <OpenClosedPill active={isOpenJob(j)} />
+   613→                    </td>
+   614→                  </tr>
+   615→                );
+   616→              })}
+   617→            </tbody>
+   618→          </table>
+   619→        </div>
+   620→      )}
+   621→
+   622→      {/* Pagination */}
+   623→      {jobs !== null && filtered.length > 0 && (
+   624→        <div className="flex items-center justify-between gap-3">
+   625→          <p className="text-xs text-pebble">
+   626→            {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length}
+   627→          </p>
+   628→          <div className="flex items-center gap-2">
+   629→            <button type="button" className={ghostBtn + " min-h-[36px] px-3 text-xs"} disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
+   630→              Previous
+   631→            </button>
+   632→            <span className="text-xs text-stone tabular-nums">
+   633→              Page {safePage} of {totalPages}
+   634→            </span>
+   635→            <button type="button" className={ghostBtn + " min-h-[36px] px-3 text-xs"} disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>
+   636→              Next
+   637→            </button>
+   638→          </div>
+   639→        </div>
+   640→      )}
+   641→
+   642→      <JobFormDialog open={formOpen} onOpenChange={setFormOpen} job={null} onSaved={() => void load(true)} />
+   643→    </div>
+   644→  );
+   645→}
+   646→

@@ -9,7 +9,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronLeft, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { SectionCard, StatusPill } from "@/components/ui/shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -19,7 +20,9 @@ import {
 import { apiFetch, deadlineState, formatCurrency, formatDate, fullName, humanize } from "@/lib/client";
 import { PIPELINE_STAGES, stageForStatus, getStatusMeta, type StageKey } from "@/lib/status";
 import { navigate, useHashRoute, type JobWire, type ApplicantMini } from "@/lib/router";
-import { JobFormDialog, ghostBtn, ctaBtn } from "@/components/views/recruitment";
+import { dotClass, variantForJobStatus, variantForStatus, type StatusVariant } from "@/lib/status-ui";
+import { cn } from "@/lib/utils";
+import { JobFormDialog, ghostBtn, ghostBadBtn, ctaBtn, iconBtn } from "@/components/views/recruitment";
 
 type QueueRow = {
   id: number;
@@ -35,19 +38,19 @@ type QueueRow = {
 const TABS = ["overview", "pipeline", "candidates"] as const;
 type TabKey = (typeof TABS)[number];
 
-function OpenClosedPill({ active }: { active: boolean }) {
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${active ? "bg-ink text-white" : "bg-fog text-stone"}`}>
-      {active ? "OPEN" : "CLOSED"}
-    </span>
-  );
-}
+/** Stage → functional color variant (matches the analytics funnel bars). */
+const STAGE_VARIANT: Record<StageKey, StatusVariant> = {
+  "Applied": "info",
+  "Under Review": "warn",
+  "Shortlisted": "ok",
+  "Rejected": "bad",
+};
 
 function RichSection({ title, html, text }: { title: string; html: string | null; text: string | null }) {
   if (!html && !text) return null;
   return (
     <section>
-      <h3 className="font-display text-lg text-ink">{title}</h3>
+      <h3 className="text-[15px] font-medium leading-6 text-ink">{title}</h3>
       {html ? (
         <div className="rich-text text-sm text-stone mt-2" dangerouslySetInnerHTML={{ __html: html }} />
       ) : (
@@ -68,6 +71,16 @@ function Monogram({ name }: { name: string }) {
     <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-fog text-xs font-medium text-ink">
       {initials || "?"}
     </span>
+  );
+}
+
+function JobStatusPill({ job, overdue }: { job: JobWire; overdue: boolean }) {
+  const open = job.isActive && !overdue;
+  return (
+    <StatusPill
+      status={open ? "OPEN" : "CLOSED"}
+      variant={variantForJobStatus(open ? "OPEN" : "CLOSED")}
+    />
   );
 }
 
@@ -196,32 +209,38 @@ export default function JobWorkspace() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="space-y-3">
-        <button type="button" className={ghostBtn} onClick={() => navigate("recruitment")}>
-          ← Back to Recruitment
-        </button>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+      {/* Header — PageHeader pattern with back affordance */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex min-w-0 items-start gap-1.5">
+          <button
+            type="button"
+            aria-label="Back to jobs"
+            title="Back to jobs"
+            className="focus-ring -ml-2 mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink"
+            onClick={() => navigate("recruitment")}
+          >
+            <ChevronLeft className="h-5 w-5" aria-hidden />
+          </button>
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-3">
-              <h1 className="font-display text-2xl text-ink">{job.title}</h1>
-              <OpenClosedPill active={job.isActive && !dl.overdue} />
+              <h1 className="font-display text-heading-md truncate">{job.title}</h1>
+              <JobStatusPill job={job} overdue={dl.overdue} />
             </div>
-            <p className="text-sm text-stone mt-1">{vitals || "—"}</p>
+            <p className="mt-1.5 text-sm leading-5 text-stone">{vitals || "—"}</p>
           </div>
-          <div className="flex items-center gap-2">
-            <button type="button" className={ghostBtn} onClick={manualRefresh} aria-label="Refresh">
-              <RefreshCw className={`h-4 w-4 ${spin ? "animate-spin" : ""}`} aria-hidden />
-            </button>
-            <button type="button" className={ghostBtn} onClick={() => setEditOpen(true)}>
-              <Pencil className="h-4 w-4" aria-hidden />
-              Edit
-            </button>
-            <button type="button" className={ghostBtn + " text-dusty-rose"} onClick={() => setDeleteOpen(true)}>
-              <Trash2 className="h-4 w-4" aria-hidden />
-              Delete
-            </button>
-          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <button type="button" className={cn(iconBtn, "h-9 w-9")} onClick={manualRefresh} aria-label="Refresh" title="Refresh">
+            <RefreshCw className={`h-4 w-4 ${spin ? "animate-spin" : ""}`} aria-hidden />
+          </button>
+          <button type="button" className={ghostBtn} onClick={() => setEditOpen(true)}>
+            <Pencil className="h-4 w-4" aria-hidden />
+            Edit
+          </button>
+          <button type="button" className={ghostBadBtn} onClick={() => setDeleteOpen(true)}>
+            <Trash2 className="h-4 w-4" aria-hidden />
+            Delete
+          </button>
         </div>
       </div>
 
@@ -238,7 +257,7 @@ export default function JobWorkspace() {
         {/* Overview */}
         <TabsContent value="overview" className="mt-4">
           <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
-            <div className="dlg-card p-6 space-y-6">
+            <SectionCard bodyClassName="space-y-6">
               <RichSection title="Brief description" html={job.briefDescriptionHtml} text={job.briefDescription} />
               <RichSection title="Duties & responsibilities" html={job.dutiesHtml} text={job.dutiesResponsibilities} />
               <RichSection title="Compensation package" html={job.compensationHtml} text={job.compensationPackage} />
@@ -246,61 +265,51 @@ export default function JobWorkspace() {
               {!job.briefDescriptionHtml && !job.briefDescription && !job.dutiesHtml && !job.dutiesResponsibilities && !job.compensationHtml && !job.compensationPackage && !job.otherQualificationsHtml && !job.otherQualifications && (
                 <p className="text-sm text-pebble text-center py-6">No description published for this posting.</p>
               )}
-            </div>
+            </SectionCard>
 
             {/* Sticky summary */}
             <div className="space-y-4 self-start xl:sticky xl:top-6">
-              <div className="dlg-card p-4 space-y-2">
-                <h3 className="font-display text-lg text-ink">Summary</h3>
-                <div className="flex items-center justify-between text-sm py-1.5 border-b border-[#ececec] last:border-0">
-                  <span className="text-xs text-stone">Vacancies</span>
-                  <span className="text-ink tabular-nums">{job.numberOfVacancy}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm py-1.5 border-b border-[#ececec] last:border-0">
-                  <span className="text-xs text-stone">Monthly salary</span>
-                  <span className="text-ink tabular-nums">{salary ?? "—"}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm py-1.5 border-b border-[#ececec] last:border-0">
-                  <span className="text-xs text-stone">SG · step</span>
-                  <span className="text-ink">{sgStep || "—"}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm py-1.5 border-b border-[#ececec] last:border-0">
-                  <span className="text-xs text-stone">Applications</span>
-                  <span className="text-ink tabular-nums">{apps.length}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm py-1.5 border-b border-[#ececec] last:border-0">
-                  <span className="text-xs text-stone">Published</span>
-                  <span className="text-ink">{formatDate(job.publishDate)}</span>
-                </div>
-                <div className={`flex items-center justify-between text-sm py-1.5 border-b border-[#ececec] last:border-0 ${dl.overdue ? "text-dusty-rose" : ""}`}>
-                  <span className="text-xs text-stone">Deadline</span>
-                  <span className={dl.overdue ? "text-dusty-rose" : "text-ink"}>
-                    {formatDate(job.deadlineDate)}
-                    {dl.overdue ? " · closed" : ""}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-sm py-1.5">
-                  <span className="text-xs text-stone">Processing</span>
-                  <span className="text-ink">{formatDate(job.processingDate)}</span>
-                </div>
-              </div>
+              <SectionCard title="Summary">
+                <dl>
+                  {(
+                    [
+                      ["Vacancies", <span key="v" className="num text-sm font-medium text-ink">{job.numberOfVacancy}</span>],
+                      ["Monthly salary", <span key="s" className="num text-sm font-medium text-ink">{salary ?? "—"}</span>],
+                      ["SG · step", <span key="g" className="text-sm font-medium text-ink">{sgStep || "—"}</span>],
+                      ["Applications", <span key="a" className="num text-sm font-medium text-ink">{apps.length}</span>],
+                      ["Published", <span key="p" className="num text-sm font-medium text-ink">{formatDate(job.publishDate)}</span>],
+                      [
+                        "Deadline",
+                        <span key="d" className={`num text-sm font-medium ${dl.overdue ? "text-[var(--bad)]" : "text-ink"}`}>
+                          {formatDate(job.deadlineDate)}
+                          {dl.overdue ? " · closed" : ""}
+                        </span>,
+                      ],
+                      ["Processing", <span key="pr" className="num text-sm font-medium text-ink">{formatDate(job.processingDate)}</span>],
+                    ] as [string, React.ReactNode][]
+                  ).map(([label, value]) => (
+                    <div key={label} className="flex items-center justify-between gap-3 border-b border-[#ececec] py-2 last:border-0">
+                      <dt className="text-xs text-stone">{label}</dt>
+                      <dd>{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </SectionCard>
 
               {/* Mini pipeline */}
-              <div className="dlg-card p-4 space-y-2">
-                <h3 className="font-display text-lg text-ink">Pipeline</h3>
-                {PIPELINE_STAGES.map((stage) => (
-                  <div key={stage} className="flex items-center justify-between text-sm py-1">
-                    <span className="flex items-center gap-2 text-stone text-xs">
-                      <span
-                        className={`inline-block h-2 w-2 rounded-full ${stage === "Shortlisted" ? "bg-ink" : stage === "Rejected" ? "bg-dusty-rose" : "bg-pebble"}`}
-                        aria-hidden
-                      />
-                      {stage}
-                    </span>
-                    <span className="text-ink tabular-nums">{pipeline[stage].length}</span>
-                  </div>
-                ))}
-              </div>
+              <SectionCard title="Pipeline">
+                <div className="space-y-1">
+                  {PIPELINE_STAGES.map((stage) => (
+                    <div key={stage} className="flex items-center justify-between gap-3 py-1.5">
+                      <span className="flex items-center gap-2.5 text-xs text-stone">
+                        <span className={`stage-dot ${dotClass(STAGE_VARIANT[stage])}`} aria-hidden />
+                        {stage}
+                      </span>
+                      <span className="num text-sm font-medium text-ink">{pipeline[stage].length}</span>
+                    </div>
+                  ))}
+                </div>
+              </SectionCard>
             </div>
           </div>
         </TabsContent>
@@ -313,8 +322,11 @@ export default function JobWorkspace() {
               return (
                 <div key={stage} className="w-[240px] shrink-0 lg:w-auto lg:min-w-0">
                   <div className="flex items-center justify-between px-1 pb-2">
-                    <h2 className="text-sm font-medium text-ink">{stage}</h2>
-                    <span className="rounded-full bg-fog text-stone text-xs px-2 py-0.5">{rows.length}</span>
+                    <h2 className="flex items-center gap-2 text-sm font-medium text-ink">
+                      <span className={`stage-dot ${dotClass(STAGE_VARIANT[stage])}`} aria-hidden />
+                      {stage}
+                    </h2>
+                    <span className="num rounded-full bg-fog px-2 py-0.5 text-xs text-stone">{rows.length}</span>
                   </div>
                   <div className="space-y-2">
                     {rows.length === 0 ? (
@@ -324,10 +336,10 @@ export default function JobWorkspace() {
                         <button
                           key={app.id}
                           type="button"
-                          className="dlg-card-plain border border-[#ececec] rounded-[12px] p-3 w-full text-left hover:shadow-md transition-shadow min-h-[44px]"
+                          className="dlg-card-plain w-full rounded-[12px] border border-[#ececec] p-3 text-left transition-shadow duration-200 hover:shadow-dialog-subtle focus-ring min-h-[44px]"
                           onClick={() => navigate("evaluator-review", { id: String(app.id) })}
                         >
-                          <p className="text-sm text-ink truncate">{fullName(app.applicant)}</p>
+                          <p className="text-sm font-medium text-ink truncate">{fullName(app.applicant)}</p>
                           <p className="text-xs text-stone mt-1">
                             Applied {formatDate(app.dateApplied)} · {getStatusMeta(app.status).label}
                           </p>
@@ -343,29 +355,27 @@ export default function JobWorkspace() {
 
         {/* Candidates */}
         <TabsContent value="candidates" className="mt-4">
-          <div className="space-y-3">
+          <div className="space-y-2">
             {apps.length === 0 ? (
-              <div className="dlg-card p-10 text-center">
-                <p className="text-sm text-pebble">No applications for this posting yet.</p>
+              <div className="dlg-card p-6">
+                <p className="text-sm text-pebble text-center py-6">No applications for this posting yet.</p>
               </div>
             ) : (
               apps.map((app) => (
                 <button
                   key={app.id}
                   type="button"
-                  className="dlg-card-plain border border-[#ececec] rounded-[12px] p-4 w-full flex items-center gap-3 text-left hover:shadow-md transition-shadow min-h-[44px]"
+                  className="dlg-card-plain min-h-[44px] w-full rounded-[12px] border border-[#ececec] p-4 flex items-center gap-3 text-left transition-shadow duration-200 hover:shadow-dialog-subtle focus-ring"
                   onClick={() => navigate("candidate", { id: String(app.applicantId) })}
                 >
                   <Monogram name={fullName(app.applicant)} />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm text-ink truncate">{fullName(app.applicant)}</p>
+                    <p className="text-sm font-medium text-ink truncate">{fullName(app.applicant)}</p>
                     <p className="text-xs text-stone mt-0.5">
                       {humanize(app.job.title)} · Applied {formatDate(app.dateApplied)}
                     </p>
                   </div>
-                  <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-xs font-medium ${getStatusMeta(app.status).tone === "danger" ? "bg-dusty-rose/15 text-dusty-rose" : getStatusMeta(app.status).tone === "success" ? "bg-ink text-white" : "bg-fog text-ink"}`}>
-                    {getStatusMeta(app.status).label}
-                  </span>
+                  <StatusPill status={getStatusMeta(app.status).label} variant={variantForStatus(app.status)} />
                 </button>
               ))
             )}
@@ -392,7 +402,7 @@ export default function JobWorkspace() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-dusty-rose/10 text-dusty-rose hover:bg-dusty-rose/20"
+              className="rounded-full border border-[var(--bad)]/30 bg-white text-[var(--bad)] hover:bg-[var(--bad-bg)]"
               onClick={(e) => {
                 e.preventDefault();
                 void deleteJob();
