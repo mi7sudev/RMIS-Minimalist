@@ -361,7 +361,9 @@ export default function PersonalInfoSection({
         <Loader2 className="h-3 w-3 animate-spin" /> Saving…
       </span>
     ) : saveState === "saved" ? (
-      <span className="text-xs leading-none text-[var(--ok)]">Saved ✓</span>
+      <span className="inline-flex items-center gap-1.5 text-xs leading-none text-[var(--ok)]">
+        <span className="h-1.5 w-1.5 rounded-full bg-[var(--ok)]" aria-hidden="true" /> Saved ✓
+      </span>
     ) : saveState === "error" ? (
       <span className="text-xs leading-none text-[var(--bad)]">Save failed — click Save Changes</span>
     ) : saveState === "dirty" ? (
@@ -371,6 +373,7 @@ export default function PersonalInfoSection({
   return (
     <SectionCard
       icon={UserRound}
+      chipTone="slate"
       title="Personal Information"
       description="Changes save automatically as you type."
       actions={

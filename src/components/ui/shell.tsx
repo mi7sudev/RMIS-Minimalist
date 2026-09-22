@@ -1,9 +1,9 @@
 "use client";
 
 // ============================================================================
-// RMIS — shared presentation primitives for the enterprise polish pass.
-// PageHeader, StatusPill, KpiCard, EmptyState, SectionCard, SkeletonBlocks.
-// Pure presentation: no fetching, no business logic. Compose per view.
+// RMIS — shared presentation primitives for the premium enterprise pass.
+// PageHeader, StatusPill, KpiCard, EmptyState, SectionCard, Monogram,
+// SkeletonBlocks. Pure presentation: no fetching, no business logic.
 // ============================================================================
 
 import * as React from "react";
@@ -17,11 +17,13 @@ export function PageHeader({
   title,
   description,
   actions,
+  eyebrow,
   className,
 }: {
   title: string;
   description?: React.ReactNode;
   actions?: React.ReactNode;
+  eyebrow?: React.ReactNode;
   className?: string;
 }) {
   return (
@@ -32,9 +34,14 @@ export function PageHeader({
       )}
     >
       <div className="min-w-0">
-        <h1 className="font-display text-heading-md truncate">{title}</h1>
+        {eyebrow ? (
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-pebble">
+            {eyebrow}
+          </p>
+        ) : null}
+        <h1 className="font-display text-heading-md tracking-[-0.01em] truncate">{title}</h1>
         {description ? (
-          <p className="mt-1.5 text-sm leading-5 text-stone">{description}</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-stone">{description}</p>
         ) : null}
       </div>
       {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
@@ -63,14 +70,65 @@ export function StatusPill({
   );
 }
 
+// ── Monogram (gradient avatar tile) ─────────────────────────────────────────
+
+export function Monogram({
+  children,
+  warm = false,
+  className,
+  size = 36,
+}: {
+  children: React.ReactNode;
+  warm?: boolean;
+  className?: string;
+  size?: number;
+}) {
+  return (
+    <span
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.34) }}
+      className={cn("monogram", warm && "monogram-warm", className)}
+    >
+      {children}
+    </span>
+  );
+}
+
+// ── Tinted icon chip ────────────────────────────────────────────────────────
+
+export type ChipTone = "amber" | "emerald" | "rose" | "slate" | "ink" | "gold" | "plum";
+
+export function IconChip({
+  icon: Icon,
+  tone = "slate",
+  size = 40,
+  iconSize,
+  className,
+}: {
+  icon: LucideIcon;
+  tone?: ChipTone;
+  size?: number;
+  iconSize?: number;
+  className?: string;
+}) {
+  return (
+    <span
+      style={{ width: size, height: size }}
+      className={cn("chip", `chip-${tone}`, className)}
+      aria-hidden="true"
+    >
+      <Icon style={{ width: iconSize ?? Math.round(size * 0.46), height: iconSize ?? Math.round(size * 0.46) }} />
+    </span>
+  );
+}
+
 // ── KpiCard ─────────────────────────────────────────────────────────────────
 
-const TONE_TEXT: Record<NonNullable<KpiCardProps["tone"]>, string> = {
-  ok: "text-[var(--ok)]",
-  warn: "text-[var(--warn)]",
-  bad: "text-[var(--bad)]",
-  info: "text-[var(--info)]",
-  neutral: "text-stone",
+const TONE_CHIP: Record<NonNullable<KpiCardProps["tone"]>, ChipTone> = {
+  ok: "emerald",
+  warn: "gold",
+  bad: "rose",
+  info: "plum",
+  neutral: "slate",
 };
 
 export type KpiCardProps = {
@@ -82,6 +140,8 @@ export type KpiCardProps = {
   onClick?: () => void;
   ariaLabel?: string;
   className?: string;
+  /** Optional decorative trailing element (sparkline, delta, etc.). */
+  aside?: React.ReactNode;
 };
 
 export function KpiCard({
@@ -93,33 +153,34 @@ export function KpiCard({
   onClick,
   ariaLabel,
   className,
+  aside,
 }: KpiCardProps) {
   const body = (
     <>
       <div className="flex items-start justify-between gap-3">
-        <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-stone">{label}</p>
-        {Icon ? (
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[12px] bg-fog">
-            <Icon className={cn("h-[18px] w-[18px]", TONE_TEXT[tone])} aria-hidden="true" />
-          </span>
-        ) : null}
+        <p className="pt-0.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-stone">{label}</p>
+        {Icon ? <IconChip icon={Icon} tone={TONE_CHIP[tone]} size={40} /> : null}
       </div>
-      <div className="mt-3 flex items-baseline gap-2">
-        <span className="num text-[32px] font-medium leading-none text-ink">{value}</span>
-        {hint ? <span className="text-xs text-pebble">{hint}</span> : null}
+      <div className="mt-4 flex items-end justify-between gap-3">
+        <div className="flex items-baseline gap-2">
+          <span className="num text-[34px] font-semibold leading-none tracking-[-0.02em] text-ink">{value}</span>
+          {hint ? <span className="text-xs font-medium text-pebble">{hint}</span> : null}
+        </div>
+        {aside}
       </div>
     </>
   );
 
   const base = cn(
-    "dlg-card-plain border border-border p-6 text-left transition-shadow duration-200",
-    onClick && "focus-ring cursor-pointer hover:border-ink/10 hover:shadow-dialog-subtle",
+    "dlg-card-plain border border-black/[0.07] bg-gradient-to-b from-white to-[#fdfdfc] p-6 shadow-e2",
+    onClick &&
+      "group focus-ring cursor-pointer lift hover:border-ink/15",
     className
   );
 
   if (onClick) {
     return (
-      <button type="button" onClick={onClick} aria-label={ariaLabel ?? label} className={cn(base, "block w-full")}>
+      <button type="button" onClick={onClick} aria-label={ariaLabel ?? label} className={cn(base, "block w-full text-left")}>
         {body}
       </button>
     );
@@ -135,6 +196,7 @@ export function EmptyState({
   description,
   action,
   compact = false,
+  tone = "slate",
   className,
 }: {
   icon: LucideIcon;
@@ -142,40 +204,45 @@ export function EmptyState({
   description?: string;
   action?: React.ReactNode;
   compact?: boolean;
+  tone?: ChipTone;
   className?: string;
 }) {
   return (
     <div
       className={cn(
         "flex flex-col items-center justify-center px-6 text-center",
-        compact ? "min-h-[96px] py-6" : "min-h-[160px] py-10",
+        compact ? "min-h-[104px] py-6" : "min-h-[176px] py-10",
         className
       )}
     >
       <span
         className={cn(
-          "mb-3 grid place-items-center rounded-full bg-fog text-pebble",
-          compact ? "h-9 w-9" : "h-12 w-12"
+          "chip mb-4 rounded-full",
+          `chip-${tone}`,
+          compact ? "h-10 w-10" : "h-14 w-14"
         )}
       >
-        <Icon className={compact ? "h-4 w-4" : "h-5 w-5"} aria-hidden="true" />
+        <Icon className={compact ? "h-4.5 w-4.5" : "h-6 w-6"} aria-hidden="true" />
       </span>
-      <p className="text-sm font-medium text-ink">{title}</p>
+      <p className="text-sm font-semibold text-ink">{title}</p>
       {description ? (
-        <p className="mt-1 max-w-sm text-[13px] leading-5 text-stone">{description}</p>
+        <p className="mt-1.5 max-w-sm text-[13px] leading-5 text-stone">{description}</p>
       ) : null}
-      {action ? <div className="mt-4">{action}</div> : null}
+      {action ? <div className="mt-5">{action}</div> : null}
     </div>
   );
 }
 
 // ── SectionCard ─────────────────────────────────────────────────────────────
 
+const SECTION_CHIP_TONE: Record<string, ChipTone> = {};
+
 export function SectionCard({
   title,
   description,
   actions,
   icon: Icon,
+  chipTone,
   children,
   className,
   bodyClassName,
@@ -184,6 +251,7 @@ export function SectionCard({
   description?: string;
   actions?: React.ReactNode;
   icon?: LucideIcon;
+  chipTone?: ChipTone;
   children: React.ReactNode;
   className?: string;
   bodyClassName?: string;
@@ -191,15 +259,18 @@ export function SectionCard({
   return (
     <section className={cn("dlg-card p-6", className)} aria-label={title}>
       {title || actions ? (
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2.5">
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             {Icon ? (
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[10px] bg-fog">
-                <Icon className="h-4 w-4 text-graphite" aria-hidden="true" />
-              </span>
+              <IconChip
+                icon={Icon}
+                tone={chipTone ?? SECTION_CHIP_TONE[title ?? ""] ?? "slate"}
+                size={36}
+                iconSize={16}
+              />
             ) : null}
             <div className="min-w-0">
-              <h2 className="truncate text-[15px] font-medium leading-6 text-ink">{title}</h2>
+              <h2 className="truncate text-[15px] font-semibold leading-6 text-ink">{title}</h2>
               {description ? <p className="truncate text-xs text-stone">{description}</p> : null}
             </div>
           </div>
@@ -217,8 +288,11 @@ export function SkeletonKpis({ count = 4, className }: { count?: number; classNa
   return (
     <div className={cn("grid grid-cols-2 gap-4 lg:grid-cols-4", className)} aria-hidden="true">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="dlg-card-plain border border-border p-6">
-          <div className="skel h-3 w-20" />
+        <div key={i} className="dlg-card-plain border border-black/[0.07] p-6 shadow-e1">
+          <div className="flex items-start justify-between">
+            <div className="skel h-3 w-20" />
+            <div className="skel h-10 w-10 rounded-xl" />
+          </div>
           <div className="skel mt-4 h-8 w-16" />
         </div>
       ))}

@@ -3,53 +3,96 @@
 // ============================================================================
 // RMIS — Sign-in view (spec §3.3, §7.3): identifier (email or username) +
 // password, demo account chips, welcome toast → session refresh → role home.
-// Presentation pass: lg+ split screen — quiet trust panel on fog (left) and
-// the existing white form card (right). All handlers, API calls, and copy
+// Wave-3 "Ink & Ember" pass: lg+ split screen with a dark brand panel (ember
+// glow, "M" watermark, glass trust rows) on the left and the upgraded form
+// card on the right; below lg the panel collapses to a compact dark strip.
+// Demo chips are tinted selectable pills. All handlers, API calls, and copy
 // are preserved exactly.
 // ============================================================================
 
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Activity, ClipboardList, FileSpreadsheet } from "lucide-react";
+import { Activity, Check, FileSpreadsheet, ShieldCheck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
+import { IconChip, Monogram } from "@/components/ui/shell";
+import type { ChipTone } from "@/components/ui/shell";
 import { useSession } from "@/components/session-provider";
 import { apiFetch } from "@/lib/client";
 import { navigate, ROLE_HOME } from "@/lib/router";
+import { cn } from "@/lib/utils";
 
 const DEMO_ACCOUNTS = ["testadmin", "testevaluator", "testapplicant"] as const;
 
-const TRUST_POINTS: ReadonlyArray<{ icon: LucideIcon; text: string }> = [
-  { icon: ClipboardList, text: "CSC-standard position catalog" },
-  { icon: FileSpreadsheet, text: "PDS auto-fill from your Civil Service Form 212" },
-  { icon: Activity, text: "Track your application in real time" },
+const TRUST_POINTS: ReadonlyArray<{ icon: LucideIcon; tone: ChipTone; text: string }> = [
+  { icon: FileSpreadsheet, tone: "amber", text: "PDS auto-fill" },
+  { icon: Activity, tone: "emerald", text: "Real-time status tracking" },
+  { icon: ShieldCheck, tone: "plum", text: "Data Privacy Act compliant" },
 ];
 
-/** Quiet reassurance panel — lg+ only, sits directly on the fog canvas. */
-function AuthTrustPanel({ heading }: { heading: string }) {
+/** Dark brand panel — lg+ only. Decorative glows are pointer-events-none. */
+function AuthBrandPanel() {
   return (
-    <div className="hidden items-center lg:flex lg:w-[42%] xl:w-[46%]">
-      <div className="w-full max-w-md px-12 xl:pl-20 xl:pr-16">
-        <div className="flex items-center gap-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-ink text-base font-medium text-white">
+    <aside className="relative hidden overflow-hidden bg-[linear-gradient(180deg,#1b1b28_0%,#14141d_100%)] lg:flex lg:w-[42%] xl:w-[46%]">
+      {/* Ember glow + watermark (decorative) */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -left-32 -top-32 h-[480px] w-[480px] rounded-full bg-[rgba(246,146,81,0.16)] blur-3xl"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -bottom-24 -right-16 h-[360px] w-[360px] rounded-full bg-[rgba(246,146,81,0.07)] blur-3xl"
+      />
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute -bottom-[130px] -right-8 select-none font-display text-[400px] leading-none text-white/[0.04]"
+      >
+        M
+      </span>
+
+      <div className="relative z-10 flex w-full max-w-md flex-col justify-center px-12 py-16 xl:pl-20 xl:pr-16">
+        <div className="inline-flex w-fit items-center gap-3 rounded-full bg-white/[0.06] py-2 pl-2 pr-4 ring-1 ring-white/10 backdrop-blur">
+          <Monogram warm size={32}>
             M
-          </span>
-          <span className="text-sm font-medium text-ink">MIRDC Recruitment</span>
+          </Monogram>
+          <span className="text-sm font-semibold text-white/90">MIRDC Recruitment</span>
         </div>
 
-        <h1 className="mt-10 font-display text-heading-md">{heading}</h1>
+        <h1 className="mt-10 font-display text-[clamp(30px,2.6vw,38px)] leading-[1.18] tracking-[-0.01em] text-white">
+          Build a career that moves the nation forward.
+        </h1>
+        <p className="mt-4 text-sm leading-relaxed text-white/55">
+          The official hiring portal of the Metals Industry Research and Development Center.
+        </p>
 
-        <ul className="mt-9 space-y-5">
+        <ul className="mt-10 space-y-3">
           {TRUST_POINTS.map((point) => (
-            <li key={point.text} className="flex items-center gap-3.5">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white">
-                <point.icon className="h-4 w-4 text-graphite" aria-hidden="true" />
-              </span>
-              <span className="text-xs leading-relaxed text-stone">{point.text}</span>
+            <li
+              key={point.text}
+              className="flex items-center gap-3.5 rounded-2xl bg-white/[0.05] p-3.5 ring-1 ring-white/10 backdrop-blur-sm"
+            >
+              <IconChip icon={point.icon} tone={point.tone} size={36} iconSize={16} />
+              <span className="text-[13px] font-medium text-white/85">{point.text}</span>
             </li>
           ))}
         </ul>
+      </div>
+    </aside>
+  );
+}
+
+/** Compact dark brand strip — below lg only. */
+function MobileBrandStrip() {
+  return (
+    <div className="relative overflow-hidden bg-[linear-gradient(180deg,#1b1b28_0%,#14141d_100%)] px-4 py-4 lg:hidden">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-20 left-1/2 h-44 w-44 -translate-x-1/2 rounded-full bg-[rgba(246,146,81,0.16)] blur-2xl"
+      />
+      <div className="relative z-10 flex items-center justify-center gap-2.5">
+        <Monogram warm size={28}>M</Monogram>
+        <span className="text-sm font-semibold text-white">MIRDC Recruitment</span>
       </div>
     </div>
   );
@@ -88,21 +131,17 @@ export default function SignInView() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-fog lg:flex-row">
-      <AuthTrustPanel heading="Welcome back." />
+    <div className="flex min-h-screen flex-col lg:flex-row">
+      <AuthBrandPanel />
+      <MobileBrandStrip />
 
       {/* Form column */}
       <div className="flex flex-1 items-center justify-center px-4 py-12 sm:px-6">
         <div className="w-full max-w-md animate-in fade-in slide-in-from-bottom-2 duration-300">
-          <div className="dlg-card p-6 sm:p-8 lg:p-10">
-            {/* Card header — mobile/tablet only; the lg+ split panel carries brand + heading */}
+          <div className="dlg-card-plain shadow-e3 ring-1 ring-black/[0.06] p-6 sm:p-8 lg:p-10">
+            {/* Card header — mobile/tablet only; the lg+ brand panel carries brand + heading */}
             <div className="lg:hidden">
-              <div className="flex justify-center">
-                <span className="grid h-12 w-12 place-items-center rounded-[12px] bg-ink text-xl font-medium text-white">
-                  M
-                </span>
-              </div>
-              <h2 className="mt-5 text-center font-display text-3xl text-carbon">Welcome back</h2>
+              <h2 className="text-center font-display text-3xl text-carbon">Welcome back</h2>
             </div>
             <p className="mt-2 text-center text-sm text-stone lg:mt-0 lg:text-left">
               Sign in with your email or username to continue.
@@ -152,19 +191,29 @@ export default function SignInView() {
             <div className="mt-6 border-t border-border pt-5">
               <p className="text-xs font-medium uppercase tracking-wider text-pebble">Demo accounts</p>
               <div className="mt-2.5 flex flex-wrap gap-2">
-                {DEMO_ACCOUNTS.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => {
-                      setIdentifier(name);
-                      setPassword("password123");
-                    }}
-                    className="dlg-ghost min-h-[44px] px-4 text-xs"
-                  >
-                    {name}
-                  </button>
-                ))}
+                {DEMO_ACCOUNTS.map((name) => {
+                  const selected = identifier === name && password === "password123";
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => {
+                        setIdentifier(name);
+                        setPassword("password123");
+                      }}
+                      className={cn(
+                        "inline-flex min-h-[44px] items-center gap-1.5 rounded-full px-4 text-xs font-medium transition-all duration-150",
+                        selected
+                          ? "bg-[linear-gradient(135deg,#2b2b3d,#181825)] text-[#f0ede8] shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_2px_4px_rgba(24,24,37,0.25)]"
+                          : "bg-[linear-gradient(135deg,#f0eff2,#e4e3e8)] text-graphite shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_1px_2px_rgba(24,24,37,0.06)] hover:brightness-[1.03]"
+                      )}
+                    >
+                      {selected && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
+                      {name}
+                    </button>
+                  );
+                })}
               </div>
               <p className="mt-3 text-xs leading-relaxed text-pebble">
                 password123 · staff accounts are restricted to the MIRDC intranet; applicants can

@@ -199,6 +199,7 @@ export default function EligibilitySection({
   return (
     <SectionCard
       icon={BadgeCheck}
+      chipTone="gold"
       title="Eligibility"
       description="Civil-service eligibility — matched verbatim against job requirements."
       actions={
@@ -221,6 +222,7 @@ export default function EligibilitySection({
         <EmptyState
           compact
           icon={BadgeCheck}
+          tone="gold"
           title="No eligibility on file"
           description="Bar/board licenses count as eligibility under RA 1080."
         />

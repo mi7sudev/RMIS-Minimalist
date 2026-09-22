@@ -85,6 +85,7 @@ export default function TrainingSection({
   return (
     <SectionCard
       icon={BookOpen}
+      chipTone="emerald"
       title="Training"
       description="Seminars and trainings — hours count toward training requirements."
       actions={
@@ -104,7 +105,7 @@ export default function TrainingSection({
       }
     >
       {items.length === 0 ? (
-        <EmptyState compact icon={BookOpen} title="No training entries yet" description="Add seminars and trainings you have completed." />
+        <EmptyState compact icon={BookOpen} tone="emerald" title="No training entries yet" description="Add seminars and trainings you have completed." />
       ) : (
         <div className="space-y-3">
           {items.map((row) => (

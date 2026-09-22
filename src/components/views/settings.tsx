@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Mail, Pencil, Search, Send, ShieldCheck, Trash2, Users } from "lucide-react";
+import { Mail, Pencil, ScrollText, Search, Send, ShieldCheck, Trash2, Users } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -22,7 +22,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { EmptyState, PageHeader, SkeletonRows, StatusPill } from "@/components/ui/shell";
+import { EmptyState, IconChip, Monogram, PageHeader, SkeletonRows, StatusPill } from "@/components/ui/shell";
 import { apiFetch, formatDateTime, humanize, timeAgo } from "@/lib/client";
 import { useHashRoute, navigate } from "@/lib/router";
 import { pillClass } from "@/lib/status-ui";
@@ -39,6 +39,18 @@ type TabKey = (typeof TABS)[number]["key"];
 
 function labelCls() {
   return "mb-1.5 block text-xs font-medium text-graphite";
+}
+
+/** First-letter monogram text ("?" when empty). */
+function monogramOf(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? "")
+      .join("") || "?"
+  );
 }
 
 // ───────────────────────────────────────────────────────────── Users panel
@@ -134,10 +146,14 @@ function UsersPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-stone">
-          <span className="num">{total}</span> account{total === 1 ? "" : "s"}
-        </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <IconChip icon={Users} tone="slate" size={36} iconSize={16} />
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[15px] font-semibold leading-6 text-ink">Users &amp; Roles</h2>
+          <p className="text-xs text-stone">
+            <span className="num">{total}</span> account{total === 1 ? "" : "s"}
+          </p>
+        </div>
         <button type="button" className={ctaBtn} onClick={() => setCreateOpen(true)}>Create User</button>
       </div>
 
@@ -175,15 +191,22 @@ function UsersPanel() {
               {rows?.length === 0 && (
                 <tr>
                   <td colSpan={4} className="p-6">
-                    <EmptyState icon={Users} title="No accounts match your filters." compact />
+                    <EmptyState icon={Users} tone="slate" title="No accounts match your filters." compact />
                   </td>
                 </tr>
               )}
               {rows?.map((u) => (
                 <tr key={u.id} className="group/row border-t border-border transition-colors hover:bg-fog/60">
                   <td className="px-5 py-3">
-                    <p className="text-sm font-medium text-ink">{[u.firstName, u.lastName].filter(Boolean).join(" ") || u.username}</p>
-                    <p className="num text-xs text-pebble">{u.email} · @{u.username}</p>
+                    <div className="flex items-center gap-3">
+                      <span aria-hidden="true" className="contents">
+                        <Monogram size={32}>{monogramOf([u.firstName, u.lastName].filter(Boolean).join(" ") || u.username)}</Monogram>
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-ink">{[u.firstName, u.lastName].filter(Boolean).join(" ") || u.username}</p>
+                        <p className="num text-xs text-pebble">{u.email} · @{u.username}</p>
+                      </div>
+                    </div>
                   </td>
                   <td className="px-4 py-3"><span className={pillClass("neutral")}>{u.role}</span></td>
                   <td className="px-4 py-3">
@@ -454,6 +477,10 @@ function AuditPanel() {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <IconChip icon={ScrollText} tone="plum" size={36} iconSize={16} />
+        <h2 className="text-[15px] font-semibold leading-6 text-ink">Audit Log</h2>
+      </div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {(
           [
@@ -463,7 +490,7 @@ function AuditPanel() {
         ).map(([label, value]) => (
           <div key={label} className="dlg-card p-4">
             <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-stone">{label}</p>
-            <p className="num mt-2 text-[28px] font-medium leading-none text-ink">{value ?? "—"}</p>
+            <p className="num mt-2 text-[28px] font-semibold leading-none text-ink">{value ?? "—"}</p>
           </div>
         ))}
       </div>
@@ -485,7 +512,7 @@ function AuditPanel() {
       <div className="dlg-card overflow-hidden">
         <div className="max-h-96 overflow-y-auto scroll-thin p-2">
           {rows === null && <div className="p-2"><SkeletonRows rows={6} rowClassName="h-11" /></div>}
-          {rows?.length === 0 && <EmptyState icon={ShieldCheck} title="No audit events match." compact />}
+          {rows?.length === 0 && <EmptyState icon={ScrollText} tone="plum" title="No audit events match." compact />}
           {rows?.map((r) => (
             <div key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[12px] px-3 py-2.5 transition-colors hover:bg-fog/60">
               <span className="num w-24 shrink-0 text-xs text-pebble" title={formatDateTime(r.timestamp)}>
@@ -592,6 +619,16 @@ function MessagingPanel({ kind }: { kind: "sms" | "email" }) {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        {kind === "sms" ? (
+          <IconChip icon={Send} tone="gold" size={36} iconSize={16} />
+        ) : (
+          <IconChip icon={Mail} tone="emerald" size={36} iconSize={16} />
+        )}
+        <h2 className="text-[15px] font-semibold leading-6 text-ink">
+          {kind === "sms" ? "SMS Gateway" : "Email Notices"}
+        </h2>
+      </div>
       <div className="dlg-card p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -608,7 +645,7 @@ function MessagingPanel({ kind }: { kind: "sms" | "email" }) {
           {tiles.map(([label, value]) => (
             <div key={label} className="rounded-[12px] bg-fog p-3">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-stone">{label}</p>
-              <p className="num mt-1 text-xl font-medium text-ink">{value ?? "—"}</p>
+              <p className="num mt-1 text-[28px] font-semibold leading-none text-ink">{value ?? "—"}</p>
             </div>
           ))}
         </div>
@@ -653,7 +690,12 @@ function MessagingPanel({ kind }: { kind: "sms" | "email" }) {
               {data?.logs.length === 0 && (
                 <tr>
                   <td colSpan={4} className="p-6">
-                    <EmptyState icon={Send} title="Nothing sent yet." compact />
+                    <EmptyState
+                      icon={kind === "sms" ? Send : Mail}
+                      tone={kind === "sms" ? "gold" : "emerald"}
+                      title="Nothing sent yet."
+                      compact
+                    />
                   </td>
                 </tr>
               )}
@@ -703,7 +745,7 @@ export default function Settings() {
                 onClick={() => navigate("settings", { tab: t.key })}
                 aria-current={tab === t.key ? "page" : undefined}
                 className={`focus-ring inline-flex h-11 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-full px-4 text-sm transition-colors ${
-                  tab === t.key ? "bg-ink text-white" : "text-stone hover:bg-fog hover:text-ink"
+                  tab === t.key ? "chip-ink" : "text-stone hover:bg-fog hover:text-ink"
                 }`}
               >
                 <t.icon className="h-4 w-4 shrink-0" aria-hidden />

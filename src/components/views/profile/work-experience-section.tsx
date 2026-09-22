@@ -87,6 +87,7 @@ export default function WorkExperienceSection({
   return (
     <SectionCard
       icon={Briefcase}
+      chipTone="amber"
       title="Work Experience"
       description="Relevant roles — dates drive the experience requirement check."
       actions={
@@ -109,6 +110,7 @@ export default function WorkExperienceSection({
         <EmptyState
           compact
           icon={Briefcase}
+          tone="amber"
           title="No work experience yet"
           description="At least one entry is required to complete your profile."
         />

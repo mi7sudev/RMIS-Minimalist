@@ -1,0 +1,1228 @@
+     1→"use client";
+     2→
+     3→// ============================================================================
+     4→// RMIS — Evaluator review workspace (spec §7.9, §9.3).
+     5→// Default export = smart wrapper: with an `applicationId` prop it renders the
+     6→// workspace body (used inside the review-queue modal); without one it reads
+     7→// the deep-link `#/evaluator-review?id=<applicationId>` from useHashRoute and
+     8→// renders page-style with a close action back to the review queue.
+     9→// LEFT = frozen-snapshot dossier (underline section tabs), RIGHT = decision
+    10→// rail (requirements match, credentials, state banner, decisions, notices,
+    11→// direct email). Enterprise polish pass: functional status pills/dots only —
+    12→// every handler, fetch, and confirmation dialog is unchanged.
+    13→// ============================================================================
+    14→
+    15→import { useCallback, useEffect, useRef, useState } from "react";
+    16→import { toast } from "sonner";
+    17→import {
+    18→  AlertTriangle, ArrowLeft, Award, BadgeCheck, BookOpen, BriefcaseBusiness,
+    19→  FileText, GraduationCap, Mail, Paperclip, Send, UserRound,
+    20→} from "lucide-react";
+    21→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    22→import {
+    23→  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    24→} from "@/components/ui/dialog";
+    25→import {
+    26→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    27→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    28→} from "@/components/ui/alert-dialog";
+    29→import { Input } from "@/components/ui/input";
+    30→import { Label } from "@/components/ui/label";
+    31→import { Skeleton } from "@/components/ui/skeleton";
+    32→import { Textarea } from "@/components/ui/textarea";
+    33→import { EmptyState, PageHeader, SkeletonRows } from "@/components/ui/shell";
+    34→import { apiFetch, formatDate, formatDateTime, fullName, timeAgo } from "@/lib/client";
+    35→import { getStatusMeta, stageForStatus, type Tone } from "@/lib/status";
+    36→import { pillClass, variantForStatus, variantForVerdict, type StatusVariant } from "@/lib/status-ui";
+    37→import { navigate, useHashRoute } from "@/lib/router";
+    38→import { cn } from "@/lib/utils";
+    39→import type { RequirementsReport } from "@/lib/requirements";
+    40→
+    41→// ── Wire shapes (GET /api/evaluator/applications/[id]) ──────────────────────
+    42→
+    43→type SnapRow = Record<string, unknown>;
+    44→
+    45→type ReviewPayload = {
+    46→  id: number;
+    47→  status: string;
+    48→  reason: string | null;
+    49→  dateApplied: string;
+    50→  applicantId: number;
+    51→  jobId: number;
+    52→  job: {
+    53→    id: number;
+    54→    title: string;
+    55→    positionType: string | null;
+    56→    position: {
+    57→      positionTitle: string;
+    58→      placeOfAssignment: string | null;
+    59→      itemNumber: string | null;
+    60→    } | null;
+    61→  };
+    62→  applicant: {
+    63→    id: number;
+    64→    firstName: string | null;
+    65→    lastName: string | null;
+    66→    emailAddress: string | null;
+    67→    contactNumber: string | null;
+    68→    gender: string | null;
+    69→    isProfileComplete: boolean;
+    70→  };
+    71→  snapshots: {
+    72→    profile: SnapRow | null;
+    73→    educations: SnapRow[];
+    74→    experiences: SnapRow[];
+    75→    trainings: SnapRow[];
+    76→    eligibilities: SnapRow[];
+    77→    awards: SnapRow[];
+    78→    documents: unknown[];
+    79→  };
+    80→  requirements: RequirementsReport;
+    81→};
+    82→
+    83→type NoticeRow = {
+    84→  id: number;
+    85→  type: "regret" | "interview" | "skills_exam";
+    86→  subject: string;
+    87→  status: string;
+    88→  to: string;
+    89→  sentAt: string;
+    90→};
+    91→
+    92→type DirectEmailRow = {
+    93→  id: number;
+    94→  to: string;
+    95→  subject: string;
+    96→  status: string;
+    97→  provider: string;
+    98→  error: string | null;
+    99→  attachments: string | null;
+   100→  createdAt: string;
+   101→};
+   102→
+   103→type NoticeSendResult = {
+   104→  type: string;
+   105→  email: { status: string; to?: string; error?: string | null };
+   106→  sms: { status: string; to?: string; error?: string | null };
+   107→};
+   108→
+   109→// ── Small shared visuals ────────────────────────────────────────────────────
+   110→
+   111→/** Legacy tone→class bridge (kept for existing importers). */
+   112→export function toneClass(tone: Tone): string {
+   113→  const map: Record<Tone, StatusVariant> = {
+   114→    success: "ok",
+   115→    warning: "warn",
+   116→    danger: "bad",
+   117→    info: "info",
+   118→    primary: "info",
+   119→    neutral: "neutral",
+   120→  };
+   121→  return pillClass(map[tone]);
+   122→}
+   123→
+   124→/**
+   125→ * Canonical stage/status pill. Displays the normalized status label; the
+   126→ * variant comes from variantForStatus unless explicitly overridden (used for
+   127→ * completion / verdict labels that are not application statuses).
+   128→ */
+   129→export function StatusPill({
+   130→  status,
+   131→  variant,
+   132→  className = "",
+   133→}: {
+   134→  status: string | null | undefined;
+   135→  variant?: StatusVariant;
+   136→  className?: string;
+   137→}) {
+   138→  const label = getStatusMeta(status).label;
+   139→  const v: StatusVariant = variant ?? variantForStatus(status);
+   140→  return <span className={cn(pillClass(v), "shrink-0", className)}>{label}</span>;
+   141→}
+   142→
+   143→function verdictMeta(verdict: string): { chip: string; variant: StatusVariant; meaning: string } {
+   144→  switch (verdict) {
+   145→    case "ALL_MET":
+   146→      return { chip: "Qualified", variant: variantForVerdict("Qualified"), meaning: "Meets the minimum requirements" };
+   147→    case "PARTIAL":
+   148→      return { chip: "Partial", variant: variantForVerdict("Partial"), meaning: "Partially meets the minimum requirements" };
+   149→    case "NONE_MET":
+   150→      return { chip: "Not qualified", variant: variantForVerdict("Not qualified"), meaning: "Does not meet the minimum requirements" };
+   151→    case "NEEDS_REVIEW":
+   152→      return { chip: "Verify", variant: variantForVerdict("Verify"), meaning: "Needs manual verification" };
+   153→    case "NO_REQUIREMENTS":
+   154→      return { chip: "No reqs", variant: variantForVerdict("No reqs"), meaning: "No published requirements" };
+   155→    default:
+   156→      return { chip: verdict, variant: variantForVerdict(verdict), meaning: "" };
+   157→  }
+   158→}
+   159→
+   160→/** MQR verdict pill for queue cards / list rows (null when no verdict). */
+   161→export function VerdictPill({ verdict, className = "" }: { verdict: string | null | undefined; className?: string }) {
+   162→  if (!verdict) return null;
+   163→  const vm = verdictMeta(verdict);
+   164→  return <span className={cn(pillClass(vm.variant), "shrink-0", className)}>{vm.chip}</span>;
+   165→}
+   166→
+   167→const ghostBtn =
+   168→  "dlg-ghost inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+   169→const ctaBtn =
+   170→  "dlg-cta inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-5 text-sm transition-all disabled:cursor-not-allowed disabled:opacity-50";
+   171→const destructiveGhost =
+   172→  "border-[var(--bad)]/30 text-[var(--bad)] hover:bg-[var(--bad-bg)]";
+   173→
+   174→function str(v: unknown): string {
+   175→  if (v === null || v === undefined) return "";
+   176→  if (typeof v === "boolean") return v ? "Yes" : "No";
+   177→  const s = String(v).trim();
+   178→  return s;
+   179→}
+   180→
+   181→function LedgerRow({ label, value, num = false }: { label: string; value: string; num?: boolean }) {
+   182→  return (
+   183→    <div className="flex items-start justify-between gap-4 border-b border-[#ececec] py-2.5 last:border-0">
+   184→      <span className="shrink-0 pt-0.5 text-xs text-stone">{label}</span>
+   185→      <span className={cn("break-words text-right text-sm text-ink", num && "num")}>{value || "—"}</span>
+   186→    </div>
+   187→  );
+   188→}
+   189→
+   190→function EmptyNote({ children }: { children: React.ReactNode }) {
+   191→  return <p className="py-6 text-center text-sm text-pebble">{children}</p>;
+   192→}
+   193→
+   194→function snapshotDisplayDate(v: unknown): string {
+   195→  const s = str(v);
+   196→  if (!s) return "";
+   197→  const d = new Date(s);
+   198→  return Number.isNaN(d.getTime()) ? s : formatDate(d);
+   199→}
+   200→
+   201→// ── Dossier section tabs (underline style) ──────────────────────────────────
+   202→
+   203→const DOSSIER_TABS = [
+   204→  { value: "profile", label: "Profile", icon: UserRound },
+   205→  { value: "education", label: "Education", icon: GraduationCap },
+   206→  { value: "experience", label: "Experience", icon: BriefcaseBusiness },
+   207→  { value: "training", label: "Training", icon: BookOpen },
+   208→  { value: "eligibility", label: "Eligibility", icon: BadgeCheck },
+   209→  { value: "awards", label: "Awards", icon: Award },
+   210→  { value: "documents", label: "Documents", icon: FileText },
+   211→] as const;
+   212→
+   213→const tabsListCls =
+   214→  "h-auto w-full flex-wrap justify-start gap-1 rounded-none border-b border-border bg-transparent p-0";
+   215→const tabTriggerCls =
+   216→  "flex-none gap-1.5 rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 py-2.5 text-[13px] font-medium text-stone shadow-none transition-colors hover:text-ink data-[state=active]:border-ink data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-none";
+   217→
+   218→// ── Snapshot tab renderers ──────────────────────────────────────────────────
+   219→
+   220→function EducationCards({ rows }: { rows: SnapRow[] }) {
+   221→  if (!rows.length) return <EmptyNote>No education entries on file.</EmptyNote>;
+   222→  return (
+   223→    <div className="space-y-3">
+   224→      {rows.map((r, i) => (
+   225→        <div key={i} className="rounded-[12px] bg-fog p-4">
+   226→          <div className="flex items-start justify-between gap-3">
+   227→            <p className="text-sm text-ink">{str(r.degree) || str(r.course) || str(r.specifyOthers) || "—"}</p>
+   228→            {r.ongoing === true && <span className="status-pill status-neutral shrink-0">Ongoing</span>}
+   229→          </div>
+   230→          <p className="mt-1 text-xs text-stone">
+   231→            {[str(r.educationLevel), str(r.schoolName)].filter(Boolean).join(" · ") || "—"}
+   232→          </p>
+   233→          <p className="num mt-0.5 text-xs text-pebble">
+   234→            {[str(r.yearFrom) && `${str(r.yearFrom)}–${str(r.yearTo) || (r.ongoing ? "Present" : "")}`, str(r.yearGraduated) && `Graduated ${str(r.yearGraduated)}`, str(r.unitsEarned) && `${str(r.unitsEarned)} units`]
+   235→              .filter(Boolean)
+   236→              .join(" · ") || "—"}
+   237→          </p>
+   238→          {str(r.awards) && <p className="mt-1 text-xs text-stone">Honors: {str(r.awards)}</p>}
+   239→        </div>
+   240→      ))}
+   241→    </div>
+   242→  );
+   243→}
+   244→
+   245→function ExperienceCards({ rows }: { rows: SnapRow[] }) {
+   246→  if (!rows.length) return <EmptyNote>No work experience entries on file.</EmptyNote>;
+   247→  return (
+   248→    <div className="space-y-3">
+   249→      {rows.map((r, i) => (
+   250→        <div key={i} className="rounded-[12px] bg-fog p-4">
+   251→          <div className="flex items-start justify-between gap-3">
+   252→            <p className="text-sm text-ink">{str(r.positionTitle) || "—"}</p>
+   253→            {r.isPresentWork === true && (
+   254→              <span className="shrink-0 rounded-full bg-ink px-2 py-0.5 text-xs text-white">Present</span>
+   255→            )}
+   256→          </div>
+   257→          <p className="mt-1 text-xs text-stone">{str(r.employerName) || "—"}</p>
+   258→          <p className="num mt-0.5 text-xs text-pebble">
+   259→            {[
+   260→              (str(r.dateFrom) || str(r.dateTo)) &&
+   261→                `${snapshotDisplayDate(r.dateFrom) || "—"} – ${r.isPresentWork ? "Present" : snapshotDisplayDate(r.dateTo) || "—"}`,
+   262→              str(r.statusOfEmployment),
+   263→            ]
+   264→              .filter(Boolean)
+   265→              .join(" · ") || "—"}
+   266→          </p>
+   267→        </div>
+   268→      ))}
+   269→    </div>
+   270→  );
+   271→}
+   272→
+   273→function TrainingCards({ rows }: { rows: SnapRow[] }) {
+   274→  if (!rows.length) return <EmptyNote>No training entries on file.</EmptyNote>;
+   275→  return (
+   276→    <div className="space-y-3">
+   277→      {rows.map((r, i) => (
+   278→        <div key={i} className="rounded-[12px] bg-fog p-4">
+   279→          <p className="text-sm text-ink">{str(r.title) || "—"}</p>
+   280→          <p className="num mt-1 text-xs text-stone">
+   281→            {[str(r.typeOfTraining), str(r.numberHours) && `${str(r.numberHours)} hrs`, str(r.hourDecimal) && `${str(r.hourDecimal)} hrs`]
+   282→              .filter(Boolean)
+   283→              .join(" · ") || "—"}
+   284→          </p>
+   285→          <p className="num mt-0.5 text-xs text-pebble">
+   286→            {snapshotDisplayDate(r.dateFrom) || snapshotDisplayDate(r.dateTo)
+   287→              ? `${snapshotDisplayDate(r.dateFrom) || "—"} – ${snapshotDisplayDate(r.dateTo) || "—"}`
+   288→              : "—"}
+   289→          </p>
+   290→        </div>
+   291→      ))}
+   292→    </div>
+   293→  );
+   294→}
+   295→
+   296→function EligibilityCards({ rows }: { rows: SnapRow[] }) {
+   297→  if (!rows.length) return <EmptyNote>No eligibility records on file.</EmptyNote>;
+   298→  return (
+   299→    <div className="space-y-3">
+   300→      {rows.map((r, i) => (
+   301→        <div key={i} className="rounded-[12px] bg-fog p-4">
+   302→          <p className="text-sm text-ink">{str(r.title) || str(r.eligibilityTitle) || "—"}</p>
+   303→          <p className="num mt-1 text-xs text-stone">
+   304→            {[str(r.rating) && `Rating: ${str(r.rating)}`, snapshotDisplayDate(r.examDate), str(r.examPlace), str(r.licenseNumber) && `License ${str(r.licenseNumber)}`]
+   305→              .filter(Boolean)
+   306→              .join(" · ") || "—"}
+   307→          </p>
+   308→        </div>
+   309→      ))}
+   310→    </div>
+   311→  );
+   312→}
+   313→
+   314→function AwardCards({ rows }: { rows: SnapRow[] }) {
+   315→  if (!rows.length) return <EmptyNote>No awards or accomplishments on file.</EmptyNote>;
+   316→  return (
+   317→    <div className="space-y-3">
+   318→      {rows.map((r, i) => (
+   319→        <div key={i} className="rounded-[12px] bg-fog p-4">
+   320→          <p className="text-sm text-ink">{str(r.details) || "—"}</p>
+   321→          <p className="num mt-1 text-xs text-stone">
+   322→            {[str(r.recognitionType), str(r.scope), str(r.provider), snapshotDisplayDate(r.dateGranted)]
+   323→              .filter(Boolean)
+   324→              .join(" · ") || "—"}
+   325→          </p>
+   326→        </div>
+   327→      ))}
+   328→    </div>
+   329→  );
+   330→}
+   331→
+   332→// ── Decision rail pieces ────────────────────────────────────────────────────
+   333→
+   334→/** Requirement check status → pill (verdict colors). */
+   335→function checkPill(status: string): { label: string; variant: StatusVariant } {
+   336→  switch (status) {
+   337→    case "MET":
+   338→      return { label: "Met", variant: "ok" };
+   339→    case "NOT_MET":
+   340→      return { label: "Not met", variant: "bad" };
+   341→    case "REVIEW":
+   342→      return { label: "Verify", variant: "neutral" };
+   343→    default:
+   344→      return { label: "Not required", variant: "neutral" };
+   345→  }
+   346→}
+   347→
+   348→function RequirementsMatchPanel({ report }: { report: RequirementsReport }) {
+   349→  const vm = verdictMeta(report.verdict);
+   350→  const allMet = report.requiredCount > 0 && report.metCount === report.requiredCount;
+   351→  const summaryCls = allMet ? "text-[var(--ok)]" : report.metCount > 0 ? "text-[var(--warn)]" : "text-stone";
+   352→  return (
+   353→    <div className="dlg-card p-4">
+   354→      <div className="flex items-start justify-between gap-3">
+   355→        <div className="min-w-0">
+   356→          <h3 className="text-[15px] font-medium leading-6 text-ink">Requirements match</h3>
+   357→          <p className="mt-0.5 text-xs text-stone">{vm.meaning}</p>
+   358→        </div>
+   359→        <StatusPill status={vm.chip} variant={vm.variant} className="shrink-0" />
+   360→      </div>
+   361→      <p className={cn("num mt-2 text-sm font-medium", summaryCls)}>
+   362→        {report.metCount} of {report.requiredCount} standards met
+   363→      </p>
+   364→      {report.checks.length > 0 && (
+   365→        <div className="mt-3 max-h-96 space-y-2.5 overflow-y-auto scroll-thin pr-1">
+   366→          {report.checks.map((c, i) => {
+   367→            const cp = checkPill(c.status);
+   368→            return (
+   369→              <div key={i} className="rounded-[12px] border border-border p-3.5">
+   370→                <div className="flex items-start justify-between gap-3">
+   371→                  <p className="min-w-0 text-[13px] leading-5 text-ink line-clamp-2">{c.standard || "—"}</p>
+   372→                  <StatusPill status={cp.label} variant={cp.variant} className="shrink-0" />
+   373→                </div>
+   374→                <p className="num mt-1.5 text-xs leading-5 text-stone line-clamp-2">
+   375→                  {c.applicantSummary || "No applicant data on file."}
+   376→                </p>
+   377→                <div className="mt-1.5 flex items-center justify-between gap-2">
+   378→                  {c.shortfall ? (
+   379→                    <p className="text-xs text-[var(--bad)]">{c.shortfall}</p>
+   380→                  ) : (
+   381→                    <span aria-hidden />
+   382→                  )}
+   383→                  <span className="shrink-0 rounded-full bg-fog px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-pebble">
+   384→                    {c.dimension}
+   385→                  </span>
+   386→                </div>
+   387→              </div>
+   388→            );
+   389→          })}
+   390→        </div>
+   391→      )}
+   392→    </div>
+   393→  );
+   394→}
+   395→
+   396→function CredentialsRow({ payload }: { payload: ReviewPayload }) {
+   397→  const p = payload.snapshots.profile;
+   398→  const personalCount = p ? Object.values(p).filter((v) => v !== null && v !== "" && v !== undefined).length : 0;
+   399→  const items: [string, number][] = [
+   400→    ["Personal", personalCount],
+   401→    ["Education", payload.snapshots.educations.length],
+   402→    ["Work", payload.snapshots.experiences.length],
+   403→    ["Training", payload.snapshots.trainings.length],
+   404→    ["Eligibility", payload.snapshots.eligibilities.length],
+   405→    ["Awards", payload.snapshots.awards.length],
+   406→  ];
+   407→  return (
+   408→    <div className="dlg-card p-4">
+   409→      <h3 className="text-[15px] font-medium leading-6 text-ink">Credentials on file</h3>
+   410→      <div className="mt-2.5 flex flex-wrap gap-1.5">
+   411→        {items.map(([label, n]) => (
+   412→          <span key={label} className="status-pill status-neutral">
+   413→            {label}: <span className="num">{n}</span>
+   414→          </span>
+   415→        ))}
+   416→      </div>
+   417→    </div>
+   418→  );
+   419→}
+   420→
+   421→function stateBanner(stage: string): { text: string; cls: string } {
+   422→  if (stage === "Shortlisted") return { text: "Applicant has been notified.", cls: "text-stone" };
+   423→  if (stage === "Rejected") return { text: "Applicant was not shortlisted.", cls: "text-stone" };
+   424→  if (stage === "Under Review") return { text: "Review in progress.", cls: "text-ink" };
+   425→  return { text: "Awaiting review.", cls: "text-stone" };
+   426→}
+   427→
+   428→// ── Notice form dialog (interview / skills exam) ────────────────────────────
+   429→
+   430→function NoticeFormDialog({
+   431→  applicationId,
+   432→  kind,
+   433→  onClose,
+   434→  onSent,
+   435→}: {
+   436→  applicationId: number;
+   437→  kind: "interview" | "skills_exam";
+   438→  onClose: () => void;
+   439→  onSent: () => void;
+   440→}) {
+   441→  const [examType, setExamType] = useState("");
+   442→  const [date, setDate] = useState("");
+   443→  const [time, setTime] = useState("");
+   444→  const [venue, setVenue] = useState("");
+   445→  const [contact, setContact] = useState("");
+   446→  const [notes, setNotes] = useState("");
+   447→  const [busy, setBusy] = useState(false);
+   448→
+   449→  const ready = date.trim() !== "" && time.trim() !== "" && venue.trim() !== "";
+   450→
+   451→  const submit = async () => {
+   452→    setBusy(true);
+   453→    try {
+   454→      const res = await apiFetch<NoticeSendResult>(`/api/evaluator/applications/${applicationId}/notice`, {
+   455→        method: "POST",
+   456→        body: {
+   457→          type: kind,
+   458→          date: date || undefined,
+   459→          time: time || undefined,
+   460→          venue: venue || undefined,
+   461→          contact: contact || undefined,
+   462→          notes: notes || undefined,
+   463→          examType: kind === "skills_exam" ? examType || undefined : undefined,
+   464→        },
+   465→      });
+   466→      const label = kind === "interview" ? "Interview invitation" : "Skills-exam notice";
+   467→      toast.success(`${label} sent`, {
+   468→        description: `Email: ${res.email?.status ?? "unknown"} · SMS: ${res.sms?.status ?? "unknown"}`,
+   469→      });
+   470→      onSent();
+   471→      onClose();
+   472→    } catch (e) {
+   473→      toast.error(e instanceof Error ? e.message : "Failed to send the notice");
+   474→    } finally {
+   475→      setBusy(false);
+   476→    }
+   477→  };
+   478→
+   479→  return (
+   480→    <Dialog open onOpenChange={(v) => !v && onClose()}>
+   481→      <DialogContent className="sm:max-w-md">
+   482→        <DialogHeader>
+   483→          <DialogTitle className="font-display text-xl">
+   484→            {kind === "interview" ? "Send interview invitation" : "Send skills-exam notice"}
+   485→          </DialogTitle>
+   486→          <DialogDescription>
+   487→            The notice fans out as an email plus a companion SMS to the applicant.
+   488→          </DialogDescription>
+   489→        </DialogHeader>
+   490→        <div className="space-y-4">
+   491→          {kind === "skills_exam" && (
+   492→            <div className="space-y-1.5">
+   493→              <Label htmlFor="notice-exam-type" className="text-xs text-stone">
+   494→                Exam type
+   495→              </Label>
+   496→              <Input
+   497→                id="notice-exam-type"
+   498→                className="dlg-input"
+   499→                value={examType}
+   500→                onChange={(e) => setExamType(e.target.value)}
+   501→                placeholder="e.g. Encoding / trade test"
+   502→              />
+   503→            </div>
+   504→          )}
+   505→          <div className="grid grid-cols-2 gap-3">
+   506→            <div className="space-y-1.5">
+   507→              <Label htmlFor="notice-date" className="text-xs text-stone">
+   508→                Date *
+   509→              </Label>
+   510→              <Input id="notice-date" type="date" className="dlg-input" value={date} onChange={(e) => setDate(e.target.value)} />
+   511→            </div>
+   512→            <div className="space-y-1.5">
+   513→              <Label htmlFor="notice-time" className="text-xs text-stone">
+   514→                Time *
+   515→              </Label>
+   516→              <Input id="notice-time" type="time" className="dlg-input" value={time} onChange={(e) => setTime(e.target.value)} />
+   517→            </div>
+   518→          </div>
+   519→          <div className="space-y-1.5">
+   520→            <Label htmlFor="notice-venue" className="text-xs text-stone">
+   521→              Venue *
+   522→            </Label>
+   523→            <Input
+   524→              id="notice-venue"
+   525→              className="dlg-input"
+   526→              value={venue}
+   527→              onChange={(e) => setVenue(e.target.value)}
+   528→              placeholder="Building / room"
+   529→            />
+   530→          </div>
+   531→          <div className="space-y-1.5">
+   532→            <Label htmlFor="notice-contact" className="text-xs text-stone">
+   533→              HR contact
+   534→            </Label>
+   535→            <Input
+   536→              id="notice-contact"
+   537→              className="dlg-input"
+   538→              value={contact}
+   539→              onChange={(e) => setContact(e.target.value)}
+   540→              placeholder="Name / number for questions"
+   541→            />
+   542→          </div>
+   543→          <div className="space-y-1.5">
+   544→            <Label htmlFor="notice-notes" className="text-xs text-stone">
+   545→              Notes
+   546→            </Label>
+   547→            <Textarea id="notice-notes" className="dlg-input min-h-[80px]" value={notes} onChange={(e) => setNotes(e.target.value)} />
+   548→          </div>
+   549→        </div>
+   550→        <DialogFooter>
+   551→          <button type="button" className={ghostBtn} onClick={onClose}>
+   552→            Cancel
+   553→          </button>
+   554→          <button type="button" className={ctaBtn} disabled={!ready || busy} onClick={() => void submit()}>
+   555→            <Send className="h-4 w-4" aria-hidden />
+   556→            {busy ? "Sending…" : "Send notice"}
+   557→          </button>
+   558→        </DialogFooter>
+   559→      </DialogContent>
+   560→    </Dialog>
+   561→  );
+   562→}
+   563→
+   564→// ── Direct email card ───────────────────────────────────────────────────────
+   565→
+   566→function parseAttachments(json: string | null): { name: string; bytes: number }[] {
+   567→  if (!json) return [];
+   568→  try {
+   569→    const parsed: unknown = JSON.parse(json);
+   570→    return Array.isArray(parsed) ? (parsed as { name: string; bytes: number }[]) : [];
+   571→  } catch {
+   572→    return [];
+   573→  }
+   574→}
+   575→
+   576→function emailStatusVariant(status: string): StatusVariant {
+   577→  return status === "sent" || status === "mock" ? "neutral" : "bad";
+   578→}
+   579→
+   580→function DirectEmailCard({
+   581→  applicationId,
+   582→  emails,
+   583→  onSent,
+   584→}: {
+   585→  applicationId: number;
+   586→  emails: DirectEmailRow[] | null;
+   587→  onSent: () => void;
+   588→}) {
+   589→  const [subject, setSubject] = useState("");
+   590→  const [message, setMessage] = useState("");
+   591→  const [files, setFiles] = useState<File[]>([]);
+   592→  const [busy, setBusy] = useState(false);
+   593→  const fileRef = useRef<HTMLInputElement>(null);
+   594→
+   595→  const pickFiles = (list: FileList | null) => {
+   596→    if (!list) return;
+   597→    const next = Array.from(list);
+   598→    if (next.length + files.length > 3) {
+   599→      toast.error("A maximum of 3 attachments is allowed");
+   600→      return;
+   601→    }
+   602→    if (next.some((f) => f.size > 5 * 1024 * 1024)) {
+   603→      toast.error("Each attachment must be 5 MB or smaller");
+   604→      return;
+   605→    }
+   606→    setFiles((prev) => [...prev, ...next].slice(0, 3));
+   607→    if (fileRef.current) fileRef.current.value = "";
+   608→  };
+   609→
+   610→  const send = async () => {
+   611→    if (!message.trim()) return;
+   612→    setBusy(true);
+   613→    try {
+   614→      const fd = new FormData();
+   615→      fd.set("subject", subject.trim());
+   616→      fd.set("message", message.trim());
+   617→      for (const f of files) fd.append("attachments", f);
+   618→      const res = await apiFetch<{ email: { status: string; error?: string | null }; attachments: number }>(
+   619→        `/api/evaluator/applications/${applicationId}/email`,
+   620→        { method: "POST", formData: fd }
+   621→      );
+   622→      if (res.email?.status === "failed") {
+   623→        toast.error("Email delivery failed", { description: res.email.error ?? undefined });
+   624→      } else {
+   625→        toast.success(`Direct email ${res.email?.status}`, {
+   626→          description: res.attachments ? `${res.attachments} attachment(s) included.` : undefined,
+   627→        });
+   628→      }
+   629→      setSubject("");
+   630→      setMessage("");
+   631→      setFiles([]);
+   632→      onSent();
+   633→    } catch (e) {
+   634→      toast.error(e instanceof Error ? e.message : "Failed to send the email");
+   635→    } finally {
+   636→      setBusy(false);
+   637→    }
+   638→  };
+   639→
+   640→  return (
+   641→    <div className="dlg-card p-4">
+   642→      <div className="flex items-center gap-2">
+   643→        <Mail className="h-4 w-4 text-stone" aria-hidden />
+   644→        <h3 className="text-[15px] font-medium leading-6 text-ink">Direct email</h3>
+   645→      </div>
+   646→      <p className="mt-1 text-xs text-stone">Recipient is resolved from the applicant record — attachments ≤ 3 files × 5 MB.</p>
+   647→      <div className="mt-3 space-y-3">
+   648→        <Input
+   649→          className="dlg-input"
+   650→          placeholder="Subject"
+   651→          value={subject}
+   652→          maxLength={200}
+   653→          onChange={(e) => setSubject(e.target.value)}
+   654→          aria-label="Email subject"
+   655→        />
+   656→        <Textarea
+   657→          className="dlg-input min-h-[100px]"
+   658→          placeholder="Message *"
+   659→          value={message}
+   660→          maxLength={5000}
+   661→          onChange={(e) => setMessage(e.target.value)}
+   662→          aria-label="Email message"
+   663→        />
+   664→        <div>
+   665→          <label className="dlg-ghost focus-ring inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-full px-4 text-sm">
+   666→            <Paperclip className="h-4 w-4" aria-hidden />
+   667→            Attach files
+   668→            <input
+   669→              ref={fileRef}
+   670→              type="file"
+   671→              multiple
+   672→              className="hidden"
+   673→              onChange={(e) => pickFiles(e.target.files)}
+   674→              aria-label="Attach files"
+   675→            />
+   676→          </label>
+   677→          {files.length > 0 && (
+   678→            <ul className="mt-2 space-y-1">
+   679→              {files.map((f) => (
+   680→                <li key={f.name} className="flex items-center justify-between gap-2 text-xs text-stone">
+   681→                  <span className="truncate">{f.name}</span>
+   682→                  <button
+   683→                    type="button"
+   684→                    className="focus-ring shrink-0 text-[var(--bad)] hover:underline"
+   685→                    onClick={() => setFiles((prev) => prev.filter((x) => x !== f))}
+   686→                  >
+   687→                    Remove
+   688→                  </button>
+   689→                </li>
+   690→              ))}
+   691→            </ul>
+   692→          )}
+   693→        </div>
+   694→        <button type="button" className={ctaBtn + " w-full"} disabled={!message.trim() || busy} onClick={() => void send()}>
+   695→          <Send className="h-4 w-4" aria-hidden />
+   696→          {busy ? "Sending…" : "Send email"}
+   697→        </button>
+   698→      </div>
+   699→      <div className="mt-4 border-t border-[#ececec] pt-3">
+   700→        <p className="text-xs font-medium text-stone">History</p>
+   701→        <div className="mt-2 max-h-48 space-y-1.5 overflow-y-auto scroll-thin">
+   702→          {emails === null ? (
+   703→            <p className="text-xs text-pebble">Loading…</p>
+   704→          ) : emails.length === 0 ? (
+   705→            <p className="text-xs text-pebble">No direct emails sent yet.</p>
+   706→          ) : (
+   707→            emails.map((m) => {
+   708→              const atts = parseAttachments(m.attachments);
+   709→              return (
+   710→                <div key={m.id} className="flex items-center justify-between gap-2 text-xs">
+   711→                  <span className="truncate text-ink">{m.subject || "(no subject)"}</span>
+   712→                  <span className="flex shrink-0 items-center gap-2 text-pebble">
+   713→                    {atts.length > 0 && <span className="num">{atts.length} att.</span>}
+   714→                    <span className="num">{timeAgo(m.createdAt)}</span>
+   715→                    <span className={pillClass(emailStatusVariant(m.status))}>{m.status}</span>
+   716→                  </span>
+   717→                </div>
+   718→              );
+   719→            })
+   720→          )}
+   721→        </div>
+   722→      </div>
+   723→    </div>
+   724→  );
+   725→}
+   726→
+   727→// ── The workspace BODY (shared by modal + page) ─────────────────────────────
+   728→
+   729→export function ReviewWorkspace({
+   730→  applicationId,
+   731→  onClose,
+   732→  onDecided,
+   733→}: {
+   734→  applicationId: number;
+   735→  onClose?: () => void;
+   736→  onDecided?: () => void;
+   737→}) {
+   738→  const [payload, setPayload] = useState<ReviewPayload | null>(null);
+   739→  const [notices, setNotices] = useState<NoticeRow[] | null>(null);
+   740→  const [emails, setEmails] = useState<DirectEmailRow[] | null>(null);
+   741→  const [error, setError] = useState<string | null>(null);
+   742→  const [remarks, setRemarks] = useState("");
+   743→  const [confirmAction, setConfirmAction] = useState<{ status: string; title: string; description: string; destructive?: boolean } | null>(null);
+   744→  const [busy, setBusy] = useState(false);
+   745→  const [noticeKind, setNoticeKind] = useState<"interview" | "skills_exam" | null>(null);
+   746→  const [regretOpen, setRegretOpen] = useState(false);
+   747→  const [regretBusy, setRegretBusy] = useState(false);
+   748→  const [tab, setTab] = useState("profile");
+   749→
+   750→  const load = useCallback(
+   751→    async (silent = false) => {
+   752→      if (!silent) setError(null);
+   753→      try {
+   754→        const [p, n, m] = await Promise.all([
+   755→          apiFetch<ReviewPayload>(`/api/evaluator/applications/${applicationId}`),
+   756→          apiFetch<{ notices: NoticeRow[] }>(`/api/evaluator/applications/${applicationId}/notice`),
+   757→          apiFetch<{ directEmails: DirectEmailRow[] }>(`/api/evaluator/applications/${applicationId}/email`),
+   758→        ]);
+   759→        setPayload(p);
+   760→        setNotices(n.notices);
+   761→        setEmails(m.directEmails);
+   762→      } catch (e) {
+   763→        if (!silent) setError(e instanceof Error ? e.message : "Failed to load the application");
+   764→      }
+   765→    },
+   766→    [applicationId]
+   767→  );
+   768→
+   769→  useEffect(() => {
+   770→    void load();
+   771→  }, [load]);
+   772→
+   773→  const refetch = useCallback(() => void load(true), [load]);
+   774→
+   775→  const stage = payload ? stageForStatus(payload.status) : "Applied";
+   776→  const applicantName = payload ? fullName(payload.applicant) : "Applicant";
+   777→  const email = payload?.applicant.emailAddress ?? null;
+   778→
+   779→  const decide = async (status: string) => {
+   780→    setBusy(true);
+   781→    try {
+   782→      await apiFetch(`/api/evaluator/applications/${applicationId}`, {
+   783→        method: "PATCH",
+   784→        body: { status, reason: remarks.trim() || undefined },
+   785→      });
+   786→      const label = getStatusMeta(status).label;
+   787→      const silentRevert = status === "Applied";
+   788→      if (silentRevert) {
+   789→        toast.info("Returned to the review queue", { description: "No notification was sent to the applicant." });
+   790→      } else {
+   791→        toast.success(`Applicant marked as ${label}`, {
+   792→          description: email ? `A notification email was sent to ${email}.` : "No email on record — HR will contact the applicant directly.",
+   793→        });
+   794→      }
+   795→      setConfirmAction(null);
+   796→      setRemarks("");
+   797→      onDecided?.();
+   798→      await load(true);
+   799→    } catch (e) {
+   800→      toast.error(e instanceof Error ? e.message : "Failed to update the application");
+   801→    } finally {
+   802→      setBusy(false);
+   803→    }
+   804→  };
+   805→
+   806→  const sendRegret = async () => {
+   807→    setRegretBusy(true);
+   808→    try {
+   809→      const res = await apiFetch<NoticeSendResult>(`/api/evaluator/applications/${applicationId}/notice`, {
+   810→        method: "POST",
+   811→        body: { type: "regret" },
+   812→      });
+   813→      toast.success("Regret letter sent", {
+   814→        description: `Email: ${res.email?.status ?? "unknown"} · SMS: ${res.sms?.status ?? "unknown"}`,
+   815→      });
+   816→      setRegretOpen(false);
+   817→      await load(true);
+   818→    } catch (e) {
+   819→      toast.error(e instanceof Error ? e.message : "Failed to send the regret letter");
+   820→    } finally {
+   821→      setRegretBusy(false);
+   822→    }
+   823→  };
+   824→
+   825→  const openConfirm = (status: string) => {
+   826→    const label = getStatusMeta(status).label;
+   827→    const consequence = email
+   828→      ? `An email will be sent to ${email}.`
+   829→      : "No email on record — HR will contact the applicant directly.";
+   830→    setConfirmAction({
+   831→      status,
+   832→      title: `Mark as ${label}?`,
+   833→      description: `${consequence}${remarks.trim() ? ` Remarks will be included: “${remarks.trim()}”` : ""}`,
+   834→      destructive: status === "Rejected",
+   835→    });
+   836→  };
+   837→
+   838→  const regretAlreadySent = (notices ?? []).some((n) => n.type === "regret" && (n.status === "sent" || n.status === "mock"));
+   839→  const noticeLabel: Record<NoticeRow["type"], string> = {
+   840→    regret: "Regret letter",
+   841→    interview: "Interview invitation",
+   842→    skills_exam: "Skills-exam notice",
+   843→  };
+   844→
+   845→  if (error) {
+   846→    return (
+   847→      <div className="dlg-card space-y-4 p-8 text-center">
+   848→        <AlertTriangle className="mx-auto h-8 w-8 text-[var(--bad)]" aria-hidden />
+   849→        <p className="text-sm text-stone">{error}</p>
+   850→        <div className="flex items-center justify-center gap-3">
+   851→          <button type="button" className={ghostBtn} onClick={() => void load()}>
+   852→            Retry
+   853→          </button>
+   854→          {onClose && (
+   855→            <button type="button" className={ghostBtn} onClick={onClose}>
+   856→              Close
+   857→            </button>
+   858→          )}
+   859→        </div>
+   860→      </div>
+   861→    );
+   862→  }
+   863→
+   864→  if (!payload) {
+   865→    return (
+   866→      <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+   867→        <div className="dlg-card space-y-5 p-6">
+   868→          <div className="space-y-2.5">
+   869→            <Skeleton className="h-7 w-1/2" />
+   870→            <Skeleton className="h-4 w-1/3" />
+   871→          </div>
+   872→          <div className="flex gap-2 border-b border-border pb-3">
+   873→            {Array.from({ length: 5 }).map((_, i) => (
+   874→              <Skeleton key={i} className="h-4 w-20" />
+   875→            ))}
+   876→          </div>
+   877→          <SkeletonRows rows={6} />
+   878→        </div>
+   879→        <div className="space-y-4">
+   880→          <div className="dlg-card p-4">
+   881→            <Skeleton className="mb-3 h-4 w-32" />
+   882→            <SkeletonRows rows={3} rowClassName="h-6" />
+   883→          </div>
+   884→          <div className="dlg-card p-4">
+   885→            <Skeleton className="mb-3 h-4 w-24" />
+   886→            <SkeletonRows rows={4} rowClassName="h-6" />
+   887→          </div>
+   888→        </div>
+   889→      </div>
+   890→    );
+   891→  }
+   892→
+   893→  const p = payload.snapshots.profile ?? {};
+   894→  const characterRefs = Array.isArray(p.characterReferences) ? (p.characterReferences as SnapRow[]) : [];
+   895→  const banner = stateBanner(stage);
+   896→  const positionTitle = payload.job.position?.positionTitle || payload.job.title;
+   897→  const place = payload.job.position?.placeOfAssignment ?? null;
+   898→
+   899→  return (
+   900→    <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+   901→      {/* ── LEFT: frozen dossier ── */}
+   902→      <div className="dlg-card space-y-4 p-6">
+   903→        <div className="flex flex-wrap items-start justify-between gap-3">
+   904→          <div className="min-w-0">
+   905→            <h2 className="font-display text-2xl leading-tight text-ink">{applicantName}</h2>
+   906→            <p className="num mt-1 text-sm text-stone">
+   907→              {[positionTitle, place].filter(Boolean).join(" · ")} · Applied {formatDate(payload.dateApplied)}
+   908→            </p>
+   909→          </div>
+   910→          <div className="flex items-center gap-2.5">
+   911→            <StatusPill status={payload.status} />
+   912→            <button
+   913→              type="button"
+   914→              className="focus-ring inline-flex min-h-[44px] items-center text-sm font-medium text-ink underline underline-offset-4"
+   915→              onClick={() => navigate("candidate", { id: String(payload.applicant.id) })}
+   916→            >
+   917→              View full profile
+   918→            </button>
+   919→          </div>
+   920→        </div>
+   921→
+   922→        <Tabs value={tab} onValueChange={setTab}>
+   923→          <TabsList className={tabsListCls}>
+   924→            {DOSSIER_TABS.map((t) => (
+   925→              <TabsTrigger key={t.value} value={t.value} className={tabTriggerCls}>
+   926→                <t.icon className="size-3.5" aria-hidden />
+   927→                {t.label}
+   928→              </TabsTrigger>
+   929→            ))}
+   930→          </TabsList>
+   931→
+   932→          <TabsContent value="profile" className="pt-4">
+   933→            <div className="rounded-[12px] bg-fog p-4">
+   934→              <LedgerRow label="Email" value={str(p.emailAddress) || str(payload.applicant.emailAddress)} />
+   935→              <LedgerRow label="Mobile" value={str(p.mobileNumber) || str(p.contactNumber)} num />
+   936→              <LedgerRow label="Other phone" value={[str(p.contactNumberSec), str(p.telephoneNumber)].filter(Boolean).join(" · ")} num />
+   937→              <LedgerRow label="Gender" value={str(p.gender)} />
+   938→              <LedgerRow label="Civil status" value={str(p.civilStatus)} />
+   939→              <LedgerRow label="Birth date" value={snapshotDisplayDate(p.birthDate)} num />
+   940→              <LedgerRow label="Birth place" value={str(p.birthPlace)} />
+   941→              <LedgerRow label="Address" value={str(p.presentAddress)} />
+   942→            </div>
+   943→            <div className="mt-4">
+   944→              <p className="text-xs font-medium text-stone">Character references</p>
+   945→              {characterRefs.length === 0 ? (
+   946→                <p className="mt-1 text-sm text-pebble">None on file.</p>
+   947→              ) : (
+   948→                <ul className="mt-1 space-y-1">
+   949→                  {characterRefs.map((r, i) => (
+   950→                    <li key={i} className="text-sm text-ink">
+   951→                      {[str(r.name), str(r.address), str(r.telephone) || str(r.contactNumber)].filter(Boolean).join(" · ") || "—"}
+   952→                    </li>
+   953→                  ))}
+   954→                </ul>
+   955→              )}
+   956→            </div>
+   957→          </TabsContent>
+   958→          <TabsContent value="education" className="pt-4">
+   959→            <EducationCards rows={payload.snapshots.educations} />
+   960→          </TabsContent>
+   961→          <TabsContent value="experience" className="pt-4">
+   962→            <ExperienceCards rows={payload.snapshots.experiences} />
+   963→          </TabsContent>
+   964→          <TabsContent value="training" className="pt-4">
+   965→            <TrainingCards rows={payload.snapshots.trainings} />
+   966→          </TabsContent>
+   967→          <TabsContent value="eligibility" className="pt-4">
+   968→            <EligibilityCards rows={payload.snapshots.eligibilities} />
+   969→          </TabsContent>
+   970→          <TabsContent value="awards" className="pt-4">
+   971→            <AwardCards rows={payload.snapshots.awards} />
+   972→          </TabsContent>
+   973→          <TabsContent value="documents" className="pt-4">
+   974→            <div className="rounded-[12px] bg-fog p-6 text-center">
+   975→              <FileText className="mx-auto h-6 w-6 text-pebble" aria-hidden />
+   976→              <p className="mt-2 text-sm text-stone">Supporting documents are verified in person at the next stage.</p>
+   977→            </div>
+   978→          </TabsContent>
+   979→        </Tabs>
+   980→      </div>
+   981→
+   982→      {/* ── RIGHT: decision rail ── */}
+   983→      <div className="space-y-4 self-start lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto scroll-thin">
+   984→        <RequirementsMatchPanel report={payload.requirements} />
+   985→        <CredentialsRow payload={payload} />
+   986→
+   987→        <div className={`rounded-[12px] bg-fog p-4 text-sm ${banner.cls}`}>
+   988→          <StatusPill status={payload.status} className="mr-2" />
+   989→          {banner.text}
+   990→        </div>
+   991→
+   992→        {(stage === "Applied" || stage === "Under Review") && (
+   993→          <div className="dlg-card space-y-3 p-4">
+   994→            <h3 className="text-[15px] font-medium leading-6 text-ink">Decision</h3>
+   995→            <Textarea
+   996→              className="dlg-input min-h-[80px]"
+   997→              placeholder="Remarks (optional) — included as the reason"
+   998→              value={remarks}
+   999→              maxLength={500}
+  1000→              onChange={(e) => setRemarks(e.target.value)}
+  1001→              aria-label="Remarks"
+  1002→            />
+  1003→            <div className="space-y-2">
+  1004→              {stage === "Applied" && (
+  1005→                <button type="button" className={ghostBtn + " w-full"} onClick={() => openConfirm("Under Review")}>
+  1006→                  Start Review
+  1007→                </button>
+  1008→              )}
+  1009→              <button type="button" className={ctaBtn + " w-full"} onClick={() => openConfirm("Shortlisted")}>
+  1010→                Shortlist
+  1011→              </button>
+  1012→              <button
+  1013→                type="button"
+  1014→                className={ghostBtn + " w-full " + destructiveGhost}
+  1015→                onClick={() => openConfirm("Rejected")}
+  1016→              >
+  1017→                Not Qualified
+  1018→              </button>
+  1019→            </div>
+  1020→            <p className="text-xs text-pebble">
+  1021→              {email ? `Decisions email ${email}.` : "No email on record for this applicant."}
+  1022→            </p>
+  1023→          </div>
+  1024→        )}
+  1025→
+  1026→        {(stage === "Shortlisted" || stage === "Rejected") && (
+  1027→          <div className="dlg-card space-y-3 p-4">
+  1028→            <h3 className="text-[15px] font-medium leading-6 text-ink">Revise decision</h3>
+  1029→            <p className="text-xs text-pebble">Changing the decision notifies the applicant.</p>
+  1030→            <button
+  1031→              type="button"
+  1032→              className={
+  1033→                ghostBtn + " w-full" + (stage === "Shortlisted" ? " " + destructiveGhost : "")
+  1034→              }
+  1035→              onClick={() =>
+  1036→                stage === "Shortlisted"
+  1037→                  ? setConfirmAction({
+  1038→                      status: "Rejected",
+  1039→                      title: "Mark as Not Qualified?",
+  1040→                      description: email
+  1041→                        ? `The decision will be flipped and a regret letter will be emailed to ${email}.`
+  1042→                        : "The decision will be flipped. No email on record — HR will contact the applicant directly.",
+  1043→                      destructive: true,
+  1044→                    })
+  1045→                  : setConfirmAction({
+  1046→                      status: "Shortlisted",
+  1047→                      title: "Mark as Shortlisted?",
+  1048→                      description: email
+  1049→                        ? `The decision will be flipped and the shortlist notice will be emailed to ${email}.`
+  1050→                        : "The decision will be flipped. No email on record — HR will contact the applicant directly.",
+  1051→                    })
+  1052→              }
+  1053→            >
+  1054→              {stage === "Shortlisted" ? "Flip to Not Qualified" : "Flip to Shortlisted"}
+  1055→            </button>
+  1056→            <button
+  1057→              type="button"
+  1058→              className={ghostBtn + " w-full"}
+  1059→              onClick={() =>
+  1060→                setConfirmAction({
+  1061→                  status: "Applied",
+  1062→                  title: "Return to review queue?",
+  1063→                  description: "This reverts the application to Applied and does NOT notify the applicant.",
+  1064→                })
+  1065→              }
+  1066→            >
+  1067→              Return to Review
+  1068→            </button>
+  1069→          </div>
+  1070→        )}
+  1071→
+  1072→        {/* Notices */}
+  1073→        <div className="dlg-card space-y-3 p-4">
+  1074→          <h3 className="text-[15px] font-medium leading-6 text-ink">Notices</h3>
+  1075→          <div className="max-h-48 space-y-1.5 overflow-y-auto scroll-thin">
+  1076→            {notices === null ? (
+  1077→              <p className="text-xs text-pebble">Loading…</p>
+  1078→            ) : notices.length === 0 ? (
+  1079→              <p className="text-xs text-pebble">No notices sent yet.</p>
+  1080→            ) : (
+  1081→              notices.map((n) => (
+  1082→                <div key={n.id} className="flex items-center justify-between gap-2 text-xs">
+  1083→                  <span className="truncate text-ink">{noticeLabel[n.type] ?? n.type}</span>
+  1084→                  <span className="flex shrink-0 items-center gap-2 text-pebble">
+  1085→                    <span className="num">{formatDateTime(n.sentAt)}</span>
+  1086→                    <span className={pillClass(n.status === "sent" || n.status === "mock" ? "neutral" : "bad")}>{n.status}</span>
+  1087→                  </span>
+  1088→                </div>
+  1089→              ))
+  1090→            )}
+  1091→          </div>
+  1092→          {stage === "Shortlisted" && (
+  1093→            <div className="space-y-2">
+  1094→              <button type="button" className={ghostBtn + " w-full"} onClick={() => setNoticeKind("interview")}>
+  1095→                Send Interview Invitation
+  1096→              </button>
+  1097→              <button type="button" className={ghostBtn + " w-full"} onClick={() => setNoticeKind("skills_exam")}>
+  1098→                Send Skills-Exam Notice
+  1099→              </button>
+  1100→            </div>
+  1101→          )}
+  1102→          {stage === "Rejected" && (
+  1103→            <button
+  1104→              type="button"
+  1105→              className={ghostBtn + " w-full " + destructiveGhost}
+  1106→              disabled={regretAlreadySent || regretBusy}
+  1107→              onClick={() => setRegretOpen(true)}
+  1108→            >
+  1109→              {regretAlreadySent ? "Regret letter sent" : regretBusy ? "Sending…" : "Send Regret Letter"}
+  1110→            </button>
+  1111→          )}
+  1112→        </div>
+  1113→
+  1114→        <DirectEmailCard applicationId={applicationId} emails={emails} onSent={refetch} />
+  1115→      </div>
+  1116→
+  1117→      {/* Decision confirm */}
+  1118→      <AlertDialog open={confirmAction !== null} onOpenChange={(v) => !v && setConfirmAction(null)}>
+  1119→        <AlertDialogContent>
+  1120→          <AlertDialogHeader>
+  1121→            <AlertDialogTitle>{confirmAction?.title}</AlertDialogTitle>
+  1122→            <AlertDialogDescription>{confirmAction?.description}</AlertDialogDescription>
+  1123→          </AlertDialogHeader>
+  1124→          <AlertDialogFooter>
+  1125→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1126→            <AlertDialogAction
+  1127→              className={confirmAction?.destructive ? "border border-[var(--bad)]/30 bg-[var(--bad-bg)] text-[var(--bad)] hover:bg-[var(--bad-bg)]/80" : ""}
+  1128→              onClick={(e) => {
+  1129→                e.preventDefault();
+  1130→                if (confirmAction) void decide(confirmAction.status);
+  1131→              }}
+  1132→            >
+  1133→              {busy ? "Working…" : "Confirm"}
+  1134→            </AlertDialogAction>
+  1135→          </AlertDialogFooter>
+  1136→        </AlertDialogContent>
+  1137→      </AlertDialog>
+  1138→
+  1139→      {/* Regret confirm */}
+  1140→      <AlertDialog open={regretOpen} onOpenChange={setRegretOpen}>
+  1141→        <AlertDialogContent>
+  1142→          <AlertDialogHeader>
+  1143→            <AlertDialogTitle>Send the regret letter?</AlertDialogTitle>
+  1144→            <AlertDialogDescription>
+  1145→              {email
+  1146→                ? `A formal regret letter will be emailed to ${email}.`
+  1147→                : "No email on record — the send will be logged as skipped and HR will contact the applicant directly."}
+  1148→            </AlertDialogDescription>
+  1149→          </AlertDialogHeader>
+  1150→          <AlertDialogFooter>
+  1151→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1152→            <AlertDialogAction
+  1153→              className="border border-[var(--bad)]/30 bg-[var(--bad-bg)] text-[var(--bad)] hover:bg-[var(--bad-bg)]/80"
+  1154→              onClick={(e) => {
+  1155→                e.preventDefault();
+  1156→                void sendRegret();
+  1157→              }}
+  1158→            >
+  1159→              Send regret letter
+  1160→            </AlertDialogAction>
+  1161→          </AlertDialogFooter>
+  1162→        </AlertDialogContent>
+  1163→      </AlertDialog>
+  1164→
+  1165→      {/* Notice form */}
+  1166→      {noticeKind && (
+  1167→        <NoticeFormDialog
+  1168→          applicationId={applicationId}
+  1169→          kind={noticeKind}
+  1170→          onClose={() => setNoticeKind(null)}
+  1171→          onSent={refetch}
+  1172→        />
+  1173→      )}
+  1174→    </div>
+  1175→  );
+  1176→}
+  1177→
+  1178→// ── Deep-link page (default export, prop-detection wrapper) ─────────────────
+  1179→
+  1180→function ReviewWorkspacePage() {
+  1181→  const { params } = useHashRoute();
+  1182→  const id = Number(params.id);
+  1183→  const valid = Number.isInteger(id) && id > 0;
+  1184→  const close = useCallback(() => navigate("review-queue"), []);
+  1185→
+  1186→  return (
+  1187→    <div className="space-y-6">
+  1188→      <PageHeader
+  1189→        title="Review Workspace"
+  1190→        description="Applicant dossier and decision rail."
+  1191→        actions={
+  1192→          <button type="button" className={ghostBtn} onClick={close}>
+  1193→            <ArrowLeft className="h-4 w-4" aria-hidden />
+  1194→            Back to review queue
+  1195→          </button>
+  1196→        }
+  1197→      />
+  1198→      {valid ? (
+  1199→        <ReviewWorkspace applicationId={id} onClose={close} />
+  1200→      ) : (
+  1201→        <div className="dlg-card py-6">
+  1202→          <EmptyState
+  1203→            icon={FileText}
+  1204→            title="No application selected"
+  1205→            description="Open a review from the queue to see the applicant dossier."
+  1206→            action={
+  1207→              <button type="button" className={ctaBtn} onClick={close}>
+  1208→                Go to review queue
+  1209→              </button>
+  1210→            }
+  1211→          />
+  1212→        </div>
+  1213→      )}
+  1214→    </div>
+  1215→  );
+  1216→}
+  1217→
+  1218→export default function ReviewWorkspaceRoute(props: {
+  1219→  applicationId?: number;
+  1220→  onClose?: () => void;
+  1221→  onDecided?: () => void;
+  1222→}) {
+  1223→  if (typeof props.applicationId === "number") {
+  1224→    return <ReviewWorkspace applicationId={props.applicationId} onClose={props.onClose} onDecided={props.onDecided} />;
+  1225→  }
+  1226→  return <ReviewWorkspacePage />;
+  1227→}
+  1228→

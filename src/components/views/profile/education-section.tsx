@@ -87,6 +87,7 @@ export default function EducationSection({
   return (
     <SectionCard
       icon={GraduationCap}
+      chipTone="plum"
       title="Education"
       description="List your education background, highest first."
       actions={
@@ -109,6 +110,7 @@ export default function EducationSection({
         <EmptyState
           compact
           icon={GraduationCap}
+          tone="plum"
           title="No education entries yet"
           description="At least one is required to complete your profile."
         />

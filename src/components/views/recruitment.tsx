@@ -24,7 +24,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  EmptyState, PageHeader, SectionCard, SkeletonRows, StatusPill,
+  EmptyState, IconChip, Monogram, PageHeader, SectionCard, SkeletonRows, StatusPill,
 } from "@/components/ui/shell";
 import { apiFetch, deadlineState, formatCurrency, formatDate } from "@/lib/client";
 import type { JobWire } from "@/lib/router";
@@ -223,7 +223,7 @@ export function JobFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto scroll-thin">
+      <DialogContent className="shadow-e4 sm:max-w-2xl max-h-[92vh] overflow-y-auto scroll-thin">
         <DialogHeader>
           <DialogTitle className="font-display text-xl">{editing ? "Edit job posting" : "Create job posting"}</DialogTitle>
           <DialogDescription>
@@ -234,7 +234,7 @@ export function JobFormDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <SectionCard title="Position Details" icon={Briefcase} className="border border-border p-4">
+          <SectionCard title="Position Details" icon={Briefcase} chipTone="slate" className="border border-border p-4">
             <div className="space-y-4">
               <Field id="job-title" label="Title" required error={errors.title}>
                 <Input
@@ -355,7 +355,7 @@ export function JobFormDialog({
             </div>
           </SectionCard>
 
-          <SectionCard title="Compensation & Vacancy" icon={Banknote} className="border border-border p-4">
+          <SectionCard title="Compensation & Vacancy" icon={Banknote} chipTone="amber" className="border border-border p-4">
             <div className="space-y-4">
               <Field id="job-vacancy" label="Number of vacancies" required error={errors.vacancy}>
                 <Input
@@ -374,7 +374,7 @@ export function JobFormDialog({
             </div>
           </SectionCard>
 
-          <SectionCard title="Posting Description" icon={FileText} className="border border-border p-4">
+          <SectionCard title="Posting Description" icon={FileText} chipTone="plum" className="border border-border p-4">
             <div className="space-y-4">
               <Field id="job-brief" label="Brief description">
                 <Textarea id="job-brief" className="dlg-input min-h-[80px]" value={brief} maxLength={5000} onChange={(e) => setBrief(e.target.value)} />
@@ -388,7 +388,7 @@ export function JobFormDialog({
             </div>
           </SectionCard>
 
-          <SectionCard title="Publishing" icon={CalendarClock} className="border border-border p-4">
+          <SectionCard title="Publishing" icon={CalendarClock} chipTone="gold" className="border border-border p-4">
             <div className="grid gap-4 sm:grid-cols-3">
               <Field id="job-publish" label="Publish date">
                 <Input id="job-publish" type="date" className="dlg-input" value={publishDate} onChange={(e) => setPublishDate(e.target.value)} />
@@ -542,12 +542,12 @@ export default function Recruitment() {
         }
       />
 
-      {/* Filter bar — one card row: search grows, selects fixed */}
+      {/* Filter bar — one card row: chip + search grows, selects fixed */}
       <div className="dlg-card flex flex-col gap-3 p-3 sm:flex-row sm:items-center">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-pebble" aria-hidden />
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <IconChip icon={Search} tone="slate" size={40} className="shrink-0 max-sm:hidden" />
           <Input
-            className="dlg-input min-h-[44px] pl-9"
+            className="dlg-input min-h-[44px] flex-1 pl-4"
             placeholder="Search title, item no., or place…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -604,6 +604,7 @@ export default function Recruitment() {
         <div className="dlg-card p-6">
           <EmptyState
             icon={Briefcase}
+            tone="amber"
             title="No postings found"
             description="No job postings match the current filters."
             action={
@@ -616,6 +617,13 @@ export default function Recruitment() {
         </div>
       ) : (
         <div className="dlg-card overflow-hidden">
+          <div className="flex items-center gap-3 border-b border-[#ececec] px-5 py-4">
+            <IconChip icon={Briefcase} tone="amber" size={36} iconSize={16} />
+            <h2 className="text-[15px] font-semibold leading-6 text-ink">Job postings</h2>
+            <span className="num ml-auto rounded-full bg-fog px-2.5 py-1 text-xs font-medium text-stone">
+              {filtered.length} total
+            </span>
+          </div>
           <div className="overflow-x-auto scroll-thin">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
@@ -642,13 +650,20 @@ export default function Recruitment() {
                       onClick={() => navigate("job", { id: String(j.id) })}
                     >
                       <td className="px-5 py-3.5">
-                        <p className="text-sm font-medium text-ink">{j.title}</p>
-                        <p className="mt-0.5 text-xs text-stone">
-                          {[j.position?.itemNumber, j.position?.placeOfAssignment, j.position?.division].filter(Boolean).join(" · ") || "—"}
-                        </p>
+                        <div className="flex items-center gap-3">
+                          <span aria-hidden="true" className="contents">
+                            <Monogram warm size={28}>M</Monogram>
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-ink">{j.title}</p>
+                            <p className="mt-0.5 text-xs text-stone">
+                              {[j.position?.itemNumber, j.position?.placeOfAssignment, j.position?.division].filter(Boolean).join(" · ") || "—"}
+                            </p>
+                          </div>
+                        </div>
                       </td>
-                      <td className="num px-4 py-3.5 text-stone">{j.numberOfVacancy}</td>
-                      <td className="num px-4 py-3.5 text-stone">
+                      <td className="num px-4 py-3.5 font-medium text-stone">{j.numberOfVacancy}</td>
+                      <td className="num px-4 py-3.5 font-medium text-stone">
                         {j.position?.salaryAmount != null ? formatCurrency(j.position.salaryAmount) : "—"}
                       </td>
                       <td className="num px-4 py-3.5 text-stone">{j.applicationCount}</td>

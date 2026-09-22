@@ -25,7 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { SectionCard } from "@/components/ui/shell";
+import { IconChip, SectionCard } from "@/components/ui/shell";
 import { apiFetch } from "@/lib/client";
 import { EXTRACTABLE_CATEGORIES } from "@/lib/validation";
 import type { DocumentWire } from "@/lib/router";
@@ -184,15 +184,19 @@ export default function PdsUploadCard({
   return (
     <SectionCard
       icon={CloudUpload}
+      chipTone="plum"
       title="AI-Assisted PDS Auto-Fill"
       description="Upload your accomplished Civil Service Form 212 and we fill your profile."
       actions={<span className="status-pill status-info">AI-assisted</span>}
     >
-      {/* Phase progress — thin bar, ink fill */}
+      {/* Phase progress — thin bar, ember gradient fill (sanctioned progress gradient) */}
       {busy && (
         <div className="mb-4">
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-fog">
-            <div className="h-full rounded-full bg-ink transition-all duration-500" style={{ width: `${progress}%` }} />
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-[#f69251] to-[#ef8340] motion-safe:transition-[width] duration-500"
+              style={{ width: `${progress}%` }}
+            />
           </div>
           <p className="mt-2 flex items-center gap-2 text-xs text-stone">
             <Loader2 className="h-3 w-3 animate-spin" /> {PHASE_LABEL[phase]}
@@ -233,9 +237,7 @@ export default function PdsUploadCard({
         /* One-extraction lock (§7.5) — the only way back is a full clear. */
         <div className="flex flex-col gap-3 rounded-[12px] bg-fog p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
-            <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink text-white">
-              <Lock className="h-4 w-4" />
-            </span>
+            <IconChip icon={Lock} tone="ink" size={36} iconSize={16} className="mt-0.5" />
             <div>
               <p className="text-sm font-medium text-ink">Profile auto-filled from your PDS</p>
               <p className="mt-0.5 text-xs text-stone">
@@ -270,10 +272,12 @@ export default function PdsUploadCard({
               if (f && !busy) void runPipeline(f);
             }}
             className={cn(
-              "focus-ring flex min-h-[140px] w-full flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-[#dcdcdc] bg-white p-6 text-center transition-colors hover:bg-fog disabled:opacity-60",
-              dragOver && "border-ink bg-fog"
+              "focus-ring flex min-h-[140px] w-full flex-col items-center justify-center gap-2.5 rounded-[12px] border border-dashed border-[#dcdcdc] bg-white p-6 text-center transition-all duration-200 hover:bg-fog disabled:opacity-60",
+              dragOver &&
+                "border-ink bg-fog ring-2 ring-[#f69251]/30 bg-[radial-gradient(460px_200px_at_50%_10%,rgba(246,146,81,0.09),transparent_70%)]"
             )}
           >
+            <IconChip icon={CloudUpload} tone="plum" size={44} />
             <span className="text-sm font-medium text-ink">Upload PDS — CS Form 212</span>
             <span className="text-xs text-pebble">XLSX, PDF, DOCX or image · up to 10 MB</span>
           </button>

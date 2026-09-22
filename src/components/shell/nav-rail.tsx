@@ -2,10 +2,10 @@
 
 // ============================================================================
 // RMIS — Desktop left navigation rail (spec §13 view registry, §7.10 nav
-// config). Enterprise pattern (Workday/Linear): LABELED w-64 rail by default;
-// user may collapse to w-16 icon-only (persisted in localStorage
-// "rmis.rail-expanded"). Active view = filled ink pill. Bottom: user dropdown
-// with sign out.
+// config). PREMIUM DARK RAIL (Linear/Notion pattern): deep-ink gradient,
+// glass hover states, glowing active pill, ember brand mark. LABELED w-64 by
+// default; user may collapse to w-16 icon-only (persisted in localStorage
+// "rmis.rail-expanded"). Bottom: user dropdown with sign out.
 // ============================================================================
 
 import { useEffect, useState } from "react";
@@ -147,8 +147,6 @@ export function NavRail({ view }: { view: string }) {
     });
   };
 
-  // Pending counts badge placeholder (kept for future socket push).
-
   if (!user) return null;
   const groups = NAV_CONFIG[user.role] ?? [];
   const activeKey = PARENT_VIEW[view] ?? view;
@@ -156,34 +154,47 @@ export function NavRail({ view }: { view: string }) {
   return (
     <TooltipProvider delayDuration={0}>
       <aside
-        className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r border-border bg-white transition-[width] duration-200 lg:flex ${
+        className={`rail sticky top-0 hidden h-screen shrink-0 flex-col text-[var(--rail-text)] transition-[width] duration-200 lg:flex ${
           expanded ? "w-64" : "w-16"
         }`}
       >
         {/* Brand → role home */}
-        <div className={`flex h-16 shrink-0 items-center border-b border-border/70 ${expanded ? "px-3" : "justify-center"}`}>
+        <div className={`flex h-16 shrink-0 items-center ${expanded ? "px-3" : "justify-center"}`}>
           <button
             onClick={() => navigate(ROLE_HOME[user.role])}
             className="flex min-h-[44px] items-center gap-3"
             aria-label="Go to my workspace"
           >
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-ink text-base font-medium text-white">
+            <span
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] text-base font-semibold text-[#2a1608]"
+              style={{
+                background: "linear-gradient(145deg, #f9a468 0%, #ef8340 100%)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 6px rgba(246,146,81,0.4)",
+              }}
+            >
               M
             </span>
-            {expanded && <span className="text-sm font-medium text-ink">MIRDC Recruitment</span>}
+            {expanded && (
+              <span className="min-w-0 text-left">
+                <span className="block truncate text-sm font-semibold text-white">MIRDC Recruitment</span>
+                <span className="block truncate text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--rail-text-dim)]">
+                  DOST · RMIS
+                </span>
+              </span>
+            )}
           </button>
         </div>
 
         {/* Sections */}
-        <nav className="flex-1 space-y-5 overflow-y-auto scroll-thin px-2 py-4" aria-label="Workspace">
+        <nav className="flex-1 space-y-6 overflow-y-auto scroll-thin px-2.5 py-4" aria-label="Workspace">
           {groups.map((g) => (
             <div key={g.group}>
               {expanded ? (
-                <p className="mb-1.5 px-3 text-[11px] font-medium uppercase tracking-wider text-pebble">
+                <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--rail-text-dim)]">
                   {g.group}
                 </p>
               ) : (
-                <div className="mx-auto mb-2 h-px w-6 bg-border" aria-hidden="true" />
+                <div className="mx-auto mb-2 h-px w-6 bg-white/10" aria-hidden="true" />
               )}
               <ul className="space-y-1">
                 {g.items.map((item) => {
@@ -192,16 +203,31 @@ export function NavRail({ view }: { view: string }) {
                     <button
                       onClick={() => navigate(item.view)}
                       aria-current={active ? "page" : undefined}
-                      className={`group relative flex min-h-[44px] w-full items-center gap-3 rounded-full text-sm transition-colors duration-150 ${
+                      className={`group relative flex min-h-[44px] w-full items-center gap-3 rounded-full text-sm transition-all duration-150 ${
                         expanded ? "px-3.5" : "justify-center px-0"
                       } ${
                         active
-                          ? "bg-ink text-white"
-                          : "text-stone hover:bg-fog hover:text-ink"
+                          ? "bg-[var(--rail-active-bg)] font-medium text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+                          : "text-[var(--rail-text)] hover:bg-[var(--rail-hover-bg)] hover:text-white"
                       }`}
                     >
+                      {/* Ember active indicator */}
+                      <span
+                        aria-hidden="true"
+                        className={`absolute -left-2.5 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full transition-opacity duration-200 ${
+                          active ? "opacity-100" : "opacity-0"
+                        }`}
+                        style={{
+                          background: "linear-gradient(180deg, #f9a468, #ef8340)",
+                          boxShadow: "0 0 8px rgba(246,146,81,0.7)",
+                        }}
+                      />
                       <item.icon
-                        className={`h-[18px] w-[18px] shrink-0 ${active ? "" : "text-graphite group-hover:text-ink"}`}
+                        className={`h-[18px] w-[18px] shrink-0 transition-colors ${
+                          active
+                            ? "text-[#f9a468]"
+                            : "text-[var(--rail-text-dim)] group-hover:text-white"
+                        }`}
                         aria-hidden="true"
                       />
                       {expanded && <span className="truncate">{item.label}</span>}
@@ -228,10 +254,10 @@ export function NavRail({ view }: { view: string }) {
         </nav>
 
         {/* Bottom: collapse toggle + user dropdown */}
-        <div className="shrink-0 space-y-1 border-t border-border/70 p-2">
+        <div className="shrink-0 space-y-1 p-2.5" style={{ borderTop: "1px solid var(--rail-border)" }}>
           <button
             onClick={toggleExpanded}
-            className={`flex min-h-[44px] w-full items-center gap-3 rounded-full text-sm text-stone hover:bg-fog hover:text-ink ${
+            className={`flex min-h-[44px] w-full items-center gap-3 rounded-full text-sm text-[var(--rail-text)] hover:bg-[var(--rail-hover-bg)] hover:text-white ${
               expanded ? "px-3.5" : "justify-center px-0"
             }`}
             aria-label={expanded ? "Collapse navigation" : "Expand navigation"}
@@ -247,20 +273,26 @@ export function NavRail({ view }: { view: string }) {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className={`flex min-h-[44px] w-full items-center gap-3 rounded-full text-left hover:bg-fog ${
+                className={`flex min-h-[44px] w-full items-center gap-3 rounded-full text-left hover:bg-[var(--rail-hover-bg)] ${
                   expanded ? "px-2" : "justify-center px-0"
                 }`}
                 aria-label="Account menu"
               >
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink text-xs font-medium text-white">
+                <span
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-semibold text-[#2a1608]"
+                  style={{
+                    background: "linear-gradient(145deg, #f9a468 0%, #ef8340 100%)",
+                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 6px rgba(246,146,81,0.35)",
+                  }}
+                >
                   {initialsOf(user)}
                 </span>
                 {expanded && (
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-ink">
+                    <span className="block truncate text-sm font-medium text-white">
                       {displayNameOf(user)}
                     </span>
-                    <span className="block truncate text-xs text-pebble">{user.role}</span>
+                    <span className="block truncate text-xs text-[var(--rail-text-dim)]">{user.role}</span>
                   </span>
                 )}
               </button>
@@ -278,7 +310,7 @@ export function NavRail({ view }: { view: string }) {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={performSignOut}
-                className="cursor-pointer gap-2 text-dusty-rose focus:text-dusty-rose"
+                className="cursor-pointer gap-2 text-[var(--bad)] focus:text-[var(--bad)]"
               >
                 <LogOut className="h-4 w-4" aria-hidden="true" />
                 Sign out

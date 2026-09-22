@@ -8,15 +8,17 @@
 // refresh only — no poll (spec §13).
 // Enterprise polish pass: PageHeader with back affordance, KpiCard row, and
 // stacked SectionCards (Contact / Profile summary / Documents / Applications).
+// Wave-3 premium pass: dlg-card hero header with warm 48px monogram, role
+// pills, and mini IconChip stats; chipToned sections; chip document rows.
+// Handlers byte-identical.
 // ============================================================================
 
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle, ArrowUpRight, BriefcaseBusiness, ChevronLeft, ClipboardList,
-  FileText, ExternalLink, FolderOpen, GraduationCap, Mail, UserRound,
+  FileText, ExternalLink, FolderOpen, GraduationCap, Mail, UserRound, type LucideIcon,
 } from "lucide-react";
-import { Skeleton } from "@/components/ui/skeleton";
-import { EmptyState, KpiCard, PageHeader, SectionCard, SkeletonKpis, SkeletonRows } from "@/components/ui/shell";
+import { EmptyState, IconChip, Monogram, PageHeader, SectionCard, SkeletonRows, type ChipTone } from "@/components/ui/shell";
 import { apiFetch, formatDate, formatDateTime, fullName } from "@/lib/client";
 import { dotClass, pillClass, variantForCompletion, variantForStatus, type StatusVariant } from "@/lib/status-ui";
 import { navigate, useHashRoute } from "@/lib/router";
@@ -128,6 +130,34 @@ function docStatusVariant(status: string): StatusVariant {
   }
 }
 
+/** Gradient monogram avatar (wave-3) with initials derived from the name. */
+function MonogramAvatar({ name, size = 36, warm = false }: { name: string; size?: number; warm?: boolean }) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
+  return (
+    <span aria-hidden="true">
+      <Monogram size={size} warm={warm}>{initials || "?"}</Monogram>
+    </span>
+  );
+}
+
+/** Compact tinted-chip stat for the candidate header card (wave-3). */
+function HeaderStat({ icon: Icon, tone, label, value }: { icon: LucideIcon; tone: ChipTone; label: string; value: number }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <IconChip icon={Icon} tone={tone} size={36} iconSize={16} />
+      <div className="min-w-0">
+        <p className="num text-[20px] font-semibold leading-none tracking-[-0.01em] text-ink">{value}</p>
+        <p className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-stone">{label}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function CandidateDetail() {
   const { params } = useHashRoute();
   const id = Number(params.id);
@@ -170,6 +200,7 @@ export default function CandidateDetail() {
       <div className="dlg-card py-6">
         <EmptyState
           icon={UserRound}
+          tone="slate"
           title="No candidate selected"
           description="Open a candidate from the registry to see their full profile."
           action={
@@ -184,12 +215,18 @@ export default function CandidateDetail() {
 
   if (error) {
     return (
-      <div className="dlg-card space-y-4 p-8 text-center">
-        <AlertTriangle className="mx-auto h-8 w-8 text-[var(--bad)]" aria-hidden />
-        <p className="text-sm text-stone">{error}</p>
-        <button type="button" className={ghostBtn} onClick={() => void load()}>
-          Retry
-        </button>
+      <div className="dlg-card p-8">
+        <EmptyState
+          icon={AlertTriangle}
+          tone="rose"
+          title="Couldn't load the candidate"
+          description={error}
+          action={
+            <button type="button" className={ghostBtn} onClick={() => void load()}>
+              Retry
+            </button>
+          }
+        />
       </div>
     );
   }
@@ -197,14 +234,23 @@ export default function CandidateDetail() {
   if (!detail) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <Skeleton className="h-9 w-9 rounded-full" />
-          <Skeleton className="h-8 w-1/2" />
-        </div>
-        <SkeletonKpis count={4} />
+        {/* Header card skeleton */}
         <div className="dlg-card p-6">
-          <SkeletonRows rows={6} />
+          <div className="skel h-9 w-9 rounded-full" />
+          <div className="mt-3 flex items-center gap-4">
+            <div className="skel h-12 w-12 rounded-[12px]" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="skel h-7 w-1/3" />
+              <div className="skel h-4 w-1/2" />
+            </div>
+          </div>
+          <div className="mt-6 grid grid-cols-2 gap-4 border-t border-black/[0.06] pt-5 sm:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="skel h-9" />
+            ))}
+          </div>
         </div>
+        <SkeletonRows rows={6} />
       </div>
     );
   }
@@ -215,59 +261,61 @@ export default function CandidateDetail() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
+      {/* Header hero card: identity + role pills + mini chip stats (wave-3) */}
+      <div className="dlg-card p-6 shadow-e2">
         <button
           type="button"
           aria-label="Back to candidates"
           onClick={() => navigate("candidates")}
-          className="focus-ring -ml-2 mb-2 inline-flex h-9 w-9 items-center justify-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink"
+          className="focus-ring -ml-2 mb-3 inline-flex h-9 w-9 items-center justify-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink"
         >
           <ChevronLeft className="h-5 w-5" aria-hidden />
         </button>
-        <PageHeader
-          title={name}
-          description={
-            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              {latestPosition && <span>{latestPosition}</span>}
-              {latestApp && (
-                <>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            <MonogramAvatar name={name} size={48} warm />
+            <PageHeader
+              className="min-w-0 flex-1"
+              title={name}
+              description={
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  {latestPosition && <span>{latestPosition}</span>}
+                  {latestApp && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span className="num">Applied {formatDate(latestApp.dateApplied)}</span>
+                    </>
+                  )}
                   <span aria-hidden>·</span>
-                  <span className="num">Applied {formatDate(latestApp.dateApplied)}</span>
-                </>
-              )}
-              <span aria-hidden>·</span>
-              <span className="num">#{detail.id}</span>
-              {detail.user && (
-                <>
-                  <span aria-hidden>·</span>
-                  <span>{detail.user.username}</span>
-                </>
-              )}
-            </span>
-          }
-          actions={
-            <>
-              <StatusPill
-                status={detail.isProfileComplete ? "Complete profile" : "Incomplete profile"}
-                variant={variantForCompletion(detail.isProfileComplete)}
-              />
-              {latestApp && <StatusPill status={latestApp.status} />}
-            </>
-          }
-        />
-      </div>
-
-      {/* KPI tiles */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiCard label="Education" value={detail.educations.length} icon={GraduationCap} />
-        <KpiCard label="Experience" value={detail.workExperiences.length} icon={BriefcaseBusiness} />
-        <KpiCard label="Documents" value={detail.documents.length} icon={FileText} />
-        <KpiCard label="Applications" value={detail.applications.length} icon={ClipboardList} tone="info" />
+                  <span className="num">#{detail.id}</span>
+                  {detail.user && (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span>{detail.user.username}</span>
+                    </>
+                  )}
+                </span>
+              }
+            />
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2 lg:justify-end">
+            <StatusPill
+              status={detail.isProfileComplete ? "Complete profile" : "Incomplete profile"}
+              variant={variantForCompletion(detail.isProfileComplete)}
+            />
+            {latestApp && <StatusPill status={latestApp.status} />}
+          </div>
+        </div>
+        <div className="mt-6 grid grid-cols-2 gap-x-4 gap-y-4 border-t border-black/[0.06] pt-5 sm:grid-cols-4">
+          <HeaderStat icon={ClipboardList} tone="plum" label="Applications" value={detail.applications.length} />
+          <HeaderStat icon={GraduationCap} tone="slate" label="Education" value={detail.educations.length} />
+          <HeaderStat icon={BriefcaseBusiness} tone="slate" label="Experience" value={detail.workExperiences.length} />
+          <HeaderStat icon={FileText} tone="slate" label="Documents" value={detail.documents.length} />
+        </div>
       </div>
 
       {/* Contact */}
-      <SectionCard title="Contact" icon={Mail} description="Personal details on record.">
+      <SectionCard title="Contact" icon={Mail} chipTone="slate" description="Personal details on record.">
         <div className="rounded-[12px] bg-fog p-4">
           <LedgerRow label="Email" value={detail.emailAddress ?? ""} />
           <LedgerRow label="Mobile" value={detail.mobileNumber ?? ""} num />
@@ -301,6 +349,7 @@ export default function CandidateDetail() {
       <SectionCard
         title="Profile summary"
         icon={UserRound}
+        chipTone="plum"
         description="Education, experience, training, eligibility, and awards on file."
       >
         <div className="space-y-4">
@@ -395,14 +444,14 @@ export default function CandidateDetail() {
       </SectionCard>
 
       {/* Documents */}
-      <SectionCard title="Documents" icon={FolderOpen} description="Files are served from the document store.">
+      <SectionCard title="Documents" icon={FolderOpen} chipTone="slate" description="Files are served from the document store.">
         {detail.documents.length === 0 ? (
           <p className="py-4 text-center text-sm text-pebble">No documents uploaded.</p>
         ) : (
           <div className="space-y-3">
             {detail.documents.map((doc) => (
               <div key={doc.id} className="flex flex-wrap items-center gap-3 rounded-[12px] bg-fog p-4">
-                <FileText className="h-4 w-4 shrink-0 text-stone" aria-hidden />
+                <IconChip icon={FileText} tone="slate" size={32} iconSize={14} />
                 <div className="min-w-0 flex-1">
                   <a
                     href={`/api/files/${doc.filePath}`}
@@ -425,9 +474,9 @@ export default function CandidateDetail() {
       </SectionCard>
 
       {/* Applications timeline */}
-      <SectionCard title="Applications" icon={ClipboardList} description="Every application on file, most recent first.">
+      <SectionCard title="Applications" icon={ClipboardList} chipTone="plum" description="Every application on file, most recent first.">
         {detail.applications.length === 0 ? (
-          <EmptyState icon={BriefcaseBusiness} title="No applications on file" />
+          <EmptyState icon={BriefcaseBusiness} tone="plum" title="No applications on file" />
         ) : (
           <div className="relative before:absolute before:bottom-4 before:left-[3.5px] before:top-4 before:w-px before:bg-[#ececec] before:content-['']">
             {detail.applications.map((app) => (
@@ -445,7 +494,7 @@ export default function CandidateDetail() {
                 </div>
                 <StatusPill status={app.status} />
                 <ArrowUpRight
-                  className="h-4 w-4 shrink-0 text-pebble opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100 max-lg:opacity-100"
+                  className="h-4 w-4 shrink-0 text-pebble opacity-0 transition-all focus-within:opacity-100 group-hover/row:translate-x-0.5 group-hover/row:opacity-100 max-lg:opacity-100"
                   aria-hidden
                 />
               </button>

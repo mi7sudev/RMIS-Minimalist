@@ -9,8 +9,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, ChevronLeft, Pencil, RefreshCw, Trash2 } from "lucide-react";
-import { SectionCard, StatusPill } from "@/components/ui/shell";
+import {
+  AlertTriangle, ChevronLeft, ClipboardList, FileText, Hourglass,
+  Inbox, KanbanSquare, Pencil, RefreshCw, Star, Trash2, UserX,
+} from "lucide-react";
+import { IconChip, Monogram, SectionCard, StatusPill } from "@/components/ui/shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -46,6 +49,33 @@ const STAGE_VARIANT: Record<StageKey, StatusVariant> = {
   "Rejected": "bad",
 };
 
+/** Kanban column chips: tone-matched to the stage + a tiny stage glyph. */
+const STAGE_CHIP: Record<StageKey, "slate" | "gold" | "emerald" | "rose"> = {
+  "Applied": "slate",
+  "Under Review": "gold",
+  "Shortlisted": "emerald",
+  "Rejected": "rose",
+};
+
+const STAGE_ICON: Record<StageKey, typeof Inbox> = {
+  "Applied": Inbox,
+  "Under Review": Hourglass,
+  "Shortlisted": Star,
+  "Rejected": UserX,
+};
+
+/** First-letter monogram text ("?" when empty). */
+function monogramOf(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? "")
+      .join("") || "?"
+  );
+}
+
 function RichSection({ title, html, text }: { title: string; html: string | null; text: string | null }) {
   if (!html && !text) return null;
   return (
@@ -57,20 +87,6 @@ function RichSection({ title, html, text }: { title: string; html: string | null
         <p className="text-sm text-stone mt-2 whitespace-pre-line">{text}</p>
       )}
     </section>
-  );
-}
-
-function Monogram({ name }: { name: string }) {
-  const initials = name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
-  return (
-    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-fog text-xs font-medium text-ink">
-      {initials || "?"}
-    </span>
   );
 }
 
@@ -221,12 +237,17 @@ export default function JobWorkspace() {
           >
             <ChevronLeft className="h-5 w-5" aria-hidden />
           </button>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="font-display text-heading-md truncate">{job.title}</h1>
-              <JobStatusPill job={job} overdue={dl.overdue} />
+          <div className="min-w-0 flex items-center gap-3">
+            <span aria-hidden="true" className="contents">
+              <Monogram warm size={44} className="max-sm:hidden">M</Monogram>
+            </span>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="font-display text-heading-md truncate">{job.title}</h1>
+                <JobStatusPill job={job} overdue={dl.overdue} />
+              </div>
+              <p className="mt-1.5 text-sm leading-5 text-stone">{vitals || "—"}</p>
             </div>
-            <p className="mt-1.5 text-sm leading-5 text-stone">{vitals || "—"}</p>
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -257,7 +278,7 @@ export default function JobWorkspace() {
         {/* Overview */}
         <TabsContent value="overview" className="mt-4">
           <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
-            <SectionCard bodyClassName="space-y-6">
+            <SectionCard bodyClassName="space-y-6" title="Posting description" icon={FileText} chipTone="plum">
               <RichSection title="Brief description" html={job.briefDescriptionHtml} text={job.briefDescription} />
               <RichSection title="Duties & responsibilities" html={job.dutiesHtml} text={job.dutiesResponsibilities} />
               <RichSection title="Compensation package" html={job.compensationHtml} text={job.compensationPackage} />
@@ -269,7 +290,7 @@ export default function JobWorkspace() {
 
             {/* Sticky summary */}
             <div className="space-y-4 self-start xl:sticky xl:top-6">
-              <SectionCard title="Summary">
+              <SectionCard title="Summary" icon={ClipboardList} chipTone="slate">
                 <dl>
                   {(
                     [
@@ -297,7 +318,7 @@ export default function JobWorkspace() {
               </SectionCard>
 
               {/* Mini pipeline */}
-              <SectionCard title="Pipeline">
+              <SectionCard title="Pipeline" icon={KanbanSquare} chipTone="amber">
                 <div className="space-y-1">
                   {PIPELINE_STAGES.map((stage) => (
                     <div key={stage} className="flex items-center justify-between gap-3 py-1.5">
@@ -323,10 +344,11 @@ export default function JobWorkspace() {
                 <div key={stage} className="w-[240px] shrink-0 lg:w-auto lg:min-w-0">
                   <div className="flex items-center justify-between px-1 pb-2">
                     <h2 className="flex items-center gap-2 text-sm font-medium text-ink">
+                      <IconChip icon={STAGE_ICON[stage]} tone={STAGE_CHIP[stage]} size={28} iconSize={14} />
                       <span className={`stage-dot ${dotClass(STAGE_VARIANT[stage])}`} aria-hidden />
                       {stage}
                     </h2>
-                    <span className="num rounded-full bg-fog px-2 py-0.5 text-xs text-stone">{rows.length}</span>
+                    <span className="num rounded-full bg-fog px-2.5 py-1 text-xs font-medium text-stone">{rows.length}</span>
                   </div>
                   <div className="space-y-2">
                     {rows.length === 0 ? (
@@ -336,10 +358,15 @@ export default function JobWorkspace() {
                         <button
                           key={app.id}
                           type="button"
-                          className="dlg-card-plain w-full rounded-[12px] border border-[#ececec] p-3 text-left transition-shadow duration-200 hover:shadow-dialog-subtle focus-ring min-h-[44px]"
+                          className="dlg-card-plain lift w-full rounded-[12px] border border-[#ececec] p-3 text-left transition-shadow duration-200 hover:shadow-dialog-subtle focus-ring min-h-[44px]"
                           onClick={() => navigate("evaluator-review", { id: String(app.id) })}
                         >
-                          <p className="text-sm font-medium text-ink truncate">{fullName(app.applicant)}</p>
+                          <span className="flex items-center gap-2.5">
+                            <span aria-hidden="true" className="contents">
+                              <Monogram size={32}>{monogramOf(fullName(app.applicant))}</Monogram>
+                            </span>
+                            <p className="text-sm font-medium text-ink truncate">{fullName(app.applicant)}</p>
+                          </span>
                           <p className="text-xs text-stone mt-1">
                             Applied {formatDate(app.dateApplied)} · {getStatusMeta(app.status).label}
                           </p>
@@ -365,10 +392,12 @@ export default function JobWorkspace() {
                 <button
                   key={app.id}
                   type="button"
-                  className="dlg-card-plain min-h-[44px] w-full rounded-[12px] border border-[#ececec] p-4 flex items-center gap-3 text-left transition-shadow duration-200 hover:shadow-dialog-subtle focus-ring"
+                  className="dlg-card-plain lift min-h-[44px] w-full rounded-[12px] border border-[#ececec] p-4 flex items-center gap-3 text-left transition-shadow duration-200 hover:shadow-dialog-subtle focus-ring"
                   onClick={() => navigate("candidate", { id: String(app.applicantId) })}
                 >
-                  <Monogram name={fullName(app.applicant)} />
+                  <span aria-hidden="true" className="contents">
+                    <Monogram size={36}>{monogramOf(fullName(app.applicant))}</Monogram>
+                  </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-ink truncate">{fullName(app.applicant)}</p>
                     <p className="text-xs text-stone mt-0.5">

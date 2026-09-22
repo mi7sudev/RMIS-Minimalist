@@ -6,12 +6,16 @@
 export function Footer() {
   const year = new Date().getFullYear();
   return (
-    <footer className="mt-auto border-t border-border">
+    <footer className="mt-auto border-t border-border/70">
       <div className="mx-auto flex w-full max-w-[1200px] flex-col items-center justify-between gap-1.5 px-4 py-6 text-center text-xs text-pebble sm:flex-row sm:gap-3 sm:px-6 sm:text-left">
         <p className="flex items-center gap-2">
           <span
             aria-hidden="true"
-            className="grid h-5 w-5 place-items-center rounded-md bg-ink text-[10px] font-medium text-white"
+            className="grid h-5 w-5 place-items-center rounded-md text-[10px] font-semibold text-[#2a1608]"
+            style={{
+              background: "linear-gradient(145deg, #f9a468 0%, #ef8340 100%)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4)",
+            }}
           >
             M
           </span>

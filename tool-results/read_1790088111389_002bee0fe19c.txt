@@ -1,0 +1,725 @@
+     1→"use client";
+     2→
+     3→// ============================================================================
+     4→// RMIS — HR recruitment list + job form (spec §7.10). Filterable, sortable,
+     5→// paginated postings table (10/page, 30 s silent poll). JobFormDialog handles
+     6→// create + edit: plain-text rich sections (HTML companions generated with
+     7→// textToHtml), qualification vitals (write-through to the position master),
+     8→// and publish/deadline/processing dates.
+     9→// ============================================================================
+    10→
+    11→import { useCallback, useEffect, useMemo, useState } from "react";
+    12→import { toast } from "sonner";
+    13→import {
+    14→  AlertTriangle, Banknote, Briefcase, CalendarClock, Clock, Eye, FileText,
+    15→  Pencil, Plus, RefreshCw, Search,
+    16→} from "lucide-react";
+    17→import { Input } from "@/components/ui/input";
+    18→import { Label } from "@/components/ui/label";
+    19→import { Textarea } from "@/components/ui/textarea";
+    20→import {
+    21→  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    22→} from "@/components/ui/dialog";
+    23→import {
+    24→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    25→} from "@/components/ui/select";
+    26→import {
+    27→  EmptyState, PageHeader, SectionCard, SkeletonRows, StatusPill,
+    28→} from "@/components/ui/shell";
+    29→import { apiFetch, deadlineState, formatCurrency, formatDate } from "@/lib/client";
+    30→import type { JobWire } from "@/lib/router";
+    31→import { navigate } from "@/lib/router";
+    32→import { textToHtml } from "@/lib/sanitize";
+    33→import { variantForJobStatus } from "@/lib/status-ui";
+    34→import {
+    35→  CSC_EDUCATION_FIRST_LEVEL, CSC_EDUCATION_HIGHER_LEVEL, CSC_ELIGIBILITY_REGISTRY,
+    36→  DIVISIONS, POSITION_TYPES,
+    37→} from "@/lib/constants";
+    38→
+    39→// ── Shared visuals ──────────────────────────────────────────────────────────
+    40→
+    41→export const ghostBtn =
+    42→  "dlg-ghost inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+    43→export const ctaBtn =
+    44→  "dlg-cta inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-5 text-sm transition-all disabled:cursor-not-allowed disabled:opacity-50";
+    45→
+    46→/** Destructive ghost (contract §3): ghost shape with the functional --bad tint. */
+    47→export const ghostBadBtn =
+    48→  "inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full border border-[var(--bad)]/30 bg-white px-4 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-[var(--bad-bg)] disabled:cursor-not-allowed disabled:opacity-50";
+    49→/** 32px icon button (fog tile on hover) for row quick actions. */
+    50→export const iconBtn =
+    51→  "grid h-8 w-8 place-items-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink focus-ring";
+    52→/** 32px destructive icon button for row quick actions. */
+    53→export const iconBtnBad =
+    54→  "grid h-8 w-8 place-items-center rounded-full text-[var(--bad)] transition-colors hover:bg-[var(--bad-bg)] focus-ring";
+    55→
+    56→function isOpenJob(j: JobWire): boolean {
+    57→  return j.isActive && !deadlineState(j.deadlineDate).overdue;
+    58→}
+    59→
+    60→function JobStatusPill({ job }: { job: JobWire }) {
+    61→  const open = isOpenJob(job);
+    62→  return (
+    63→    <StatusPill
+    64→      status={open ? "OPEN" : "CLOSED"}
+    65→      variant={variantForJobStatus(open ? "OPEN" : "CLOSED")}
+    66→    />
+    67→  );
+    68→}
+    69→
+    70→// ── Job form dialog (create + edit) — named export, reused by job-workspace ─
+    71→
+    72→function Field({
+    73→  id,
+    74→  label,
+    75→  required,
+    76→  error,
+    77→  children,
+    78→}: {
+    79→  id: string;
+    80→  label: string;
+    81→  required?: boolean;
+    82→  error?: string | null;
+    83→  children: React.ReactNode;
+    84→}) {
+    85→  return (
+    86→    <div className="space-y-1.5">
+    87→      <Label htmlFor={id} className="text-xs text-stone">
+    88→        {label}
+    89→        {required ? " *" : ""}
+    90→      </Label>
+    91→      {children}
+    92→      {error && <p className="text-xs text-[var(--bad)]">{error}</p>}
+    93→    </div>
+    94→  );
+    95→}
+    96→
+    97→export function JobFormDialog({
+    98→  open,
+    99→  onOpenChange,
+   100→  job,
+   101→  onSaved,
+   102→}: {
+   103→  open: boolean;
+   104→  onOpenChange: (v: boolean) => void;
+   105→  job?: JobWire | null;
+   106→  onSaved: () => void;
+   107→}) {
+   108→  const editing = job != null;
+   109→  const [title, setTitle] = useState("");
+   110→  const [positionType, setPositionType] = useState("");
+   111→  const [vacancy, setVacancy] = useState("1");
+   112→  const [division, setDivision] = useState("");
+   113→  const [education, setEducation] = useState("");
+   114→  const [experience, setExperience] = useState("");
+   115→  const [training, setTraining] = useState("");
+   116→  const [eligibility, setEligibility] = useState("");
+   117→  const [license, setLicense] = useState("");
+   118→  const [brief, setBrief] = useState("");
+   119→  const [duties, setDuties] = useState("");
+   120→  const [compensation, setCompensation] = useState("");
+   121→  const [otherQuals, setOtherQuals] = useState("");
+   122→  const [publishDate, setPublishDate] = useState("");
+   123→  const [deadlineDate, setDeadlineDate] = useState("");
+   124→  const [processingDate, setProcessingDate] = useState("");
+   125→  const [errors, setErrors] = useState<{ title?: string | null; vacancy?: string | null }>({});
+   126→  const [busy, setBusy] = useState(false);
+   127→
+   128→  const prefill = useCallback(() => {
+   129→    setErrors({});
+   130→    if (!job) {
+   131→      setTitle("");
+   132→      setPositionType("");
+   133→      setVacancy("1");
+   134→      setDivision("");
+   135→      setEducation("");
+   136→      setExperience("");
+   137→      setTraining("");
+   138→      setEligibility("");
+   139→      setLicense("");
+   140→      setBrief("");
+   141→      setDuties("");
+   142→      setCompensation("");
+   143→      setOtherQuals("");
+   144→      setPublishDate(new Date().toISOString().slice(0, 10));
+   145→      setDeadlineDate("");
+   146→      setProcessingDate("");
+   147→      return;
+   148→    }
+   149→    setTitle(job.title ?? "");
+   150→    setPositionType(job.positionType ?? "");
+   151→    setVacancy(String(job.numberOfVacancy ?? 1));
+   152→    setDivision(job.position?.division ?? "");
+   153→    setEducation(job.position?.cscEducation ?? "");
+   154→    setExperience(job.position?.cscWorkExperience ?? "");
+   155→    setTraining(job.position?.cscTraining ?? "");
+   156→    setEligibility(job.position?.cscEligibilityGroup ?? job.position?.cscEligibility ?? "");
+   157→    setLicense(job.position?.license ?? "");
+   158→    setBrief(job.briefDescription ?? "");
+   159→    setDuties(job.dutiesResponsibilities ?? "");
+   160→    setCompensation(job.compensationPackage ?? "");
+   161→    setOtherQuals(job.otherQualifications ?? "");
+   162→    setPublishDate(job.publishDate ? job.publishDate.slice(0, 10) : "");
+   163→    setDeadlineDate(job.deadlineDate ? job.deadlineDate.slice(0, 10) : "");
+   164→    setProcessingDate(job.processingDate ? job.processingDate.slice(0, 10) : "");
+   165→  }, [job]);
+   166→
+   167→  useEffect(() => {
+   168→    if (open) prefill();
+   169→  }, [open, prefill]);
+   170→
+   171→  const opt = (v: string) => {
+   172→    const t = v.trim();
+   173→    return t === "" ? undefined : t;
+   174→  };
+   175→
+   176→  const submit = async () => {
+   177→    const nextErrors: { title?: string | null; vacancy?: string | null } = {};
+   178→    if (!title.trim()) nextErrors.title = "Title is required";
+   179→    const vacancyNum = Number(vacancy);
+   180→    if (!Number.isInteger(vacancyNum) || vacancyNum < 1) nextErrors.vacancy = "Vacancies must be a whole number of at least 1";
+   181→    setErrors(nextErrors);
+   182→    if (Object.keys(nextErrors).length > 0) return;
+   183→
+   184→    setBusy(true);
+   185→    try {
+   186→      const body = {
+   187→        title: title.trim(),
+   188→        positionType: opt(positionType),
+   189→        numberOfVacancy: vacancyNum,
+   190→        division: opt(division),
+   191→        education: opt(education),
+   192→        experience: opt(experience),
+   193→        training: opt(training),
+   194→        eligibility: opt(eligibility),
+   195→        license: opt(license),
+   196→        briefDescription: opt(brief),
+   197→        briefDescriptionHtml: textToHtml(brief) || undefined,
+   198→        dutiesResponsibilities: opt(duties),
+   199→        dutiesHtml: textToHtml(duties) || undefined,
+   200→        compensationPackage: opt(compensation),
+   201→        compensationHtml: textToHtml(compensation) || undefined,
+   202→        otherQualifications: opt(otherQuals),
+   203→        otherQualificationsHtml: textToHtml(otherQuals) || undefined,
+   204→        publishDate: publishDate || undefined,
+   205→        deadlineDate: deadlineDate || undefined,
+   206→        processingDate: processingDate || undefined,
+   207→      };
+   208→      if (editing) {
+   209→        await apiFetch(`/api/jobs/${job.id}`, { method: "PATCH", body });
+   210→        toast.success("Job posting updated");
+   211→      } else {
+   212→        await apiFetch("/api/jobs", { method: "POST", body });
+   213→        toast.success("Job posting created and published");
+   214→      }
+   215→      onOpenChange(false);
+   216→      onSaved();
+   217→    } catch (e) {
+   218→      toast.error(e instanceof Error ? e.message : "Failed to save the job posting");
+   219→    } finally {
+   220→      setBusy(false);
+   221→    }
+   222→  };
+   223→
+   224→  return (
+   225→    <Dialog open={open} onOpenChange={onOpenChange}>
+   226→      <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto scroll-thin">
+   227→        <DialogHeader>
+   228→          <DialogTitle className="font-display text-xl">{editing ? "Edit job posting" : "Create job posting"}</DialogTitle>
+   229→          <DialogDescription>
+   230→            {editing
+   231→              ? "Updates are saved to the posting; qualification vitals write through to the position master."
+   232→              : "The posting is published immediately; qualification vitals create or update the linked position."}
+   233→          </DialogDescription>
+   234→        </DialogHeader>
+   235→
+   236→        <div className="space-y-4">
+   237→          <SectionCard title="Position Details" icon={Briefcase} className="border border-border p-4">
+   238→            <div className="space-y-4">
+   239→              <Field id="job-title" label="Title" required error={errors.title}>
+   240→                <Input
+   241→                  id="job-title"
+   242→                  className="dlg-input"
+   243→                  value={title}
+   244→                  maxLength={200}
+   245→                  onChange={(e) => setTitle(e.target.value)}
+   246→                  placeholder="e.g. Science Research Specialist I"
+   247→                />
+   248→              </Field>
+   249→
+   250→              <Field id="job-type" label="Position type">
+   251→                <Input
+   252→                  id="job-type"
+   253→                  className="dlg-input"
+   254→                  list="rmis-position-types"
+   255→                  value={positionType}
+   256→                  maxLength={100}
+   257→                  onChange={(e) => setPositionType(e.target.value)}
+   258→                  placeholder="Select or type"
+   259→                />
+   260→                <datalist id="rmis-position-types">
+   261→                  {POSITION_TYPES.map((t) => (
+   262→                    <option key={t} value={t} />
+   263→                  ))}
+   264→                </datalist>
+   265→              </Field>
+   266→
+   267→              <Field id="job-division" label="Division">
+   268→                <Input
+   269→                  id="job-division"
+   270→                  className="dlg-input"
+   271→                  list="rmis-divisions"
+   272→                  value={division}
+   273→                  maxLength={100}
+   274→                  onChange={(e) => setDivision(e.target.value)}
+   275→                  placeholder="Official code or custom"
+   276→                />
+   277→                <datalist id="rmis-divisions">
+   278→                  {DIVISIONS.map((d) => (
+   279→                    <option key={d.code} value={d.code}>
+   280→                      {d.name}
+   281→                    </option>
+   282→                  ))}
+   283→                  <option value="Others">Others — type your own</option>
+   284→                </datalist>
+   285→              </Field>
+   286→
+   287→              <div className="space-y-4 rounded-[12px] bg-fog p-4">
+   288→                <p className="text-xs font-medium text-stone">Qualification vitals (write-through to the position master)</p>
+   289→                <Field id="job-education" label="Education (CSC standard)">
+   290→                  <Input
+   291→                    id="job-education"
+   292→                    className="dlg-input"
+   293→                    list="rmis-education-options"
+   294→                    value={education}
+   295→                    maxLength={1000}
+   296→                    onChange={(e) => setEducation(e.target.value)}
+   297→                    placeholder="Select from CSC MC 07 options or type"
+   298→                  />
+   299→                  <datalist id="rmis-education-options">
+   300→                    {[...CSC_EDUCATION_FIRST_LEVEL, ...CSC_EDUCATION_HIGHER_LEVEL].map((t) => (
+   301→                      <option key={t} value={t} />
+   302→                    ))}
+   303→                  </datalist>
+   304→                </Field>
+   305→                <div className="grid gap-4 sm:grid-cols-2">
+   306→                  <Field id="job-experience" label="Experience">
+   307→                    <Input
+   308→                      id="job-experience"
+   309→                      className="dlg-input"
+   310→                      value={experience}
+   311→                      maxLength={500}
+   312→                      onChange={(e) => setExperience(e.target.value)}
+   313→                      placeholder='e.g. 1 year of relevant experience'
+   314→                    />
+   315→                  </Field>
+   316→                  <Field id="job-training" label="Training">
+   317→                    <Input
+   318→                      id="job-training"
+   319→                      className="dlg-input"
+   320→                      value={training}
+   321→                      maxLength={500}
+   322→                      onChange={(e) => setTraining(e.target.value)}
+   323→                      placeholder='e.g. 8 hours of relevant training'
+   324→                    />
+   325→                  </Field>
+   326→                </div>
+   327→                <Field id="job-eligibility" label="Eligibility">
+   328→                  <Input
+   329→                    id="job-eligibility"
+   330→                    className="dlg-input"
+   331→                    list="rmis-eligibility-options"
+   332→                    value={eligibility}
+   333→                    maxLength={500}
+   334→                    onChange={(e) => setEligibility(e.target.value)}
+   335→                    placeholder="CSC registry entry or custom"
+   336→                  />
+   337→                  <datalist id="rmis-eligibility-options">
+   338→                    {CSC_ELIGIBILITY_REGISTRY.map((r) => (
+   339→                      <option key={r.name} value={r.name}>
+   340→                        {r.description}
+   341→                      </option>
+   342→                    ))}
+   343→                  </datalist>
+   344→                </Field>
+   345→                <Field id="job-license" label="License / special skill">
+   346→                  <Input
+   347→                    id="job-license"
+   348→                    className="dlg-input"
+   349→                    value={license}
+   350→                    maxLength={500}
+   351→                    onChange={(e) => setLicense(e.target.value)}
+   352→                  />
+   353→                </Field>
+   354→              </div>
+   355→            </div>
+   356→          </SectionCard>
+   357→
+   358→          <SectionCard title="Compensation & Vacancy" icon={Banknote} className="border border-border p-4">
+   359→            <div className="space-y-4">
+   360→              <Field id="job-vacancy" label="Number of vacancies" required error={errors.vacancy}>
+   361→                <Input
+   362→                  id="job-vacancy"
+   363→                  type="number"
+   364→                  min={1}
+   365→                  max={99}
+   366→                  className="dlg-input"
+   367→                  value={vacancy}
+   368→                  onChange={(e) => setVacancy(e.target.value)}
+   369→                />
+   370→              </Field>
+   371→              <Field id="job-compensation" label="Compensation package">
+   372→                <Textarea id="job-compensation" className="dlg-input min-h-[80px]" value={compensation} maxLength={4000} onChange={(e) => setCompensation(e.target.value)} />
+   373→              </Field>
+   374→            </div>
+   375→          </SectionCard>
+   376→
+   377→          <SectionCard title="Posting Description" icon={FileText} className="border border-border p-4">
+   378→            <div className="space-y-4">
+   379→              <Field id="job-brief" label="Brief description">
+   380→                <Textarea id="job-brief" className="dlg-input min-h-[80px]" value={brief} maxLength={5000} onChange={(e) => setBrief(e.target.value)} />
+   381→              </Field>
+   382→              <Field id="job-duties" label="Duties & responsibilities">
+   383→                <Textarea id="job-duties" className="dlg-input min-h-[100px]" value={duties} maxLength={8000} onChange={(e) => setDuties(e.target.value)} />
+   384→              </Field>
+   385→              <Field id="job-quals" label="Other qualifications">
+   386→                <Textarea id="job-quals" className="dlg-input min-h-[80px]" value={otherQuals} maxLength={4000} onChange={(e) => setOtherQuals(e.target.value)} />
+   387→              </Field>
+   388→            </div>
+   389→          </SectionCard>
+   390→
+   391→          <SectionCard title="Publishing" icon={CalendarClock} className="border border-border p-4">
+   392→            <div className="grid gap-4 sm:grid-cols-3">
+   393→              <Field id="job-publish" label="Publish date">
+   394→                <Input id="job-publish" type="date" className="dlg-input" value={publishDate} onChange={(e) => setPublishDate(e.target.value)} />
+   395→              </Field>
+   396→              <Field id="job-deadline" label="Deadline">
+   397→                <Input id="job-deadline" type="date" className="dlg-input" value={deadlineDate} onChange={(e) => setDeadlineDate(e.target.value)} />
+   398→              </Field>
+   399→              <Field id="job-processing" label="Processing date">
+   400→                <Input id="job-processing" type="date" className="dlg-input" value={processingDate} onChange={(e) => setProcessingDate(e.target.value)} />
+   401→              </Field>
+   402→            </div>
+   403→          </SectionCard>
+   404→        </div>
+   405→
+   406→        <DialogFooter>
+   407→          <button type="button" className={ghostBtn} onClick={() => onOpenChange(false)}>
+   408→            Cancel
+   409→          </button>
+   410→          <button type="button" className={ctaBtn} disabled={busy} onClick={() => void submit()}>
+   411→            {busy ? "Saving…" : editing ? "Save changes" : "Create & publish"}
+   412→          </button>
+   413→        </DialogFooter>
+   414→      </DialogContent>
+   415→    </Dialog>
+   416→  );
+   417→}
+   418→
+   419→// ── Recruitment list ────────────────────────────────────────────────────────
+   420→
+   421→const PAGE_SIZE = 10;
+   422→
+   423→export default function Recruitment() {
+   424→  const [jobs, setJobs] = useState<JobWire[] | null>(null);
+   425→  const [error, setError] = useState<string | null>(null);
+   426→  const [search, setSearch] = useState("");
+   427→  const [debouncedSearch, setDebouncedSearch] = useState("");
+   428→  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "closed">("all");
+   429→  const [sortBy, setSortBy] = useState<"recent" | "deadline" | "applications">("recent");
+   430→  const [page, setPage] = useState(1);
+   431→  const [formOpen, setFormOpen] = useState(false);
+   432→  const [editJob, setEditJob] = useState<JobWire | null>(null);
+   433→  const [spin, setSpin] = useState(false);
+   434→
+   435→  const openCreate = () => {
+   436→    setEditJob(null);
+   437→    setFormOpen(true);
+   438→  };
+   439→  const openEdit = (j: JobWire) => {
+   440→    setEditJob(j);
+   441→    setFormOpen(true);
+   442→  };
+   443→
+   444→  const load = useCallback(async (silent = false) => {
+   445→    if (!silent) setError(null);
+   446→    try {
+   447→      const data = await apiFetch<JobWire[]>("/api/jobs?limit=200");
+   448→      setJobs(data);
+   449→    } catch (e) {
+   450→      if (!silent) setError(e instanceof Error ? e.message : "Failed to load job postings");
+   451→    }
+   452→  }, []);
+   453→
+   454→  useEffect(() => {
+   455→    void load();
+   456→  }, [load]);
+   457→
+   458→  // 30 s silent poll + refetch-on-focus.
+   459→  useEffect(() => {
+   460→    const id = setInterval(() => {
+   461→      if (!document.hidden) void load(true);
+   462→    }, 30_000);
+   463→    return () => clearInterval(id);
+   464→  }, [load]);
+   465→  useEffect(() => {
+   466→    const onFocus = () => void load(true);
+   467→    window.addEventListener("focus", onFocus);
+   468→    document.addEventListener("visibilitychange", onFocus);
+   469→    return () => {
+   470→      window.removeEventListener("focus", onFocus);
+   471→      document.removeEventListener("visibilitychange", onFocus);
+   472→    };
+   473→  }, [load]);
+   474→
+   475→  // Debounced search (350 ms).
+   476→  useEffect(() => {
+   477→    const t = setTimeout(() => {
+   478→      setDebouncedSearch(search.trim().toLowerCase());
+   479→      setPage(1);
+   480→    }, 350);
+   481→    return () => clearTimeout(t);
+   482→  }, [search]);
+   483→
+   484→  const filtered = useMemo(() => {
+   485→    let rows = jobs ?? [];
+   486→    if (debouncedSearch) {
+   487→      rows = rows.filter((j) => {
+   488→        const hay = [
+   489→          j.title,
+   490→          j.position?.itemNumber,
+   491→          j.position?.placeOfAssignment,
+   492→          j.positionType,
+   493→        ]
+   494→          .filter(Boolean)
+   495→          .join(" ")
+   496→          .toLowerCase();
+   497→        return hay.includes(debouncedSearch);
+   498→      });
+   499→    }
+   500→    if (statusFilter === "open") rows = rows.filter(isOpenJob);
+   501→    else if (statusFilter === "closed") rows = rows.filter((j) => !isOpenJob(j));
+   502→    const sorted = [...rows];
+   503→    if (sortBy === "recent") {
+   504→      sorted.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+   505→    } else if (sortBy === "deadline") {
+   506→      sorted.sort((a, b) => {
+   507→        const av = a.deadlineDate ? new Date(a.deadlineDate).getTime() : Number.POSITIVE_INFINITY;
+   508→        const bv = b.deadlineDate ? new Date(b.deadlineDate).getTime() : Number.POSITIVE_INFINITY;
+   509→        return av - bv;
+   510→      });
+   511→    } else {
+   512→      sorted.sort((a, b) => b.applicationCount - a.applicationCount);
+   513→    }
+   514→    return sorted;
+   515→  }, [jobs, debouncedSearch, statusFilter, sortBy]);
+   516→
+   517→  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+   518→  const safePage = Math.min(page, totalPages);
+   519→  const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+   520→
+   521→  const manualRefresh = useCallback(() => {
+   522→    setSpin(true);
+   523→    void load(true).finally(() => setTimeout(() => setSpin(false), 500));
+   524→  }, [load]);
+   525→
+   526→  return (
+   527→    <div className="space-y-6">
+   528→      <PageHeader
+   529→        title="Recruitment"
+   530→        description={`${filtered.length} posting${filtered.length === 1 ? "" : "s"}`}
+   531→        actions={
+   532→          <>
+   533→            <button type="button" className={ghostBtn} onClick={manualRefresh}>
+   534→              <RefreshCw className={`h-4 w-4 ${spin ? "animate-spin" : ""}`} aria-hidden />
+   535→              Refresh
+   536→            </button>
+   537→            <button type="button" className={ctaBtn} onClick={openCreate}>
+   538→              <Plus className="h-4 w-4" aria-hidden />
+   539→              Create Job
+   540→            </button>
+   541→          </>
+   542→        }
+   543→      />
+   544→
+   545→      {/* Filter bar — one card row: search grows, selects fixed */}
+   546→      <div className="dlg-card flex flex-col gap-3 p-3 sm:flex-row sm:items-center">
+   547→        <div className="relative min-w-0 flex-1">
+   548→          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-pebble" aria-hidden />
+   549→          <Input
+   550→            className="dlg-input min-h-[44px] pl-9"
+   551→            placeholder="Search title, item no., or place…"
+   552→            value={search}
+   553→            onChange={(e) => setSearch(e.target.value)}
+   554→            aria-label="Search job postings"
+   555→          />
+   556→        </div>
+   557→        <Select
+   558→          value={statusFilter}
+   559→          onValueChange={(v) => {
+   560→            setStatusFilter(v as typeof statusFilter);
+   561→            setPage(1);
+   562→          }}
+   563→        >
+   564→          <SelectTrigger className="dlg-input min-h-[44px] w-full sm:w-44" aria-label="Status filter">
+   565→            <SelectValue />
+   566→          </SelectTrigger>
+   567→          <SelectContent>
+   568→            <SelectItem value="all">All statuses</SelectItem>
+   569→            <SelectItem value="open">Open</SelectItem>
+   570→            <SelectItem value="closed">Closed</SelectItem>
+   571→          </SelectContent>
+   572→        </Select>
+   573→        <Select
+   574→          value={sortBy}
+   575→          onValueChange={(v) => {
+   576→            setSortBy(v as typeof sortBy);
+   577→            setPage(1);
+   578→          }}
+   579→        >
+   580→          <SelectTrigger className="dlg-input min-h-[44px] w-full sm:w-44" aria-label="Sort">
+   581→            <SelectValue />
+   582→          </SelectTrigger>
+   583→          <SelectContent>
+   584→            <SelectItem value="recent">Recently posted</SelectItem>
+   585→            <SelectItem value="deadline">Deadline</SelectItem>
+   586→            <SelectItem value="applications">Applications</SelectItem>
+   587→          </SelectContent>
+   588→        </Select>
+   589→      </div>
+   590→
+   591→      {error ? (
+   592→        <div className="dlg-card p-8 text-center space-y-4">
+   593→          <AlertTriangle className="h-8 w-8 text-dusty-rose mx-auto" aria-hidden />
+   594→          <p className="text-sm text-stone">{error}</p>
+   595→          <button type="button" className={ghostBtn} onClick={() => void load()}>
+   596→            Retry
+   597→          </button>
+   598→        </div>
+   599→      ) : jobs === null ? (
+   600→        <div className="dlg-card p-6">
+   601→          <SkeletonRows rows={6} rowClassName="h-14" />
+   602→        </div>
+   603→      ) : pageRows.length === 0 ? (
+   604→        <div className="dlg-card p-6">
+   605→          <EmptyState
+   606→            icon={Briefcase}
+   607→            title="No postings found"
+   608→            description="No job postings match the current filters."
+   609→            action={
+   610→              <button type="button" className={ctaBtn} onClick={openCreate}>
+   611→                <Plus className="h-4 w-4" aria-hidden />
+   612→                Create Job
+   613→              </button>
+   614→            }
+   615→          />
+   616→        </div>
+   617→      ) : (
+   618→        <div className="dlg-card overflow-hidden">
+   619→          <div className="overflow-x-auto scroll-thin">
+   620→            <table className="w-full min-w-[640px] text-sm">
+   621→              <thead>
+   622→                <tr className="border-b border-[#ececec] text-left text-xs font-medium uppercase tracking-[0.08em] text-stone">
+   623→                  <th className="px-5 py-3.5">Position</th>
+   624→                  <th className="px-4 py-3.5">Vacancies</th>
+   625→                  <th className="px-4 py-3.5">Monthly salary</th>
+   626→                  <th className="px-4 py-3.5">Applications</th>
+   627→                  <th className="px-4 py-3.5">Deadline</th>
+   628→                  <th className="px-4 py-3.5">Status</th>
+   629→                  <th className="px-5 py-3.5 text-right">
+   630→                    <span className="sr-only">Quick actions</span>
+   631→                  </th>
+   632→                </tr>
+   633→              </thead>
+   634→              <tbody>
+   635→                {pageRows.map((j) => {
+   636→                  const dl = deadlineState(j.deadlineDate);
+   637→                  const urgent = isOpenJob(j) && dl.closingSoon;
+   638→                  return (
+   639→                    <tr
+   640→                      key={j.id}
+   641→                      className="group/row cursor-pointer border-b border-[#ececec] transition-colors last:border-0 hover:bg-fog/60"
+   642→                      onClick={() => navigate("job", { id: String(j.id) })}
+   643→                    >
+   644→                      <td className="px-5 py-3.5">
+   645→                        <p className="text-sm font-medium text-ink">{j.title}</p>
+   646→                        <p className="mt-0.5 text-xs text-stone">
+   647→                          {[j.position?.itemNumber, j.position?.placeOfAssignment, j.position?.division].filter(Boolean).join(" · ") || "—"}
+   648→                        </p>
+   649→                      </td>
+   650→                      <td className="num px-4 py-3.5 text-stone">{j.numberOfVacancy}</td>
+   651→                      <td className="num px-4 py-3.5 text-stone">
+   652→                        {j.position?.salaryAmount != null ? formatCurrency(j.position.salaryAmount) : "—"}
+   653→                      </td>
+   654→                      <td className="num px-4 py-3.5 text-stone">{j.applicationCount}</td>
+   655→                      <td className={`num px-4 py-3.5 ${urgent ? "text-[var(--bad)]" : "text-stone"}`}>
+   656→                        <span className="inline-flex items-center gap-1.5">
+   657→                          {urgent ? <Clock className="h-3 w-3" aria-hidden /> : null}
+   658→                          {formatDate(j.deadlineDate)}
+   659→                        </span>
+   660→                      </td>
+   661→                      <td className="px-4 py-3.5">
+   662→                        <JobStatusPill job={j} />
+   663→                      </td>
+   664→                      <td className="px-5 py-3.5">
+   665→                        <div className="flex justify-end gap-1.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100 max-lg:opacity-100">
+   666→                          <button
+   667→                            type="button"
+   668→                            className={iconBtn}
+   669→                            aria-label={`View ${j.title}`}
+   670→                            title="View"
+   671→                            onClick={(e) => {
+   672→                              e.stopPropagation();
+   673→                              navigate("job", { id: String(j.id) });
+   674→                            }}
+   675→                          >
+   676→                            <Eye className="h-4 w-4" aria-hidden />
+   677→                          </button>
+   678→                          <button
+   679→                            type="button"
+   680→                            className={iconBtn}
+   681→                            aria-label={`Edit ${j.title}`}
+   682→                            title="Edit"
+   683→                            onClick={(e) => {
+   684→                              e.stopPropagation();
+   685→                              openEdit(j);
+   686→                            }}
+   687→                          >
+   688→                            <Pencil className="h-4 w-4" aria-hidden />
+   689→                          </button>
+   690→                        </div>
+   691→                      </td>
+   692→                    </tr>
+   693→                  );
+   694→                })}
+   695→              </tbody>
+   696→            </table>
+   697→          </div>
+   698→        </div>
+   699→      )}
+   700→
+   701→      {/* Pagination */}
+   702→      {jobs !== null && filtered.length > 0 && (
+   703→        <div className="flex items-center justify-between gap-3">
+   704→          <p className="num text-xs text-pebble">
+   705→            {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length}
+   706→          </p>
+   707→          <div className="flex items-center gap-2">
+   708→            <button type="button" className={ghostBtn + " min-h-[36px] px-3 text-xs"} disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
+   709→              Previous
+   710→            </button>
+   711→            <span className="num text-xs text-stone">
+   712→              Page {safePage} of {totalPages}
+   713→            </span>
+   714→            <button type="button" className={ghostBtn + " min-h-[36px] px-3 text-xs"} disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>
+   715→              Next
+   716→            </button>
+   717→          </div>
+   718→        </div>
+   719→      )}
+   720→
+   721→      <JobFormDialog open={formOpen} onOpenChange={setFormOpen} job={editJob} onSaved={() => void load(true)} />
+   722→    </div>
+   723→  );
+   724→}
+   725→

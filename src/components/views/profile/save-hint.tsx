@@ -32,6 +32,11 @@ export function useSavedFlash(): [boolean, () => void] {
 
 export function SaveHint({ saving, saved }: { saving: boolean; saved: boolean }) {
   if (saving) return <span className="text-xs leading-none text-stone">Saving…</span>;
-  if (saved) return <span className="text-xs leading-none text-[var(--ok)]">Saved ✓</span>;
+  if (saved)
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs leading-none text-[var(--ok)]">
+        <span className="h-1.5 w-1.5 rounded-full bg-[var(--ok)]" aria-hidden="true" /> Saved ✓
+      </span>
+    );
   return null;
 }

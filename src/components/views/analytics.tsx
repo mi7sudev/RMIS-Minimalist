@@ -13,9 +13,12 @@ import {
   Area, AreaChart, CartesianGrid, Cell, Pie, PieChart,
   ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis,
 } from "recharts";
-import { AlertTriangle, Inbox, RefreshCw, Users } from "lucide-react";
 import {
-  EmptyState, PageHeader, SectionCard, SkeletonKpis, SkeletonRows, StatusPill,
+  AlertTriangle, Filter, History, Inbox, PieChart as PieChartIcon,
+  RefreshCw, TrendingUp, Users,
+} from "lucide-react";
+import {
+  EmptyState, Monogram, PageHeader, SectionCard, SkeletonKpis, SkeletonRows, StatusPill,
 } from "@/components/ui/shell";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -84,17 +87,15 @@ function statusSliceColor(status: string): string {
   return key ?? "#8b8b8b";
 }
 
-function Monogram({ name }: { name: string }) {
-  const initials = name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
+/** First-letter monogram text ("?" when empty). */
+function monogramOf(name: string): string {
   return (
-    <span className="num inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fog text-xs font-medium text-ink">
-      {initials || "?"}
-    </span>
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? "")
+      .join("") || "?"
   );
 }
 
@@ -241,6 +242,8 @@ export default function Analytics() {
           <SectionCard
             title="Pipeline conversion"
             description="Click a stage to drill into its applicants. Percentages are of Applied."
+            icon={Filter}
+            chipTone="plum"
           >
             <div className="space-y-1">
               {funnel.map((f) => {
@@ -261,7 +264,7 @@ export default function Analytics() {
                       <span className="num text-sm font-medium text-ink">{f.count}</span>
                     </div>
                     <div className="mt-2 flex items-center gap-2.5">
-                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-fog">
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-fog shadow-[inset_0_1px_2px_rgba(24,24,37,0.08)]">
                         <div
                           className="h-full rounded-full"
                           style={{ width: `${Math.min(100, f.pct)}%`, background: STAGE_BAR[f.stage] }}
@@ -276,7 +279,12 @@ export default function Analytics() {
           </SectionCard>
 
           <div className="space-y-6">
-            <SectionCard title="Applications per day" description="Last 30 days, from the review queue.">
+            <SectionCard
+              title="Applications per day"
+              description="Last 30 days, from the review queue."
+              icon={TrendingUp}
+              chipTone="plum"
+            >
               <div className="mt-2">
                 <ResponsiveContainer width="100%" height={220}>
                   <AreaChart data={volume} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
@@ -304,13 +312,22 @@ export default function Analytics() {
               </div>
             </SectionCard>
 
-            <SectionCard title="Status distribution" description="All applications by stored status.">
+            <SectionCard
+              title="Status distribution"
+              description="All applications by stored status."
+              icon={PieChartIcon}
+              chipTone="plum"
+            >
               {donutData.length === 0 ? (
-                <EmptyState icon={Inbox} title="No applications recorded yet." compact />
+                <EmptyState icon={Inbox} tone="plum" title="No applications recorded yet." compact />
               ) : (
                 <div className="mt-2 grid grid-cols-1 items-center gap-6 sm:grid-cols-[200px_1fr]">
                   {/* Donut with centered total — the award-dash staple */}
                   <div className="relative mx-auto h-[200px] w-[200px]">
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute inset-0 rounded-full shadow-[inset_0_0_0_1px_rgba(24,24,37,0.05)]"
+                    />
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <RTooltip />
@@ -321,6 +338,7 @@ export default function Analytics() {
                           innerRadius={64}
                           outerRadius={92}
                           paddingAngle={2}
+                          cornerRadius={4}
                           strokeWidth={0}
                           startAngle={90}
                           endAngle={-270}
@@ -333,7 +351,7 @@ export default function Analytics() {
                     </ResponsiveContainer>
                     <div className="pointer-events-none absolute inset-0 grid place-items-center">
                       <div className="text-center">
-                        <p className="num font-display text-3xl leading-none text-carbon">
+                        <p className="num font-display text-[32px] font-semibold leading-none tracking-[-0.02em] text-carbon">
                           {donutTotal}
                         </p>
                         <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.08em] text-pebble">
@@ -370,6 +388,8 @@ export default function Analytics() {
         <SectionCard
           title="Drill-down"
           description={drill === "All" ? "All stages." : `Filtered to ${drill}.`}
+          icon={Users}
+          chipTone="plum"
           actions={
             <>
               <Select value={drill} onValueChange={(v) => setDrill(v as Drill)}>
@@ -397,7 +417,7 @@ export default function Analytics() {
           }
         >
           {drillRows.length === 0 ? (
-            <EmptyState icon={Users} title="No applicants in this selection." compact />
+            <EmptyState icon={Users} tone="plum" title="No applicants in this selection." compact />
           ) : (
             <div className="max-h-96 space-y-1 overflow-y-auto scroll-thin pr-1">
               {drillRows.map((r) => (
@@ -407,7 +427,9 @@ export default function Analytics() {
                   className="flex min-h-[44px] w-full items-center gap-3 rounded-[12px] p-3 text-left transition-colors hover:bg-fog/60 focus-ring"
                   onClick={() => navigate("candidate", { id: String(r.applicantId) })}
                 >
-                  <Monogram name={fullName(r.applicant)} />
+                  <span aria-hidden="true" className="contents">
+                    <Monogram size={32}>{monogramOf(fullName(r.applicant))}</Monogram>
+                  </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-ink">{fullName(r.applicant)}</p>
                     <p className="truncate text-xs text-stone">
@@ -425,9 +447,11 @@ export default function Analytics() {
         <SectionCard
           title="Recent activity"
           description={`${auditTotal} logged event${auditTotal === 1 ? "" : "s"}`}
+          icon={History}
+          chipTone="plum"
         >
           {audit.length === 0 ? (
-            <EmptyState icon={Inbox} title="No audit events recorded yet." compact />
+            <EmptyState icon={Inbox} tone="plum" title="No audit events recorded yet." compact />
           ) : (
             <div className="max-h-96 space-y-1 overflow-y-auto scroll-thin pr-1">
               {audit.map((a) => (

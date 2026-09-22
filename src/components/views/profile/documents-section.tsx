@@ -43,6 +43,27 @@ import type { StatusVariant } from "@/lib/status-ui";
 const CATEGORY_NONE = "__select__";
 const EXTRACTABLE = EXTRACTABLE_CATEGORIES as readonly string[];
 
+/** File extension → short uppercase label for the slate mini chip (display-only). */
+function fileKind(name: string): string {
+  const ext = name.includes(".") ? (name.split(".").pop() ?? "") : "";
+  const labels: Record<string, string> = {
+    pdf: "PDF",
+    xlsx: "XLSX",
+    xls: "XLS",
+    xlsm: "XLSM",
+    doc: "DOC",
+    docx: "DOCX",
+    png: "IMG",
+    jpg: "IMG",
+    jpeg: "IMG",
+    gif: "IMG",
+    webp: "IMG",
+  };
+  const key = ext.toLowerCase();
+  if (labels[key]) return labels[key];
+  return ext ? ext.toUpperCase().slice(0, 4) : "FILE";
+}
+
 /** Document extraction status → label + functional variant (§2 status system). */
 function statusChip(doc: DocumentWire): { label: string; variant: StatusVariant } | null {
   if (!EXTRACTABLE.includes(doc.category)) return null;
@@ -138,6 +159,7 @@ export default function DocumentsSection({
   return (
     <SectionCard
       icon={FileText}
+      chipTone="slate"
       title="Supporting Documents"
       description="Credentials for HR verification — stored as-is. PDS extraction lives at the top of this page."
       actions={<SaveHint saving={uploading} saved={savedFlash} />}
@@ -184,7 +206,9 @@ export default function DocumentsSection({
             }}
             disabled={uploading}
             className={`flex min-h-[44px] items-center justify-center gap-2 rounded-[12px] border border-dashed px-5 py-3 text-sm font-medium transition-colors ${
-              categoryError ? "border-[var(--bad)]/40 bg-white text-[var(--bad)]" : "border-divider bg-white text-ink hover:bg-fog"
+              categoryError
+                ? "border-[var(--bad)]/40 bg-white text-[var(--bad)]"
+                : "border-divider bg-white text-ink hover:bg-[radial-gradient(420px_160px_at_50%_0%,rgba(246,146,81,0.055),transparent_70%)]"
             } disabled:opacity-50`}
           >
             {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
@@ -221,7 +245,7 @@ export default function DocumentsSection({
 
       {/* File rows */}
       {docs.length === 0 ? (
-        <EmptyState compact icon={Paperclip} title="No documents on file yet" description="Upload credentials HR will need for verification." className="mt-4" />
+        <EmptyState compact icon={Paperclip} tone="slate" title="No documents on file yet" description="Upload credentials HR will need for verification." className="mt-4" />
       ) : (
         <TooltipProvider delayDuration={150}>
           <div className="mt-4 max-h-96 space-y-2 overflow-y-auto scroll-thin pr-1">
@@ -238,6 +262,9 @@ export default function DocumentsSection({
                     aria-label={`Select ${doc.originalName}`}
                     className="shrink-0"
                   />
+                  <span className="chip chip-slate h-6 shrink-0 px-2 text-[10px] font-semibold tracking-wide" aria-hidden="true">
+                    {fileKind(doc.originalName)}
+                  </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-ink" title={doc.originalName}>
                       {doc.originalName}

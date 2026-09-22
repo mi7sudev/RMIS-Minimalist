@@ -10,15 +10,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle, BarChart3, Briefcase, CalendarClock, ClipboardCheck, Clock,
-  Inbox, RefreshCw, ShieldAlert, UserRound, UserX,
+  Inbox, LayoutDashboard, RefreshCw, ShieldAlert, UserRound, UserX,
 } from "lucide-react";
 import {
-  EmptyState, KpiCard, PageHeader, SkeletonKpis, SkeletonRows, StatusPill,
+  EmptyState, IconChip, KpiCard, Monogram, PageHeader, SkeletonKpis, SkeletonRows, StatusPill,
 } from "@/components/ui/shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiFetch, deadlineState, formatDate, fullName } from "@/lib/client";
 import { navigate } from "@/lib/router";
-import { getStatusMeta } from "@/lib/status";
+import { getStatusMeta, stageForStatus, PIPELINE_STAGES, type StageKey } from "@/lib/status";
 import { variantForStatus } from "@/lib/status-ui";
 import { ghostBtn } from "@/components/views/recruitment";
 
@@ -62,16 +62,44 @@ type JobRow = {
   position: { placeOfAssignment: string | null; division: string | null } | null;
 };
 
-function Initials({ name }: { name: string }) {
-  const initials = name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
+/** First-letter monogram text ("?" when empty). */
+function initialsOf(name: string): string {
   return (
-    <span className="num grid h-7 w-7 shrink-0 place-items-center rounded-full bg-fog text-[10px] font-medium text-ink" aria-hidden>
-      {initials || "?"}
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? "")
+      .join("") || "?"
+  );
+}
+
+/** Stage colors for the pipeline sparkline (same tokens as the analytics funnel). */
+const STAGE_SPARK: Record<StageKey, string> = {
+  "Applied": "var(--info)",
+  "Under Review": "var(--warn)",
+  "Shortlisted": "var(--ok)",
+  "Rejected": "var(--bad)",
+};
+
+/** Tiny stacked pipeline bar for the KpiCard aside — built only from byStatus wire data. */
+function PipelineSpark({ byStatus }: { byStatus: { status: string; count: number }[] }) {
+  const buckets = PIPELINE_STAGES.map((stage) => ({
+    stage,
+    count: byStatus.reduce((sum, d) => (stageForStatus(d.status) === stage ? sum + d.count : sum), 0),
+  }));
+  const total = buckets.reduce((sum, b) => sum + b.count, 0);
+  if (total === 0) return null;
+  return (
+    <span className="flex h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-fog" aria-hidden>
+      {buckets.map((b) =>
+        b.count > 0 ? (
+          <span
+            key={b.stage}
+            style={{ width: `${(b.count / total) * 100}%`, background: STAGE_SPARK[b.stage] }}
+          />
+        ) : null
+      )}
     </span>
   );
 }
@@ -207,6 +235,7 @@ export default function CommandCenter() {
                 tone="warn"
                 hint="Open →"
                 onClick={() => navigate("review-queue")}
+                aside={<PipelineSpark byStatus={stats.byStatus} />}
               />
               <KpiCard
                 label="Deadlines this week"
@@ -269,9 +298,10 @@ export default function CommandCenter() {
                     <button
                       key={j.id}
                       type="button"
-                      className="flex min-h-[44px] w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-[12px] border border-border bg-white p-3.5 text-left transition-shadow duration-200 hover:shadow-dialog-subtle focus-ring"
+                      className="dlg-card lift flex min-h-[44px] w-full flex-wrap items-center gap-x-3 gap-y-2 p-3.5 text-left focus-ring"
                       onClick={() => navigate("job", { id: String(j.id) })}
                     >
+                      <IconChip icon={Briefcase} tone="amber" size={36} iconSize={16} />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-ink">{j.title}</p>
                         <p className="mt-0.5 truncate text-xs text-stone">
@@ -315,10 +345,12 @@ export default function CommandCenter() {
                   <button
                     key={r.id}
                     type="button"
-                    className="flex min-h-[44px] w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-[12px] border border-border bg-white p-3.5 text-left transition-shadow duration-200 hover:shadow-dialog-subtle focus-ring"
+                    className="dlg-card lift flex min-h-[44px] w-full flex-wrap items-center gap-x-3 gap-y-2 p-3.5 text-left focus-ring"
                     onClick={() => navigate("candidate", { id: String(r.applicant.id) })}
                   >
-                    <Initials name={fullName(r.applicant)} />
+                    <span aria-hidden="true" className="contents">
+                      <Monogram size={28}>{initialsOf(fullName(r.applicant))}</Monogram>
+                    </span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-ink">{fullName(r.applicant)}</p>
                       <p className="mt-0.5 truncate text-xs text-stone">
@@ -336,8 +368,11 @@ export default function CommandCenter() {
         {/* Overview aside */}
         <aside className="space-y-4 self-start lg:sticky lg:top-6">
           <div className="dlg-card p-5">
-            <h2 className="text-[15px] font-medium leading-6 text-ink">Overview</h2>
-            <dl className="mt-2">
+            <div className="flex items-center gap-3">
+              <IconChip icon={LayoutDashboard} tone="slate" size={36} iconSize={16} />
+              <h2 className="text-[15px] font-semibold leading-6 text-ink">Overview</h2>
+            </div>
+            <dl className="mt-3">
               {(
                 [
                   ["Applicants", stats.applicants],

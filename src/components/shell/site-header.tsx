@@ -17,17 +17,25 @@ export function SiteHeader() {
 
   return (
     <header className="sticky top-4 z-40 px-4 sm:px-6">
-      <div className="mx-auto flex h-16 w-full max-w-[1200px] items-center justify-between gap-3 rounded-[32px] bg-white px-4 shadow-dialog-subtle sm:px-6">
+      <div
+        className="glass mx-auto flex h-16 w-full max-w-[1200px] items-center justify-between gap-3 rounded-[32px] border border-white/60 px-4 shadow-e2 sm:px-6"
+      >
         {/* Brand */}
         <button
           onClick={() => navigate("home")}
           className="flex min-h-[44px] items-center gap-3"
           aria-label="MIRDC Recruitment home"
         >
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-ink text-base font-medium text-white">
+          <span
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] text-base font-semibold text-[#2a1608]"
+            style={{
+              background: "linear-gradient(145deg, #f9a468 0%, #ef8340 100%)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 6px rgba(246,146,81,0.4)",
+            }}
+          >
             M
           </span>
-          <span className="text-sm font-medium tracking-[-0.01em] text-ink">
+          <span className="text-sm font-semibold tracking-[-0.01em] text-ink">
             MIRDC Recruitment
           </span>
         </button>

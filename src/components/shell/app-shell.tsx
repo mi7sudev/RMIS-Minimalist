@@ -29,15 +29,17 @@ export function AppShell({
   const { user } = useSession();
 
   return (
-    <div className="flex min-h-screen flex-col bg-fog">
+    <div className="flex min-h-screen flex-col">
       <div className="flex flex-1 items-stretch">
         {/* Desktop left rail (lg+) */}
         <NavRail view={view} />
 
         {/* Content column */}
         <div className="flex min-w-0 flex-1 flex-col">
-          {/* Mobile top bar with sheet menu */}
-          <div className="sticky top-0 z-40 flex h-16 items-center gap-1.5 border-b border-border bg-white px-3 sm:px-4 lg:hidden">
+          {/* Mobile top bar with sheet menu — dark premium strip */}
+          <div
+            className="rail sticky top-0 z-40 flex h-16 items-center gap-1.5 px-3 text-[var(--rail-text)] sm:px-4 lg:hidden"
+          >
             <MobileNav view={view} />
             <button
               onClick={() => {
@@ -46,10 +48,16 @@ export function AppShell({
               className="flex min-h-[44px] items-center gap-2.5"
               aria-label="Go to my workspace"
             >
-              <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-ink text-base font-medium text-white">
+              <span
+                className="grid h-9 w-9 place-items-center rounded-[10px] text-base font-semibold text-[#2a1608]"
+                style={{
+                  background: "linear-gradient(145deg, #f9a468 0%, #ef8340 100%)",
+                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 6px rgba(246,146,81,0.4)",
+                }}
+              >
                 M
               </span>
-              <span className="text-sm font-medium text-ink">MIRDC Recruitment</span>
+              <span className="text-sm font-semibold text-white">MIRDC Recruitment</span>
             </button>
           </div>
 
@@ -72,7 +80,7 @@ export function AppShell({
 
 export function PublicShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen flex-col bg-fog">
+    <div className="flex min-h-screen flex-col">
       <SiteHeader />
       <main className="w-full flex-1">{children}</main>
       <Footer />

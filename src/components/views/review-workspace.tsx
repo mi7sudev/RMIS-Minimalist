@@ -10,13 +10,17 @@
 // rail (requirements match, credentials, state banner, decisions, notices,
 // direct email). Enterprise polish pass: functional status pills/dots only —
 // every handler, fetch, and confirmation dialog is unchanged.
+// Wave-3 premium pass: warm monogram dossier header, gradient ink→ember
+// active-tab underline, tone chips on verdict actions, mini emerald/rose
+// requirement indicators, IconChip rail headers. Handlers byte-identical.
 // ============================================================================
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertTriangle, ArrowLeft, Award, BadgeCheck, BookOpen, BriefcaseBusiness,
-  FileText, GraduationCap, Mail, Paperclip, Send, UserRound,
+  Check, Eye, FileText, Gavel, GraduationCap, History, IdCard, ListChecks, Mail,
+  Minus, Mails, Paperclip, RotateCcw, ScanSearch, Send, Star, UserRound, X, XCircle,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -30,7 +34,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { EmptyState, PageHeader, SkeletonRows } from "@/components/ui/shell";
+import {
+  EmptyState, IconChip, Monogram, PageHeader, SkeletonRows, type ChipTone,
+} from "@/components/ui/shell";
 import { apiFetch, formatDate, formatDateTime, fullName, timeAgo } from "@/lib/client";
 import { getStatusMeta, stageForStatus, type Tone } from "@/lib/status";
 import { pillClass, variantForStatus, variantForVerdict, type StatusVariant } from "@/lib/status-ui";
@@ -171,6 +177,35 @@ const ctaBtn =
 const destructiveGhost =
   "border-[var(--bad)]/30 text-[var(--bad)] hover:bg-[var(--bad-bg)]";
 
+/** Gradient monogram avatar (wave-3) with initials derived from the name. */
+function MonogramAvatar({ name, size = 36, warm = false }: { name: string; size?: number; warm?: boolean }) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
+  return (
+    <span aria-hidden="true">
+      <Monogram size={size} warm={warm}>{initials || "?"}</Monogram>
+    </span>
+  );
+}
+
+/** Requirement check status → mini matched/missing indicator chip. */
+function checkChip(status: string): { icon: typeof Check; tone: ChipTone } {
+  switch (status) {
+    case "MET":
+      return { icon: Check, tone: "emerald" };
+    case "NOT_MET":
+      return { icon: X, tone: "rose" };
+    case "REVIEW":
+      return { icon: Eye, tone: "slate" };
+    default:
+      return { icon: Minus, tone: "slate" };
+  }
+}
+
 function str(v: unknown): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "boolean") return v ? "Yes" : "No";
@@ -213,7 +248,7 @@ const DOSSIER_TABS = [
 const tabsListCls =
   "h-auto w-full flex-wrap justify-start gap-1 rounded-none border-b border-border bg-transparent p-0";
 const tabTriggerCls =
-  "flex-none gap-1.5 rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 py-2.5 text-[13px] font-medium text-stone shadow-none transition-colors hover:text-ink data-[state=active]:border-ink data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-none";
+  "flex-none gap-1.5 rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 py-2.5 text-[13px] font-medium text-stone shadow-none transition-colors hover:text-ink data-[state=active]:bg-transparent data-[state=active]:text-ink data-[state=active]:shadow-none data-[state=active]:[background-image:linear-gradient(90deg,#181825,#f69251)] data-[state=active]:[background-size:100%_2px] data-[state=active]:[background-position:bottom] data-[state=active]:[background-repeat:no-repeat]";
 
 // ── Snapshot tab renderers ──────────────────────────────────────────────────
 
@@ -352,9 +387,12 @@ function RequirementsMatchPanel({ report }: { report: RequirementsReport }) {
   return (
     <div className="dlg-card p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="text-[15px] font-medium leading-6 text-ink">Requirements match</h3>
-          <p className="mt-0.5 text-xs text-stone">{vm.meaning}</p>
+        <div className="flex min-w-0 items-center gap-3">
+          <IconChip icon={ListChecks} tone="gold" size={36} iconSize={16} />
+          <div className="min-w-0">
+            <h3 className="text-[15px] font-medium leading-6 text-ink">Requirements match</h3>
+            <p className="mt-0.5 text-xs text-stone">{vm.meaning}</p>
+          </div>
         </div>
         <StatusPill status={vm.chip} variant={vm.variant} className="shrink-0" />
       </div>
@@ -365,10 +403,12 @@ function RequirementsMatchPanel({ report }: { report: RequirementsReport }) {
         <div className="mt-3 max-h-96 space-y-2.5 overflow-y-auto scroll-thin pr-1">
           {report.checks.map((c, i) => {
             const cp = checkPill(c.status);
+            const cc = checkChip(c.status);
             return (
               <div key={i} className="rounded-[12px] border border-border p-3.5">
-                <div className="flex items-start justify-between gap-3">
-                  <p className="min-w-0 text-[13px] leading-5 text-ink line-clamp-2">{c.standard || "—"}</p>
+                <div className="flex items-start gap-2.5">
+                  <IconChip icon={cc.icon} tone={cc.tone} size={22} iconSize={12} className="mt-0.5" />
+                  <p className="min-w-0 flex-1 text-[13px] leading-5 text-ink line-clamp-2">{c.standard || "—"}</p>
                   <StatusPill status={cp.label} variant={cp.variant} className="shrink-0" />
                 </div>
                 <p className="num mt-1.5 text-xs leading-5 text-stone line-clamp-2">
@@ -406,7 +446,10 @@ function CredentialsRow({ payload }: { payload: ReviewPayload }) {
   ];
   return (
     <div className="dlg-card p-4">
-      <h3 className="text-[15px] font-medium leading-6 text-ink">Credentials on file</h3>
+      <div className="flex items-center gap-2.5">
+        <IconChip icon={IdCard} tone="slate" size={28} iconSize={13} />
+        <h3 className="text-[15px] font-medium leading-6 text-ink">Credentials on file</h3>
+      </div>
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {items.map(([label, n]) => (
           <span key={label} className="status-pill status-neutral">
@@ -639,8 +682,8 @@ function DirectEmailCard({
 
   return (
     <div className="dlg-card p-4">
-      <div className="flex items-center gap-2">
-        <Mail className="h-4 w-4 text-stone" aria-hidden />
+      <div className="flex items-center gap-2.5">
+        <IconChip icon={Mail} tone="slate" size={28} iconSize={13} />
         <h3 className="text-[15px] font-medium leading-6 text-ink">Direct email</h3>
       </div>
       <p className="mt-1 text-xs text-stone">Recipient is resolved from the applicant record — attachments ≤ 3 files × 5 MB.</p>
@@ -844,19 +887,25 @@ export function ReviewWorkspace({
 
   if (error) {
     return (
-      <div className="dlg-card space-y-4 p-8 text-center">
-        <AlertTriangle className="mx-auto h-8 w-8 text-[var(--bad)]" aria-hidden />
-        <p className="text-sm text-stone">{error}</p>
-        <div className="flex items-center justify-center gap-3">
-          <button type="button" className={ghostBtn} onClick={() => void load()}>
-            Retry
-          </button>
-          {onClose && (
-            <button type="button" className={ghostBtn} onClick={onClose}>
-              Close
-            </button>
-          )}
-        </div>
+      <div className="dlg-card p-8">
+        <EmptyState
+          icon={AlertTriangle}
+          tone="rose"
+          title="Couldn't load the application"
+          description={error}
+          action={
+            <div className="flex items-center justify-center gap-3">
+              <button type="button" className={ghostBtn} onClick={() => void load()}>
+                Retry
+              </button>
+              {onClose && (
+                <button type="button" className={ghostBtn} onClick={onClose}>
+                  Close
+                </button>
+              )}
+            </div>
+          }
+        />
       </div>
     );
   }
@@ -901,11 +950,14 @@ export function ReviewWorkspace({
       {/* ── LEFT: frozen dossier ── */}
       <div className="dlg-card space-y-4 p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="font-display text-2xl leading-tight text-ink">{applicantName}</h2>
-            <p className="num mt-1 text-sm text-stone">
-              {[positionTitle, place].filter(Boolean).join(" · ")} · Applied {formatDate(payload.dateApplied)}
-            </p>
+          <div className="flex min-w-0 items-center gap-4">
+            <MonogramAvatar name={applicantName} size={48} warm />
+            <div className="min-w-0">
+              <h2 className="font-display text-2xl leading-tight text-ink">{applicantName}</h2>
+              <p className="num mt-1 text-sm text-stone">
+                {[positionTitle, place].filter(Boolean).join(" · ")} · Applied {formatDate(payload.dateApplied)}
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-2.5">
             <StatusPill status={payload.status} />
@@ -972,7 +1024,7 @@ export function ReviewWorkspace({
           </TabsContent>
           <TabsContent value="documents" className="pt-4">
             <div className="rounded-[12px] bg-fog p-6 text-center">
-              <FileText className="mx-auto h-6 w-6 text-pebble" aria-hidden />
+              <IconChip icon={FileText} tone="slate" size={40} className="mx-auto" />
               <p className="mt-2 text-sm text-stone">Supporting documents are verified in person at the next stage.</p>
             </div>
           </TabsContent>
@@ -991,7 +1043,10 @@ export function ReviewWorkspace({
 
         {(stage === "Applied" || stage === "Under Review") && (
           <div className="dlg-card space-y-3 p-4">
-            <h3 className="text-[15px] font-medium leading-6 text-ink">Decision</h3>
+            <div className="flex items-center gap-2.5">
+              <IconChip icon={Gavel} tone="slate" size={28} iconSize={13} />
+              <h3 className="text-[15px] font-medium leading-6 text-ink">Decision</h3>
+            </div>
             <Textarea
               className="dlg-input min-h-[80px]"
               placeholder="Remarks (optional) — included as the reason"
@@ -1003,10 +1058,12 @@ export function ReviewWorkspace({
             <div className="space-y-2">
               {stage === "Applied" && (
                 <button type="button" className={ghostBtn + " w-full"} onClick={() => openConfirm("Under Review")}>
+                  <IconChip icon={ScanSearch} tone="gold" size={28} iconSize={14} />
                   Start Review
                 </button>
               )}
               <button type="button" className={ctaBtn + " w-full"} onClick={() => openConfirm("Shortlisted")}>
+                <IconChip icon={Star} tone="emerald" size={28} iconSize={14} />
                 Shortlist
               </button>
               <button
@@ -1014,6 +1071,7 @@ export function ReviewWorkspace({
                 className={ghostBtn + " w-full " + destructiveGhost}
                 onClick={() => openConfirm("Rejected")}
               >
+                <IconChip icon={XCircle} tone="rose" size={28} iconSize={14} />
                 Not Qualified
               </button>
             </div>
@@ -1025,7 +1083,10 @@ export function ReviewWorkspace({
 
         {(stage === "Shortlisted" || stage === "Rejected") && (
           <div className="dlg-card space-y-3 p-4">
-            <h3 className="text-[15px] font-medium leading-6 text-ink">Revise decision</h3>
+            <div className="flex items-center gap-2.5">
+              <IconChip icon={History} tone="slate" size={28} iconSize={13} />
+              <h3 className="text-[15px] font-medium leading-6 text-ink">Revise decision</h3>
+            </div>
             <p className="text-xs text-pebble">Changing the decision notifies the applicant.</p>
             <button
               type="button"
@@ -1051,7 +1112,17 @@ export function ReviewWorkspace({
                     })
               }
             >
-              {stage === "Shortlisted" ? "Flip to Not Qualified" : "Flip to Shortlisted"}
+              {stage === "Shortlisted" ? (
+                <>
+                  <IconChip icon={XCircle} tone="rose" size={28} iconSize={14} />
+                  Flip to Not Qualified
+                </>
+              ) : (
+                <>
+                  <IconChip icon={Star} tone="emerald" size={28} iconSize={14} />
+                  Flip to Shortlisted
+                </>
+              )}
             </button>
             <button
               type="button"
@@ -1064,6 +1135,7 @@ export function ReviewWorkspace({
                 })
               }
             >
+              <IconChip icon={RotateCcw} tone="slate" size={28} iconSize={14} />
               Return to Review
             </button>
           </div>
@@ -1071,7 +1143,10 @@ export function ReviewWorkspace({
 
         {/* Notices */}
         <div className="dlg-card space-y-3 p-4">
-          <h3 className="text-[15px] font-medium leading-6 text-ink">Notices</h3>
+          <div className="flex items-center gap-2.5">
+            <IconChip icon={Mails} tone="slate" size={28} iconSize={13} />
+            <h3 className="text-[15px] font-medium leading-6 text-ink">Notices</h3>
+          </div>
           <div className="max-h-48 space-y-1.5 overflow-y-auto scroll-thin">
             {notices === null ? (
               <p className="text-xs text-pebble">Loading…</p>

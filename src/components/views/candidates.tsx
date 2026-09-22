@@ -7,13 +7,16 @@
 // mode over the evaluator queue. 20 s silent poll + focus refresh.
 // Enterprise polish pass: PageHeader, KpiCard row, single-card filter toolbar,
 // table-card rows with hover quick-view, EmptyState, skeleton loading.
+// Wave-3 premium pass: slate search IconChip, gradient .monogram avatars,
+// IconChip kanban column headers with lg tint cards, .lift cards, arrow
+// translate-x quick action, shadow-e4 quick-view modal. Handlers byte-identical.
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertTriangle, ArrowUpRight, Inbox, KeyRound, LayoutGrid, List, Mail, Phone,
-  RefreshCw, Search, UserCheck, UserRound, Users,
+  RefreshCw, ScanSearch, Search, Star, UserCheck, Users, XCircle, type LucideIcon,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -23,12 +26,14 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { EmptyState, KpiCard, PageHeader, SkeletonRows } from "@/components/ui/shell";
+import {
+  EmptyState, IconChip, KpiCard, Monogram, PageHeader, SkeletonKpis, SkeletonRows,
+  type ChipTone,
+} from "@/components/ui/shell";
 import { apiFetch, formatDate, fullName, humanize } from "@/lib/client";
 import { PIPELINE_STAGES, isRejectedStatus, stageForStatus, type StageKey } from "@/lib/status";
 import { dotClass, variantForCompletion, type StatusVariant } from "@/lib/status-ui";
 import { navigate, useHashRoute } from "@/lib/router";
-import { cn } from "@/lib/utils";
 import { StatusPill } from "@/components/views/review-workspace";
 import { ghostBtn, ctaBtn } from "@/components/views/recruitment";
 
@@ -82,13 +87,31 @@ const STAGE_DOT: Record<StageKey, StatusVariant> = {
   "Rejected": "bad",
 };
 
+/** Stage → IconChip tone (wave-3 semantic mapping). */
+const STAGE_TONE: Record<StageKey, ChipTone> = {
+  "Applied": "plum",
+  "Under Review": "gold",
+  "Shortlisted": "emerald",
+  "Rejected": "rose",
+};
+
+/** Stage → column icon. */
+const STAGE_ICON: Record<StageKey, LucideIcon> = {
+  "Applied": Inbox,
+  "Under Review": ScanSearch,
+  "Shortlisted": Star,
+  "Rejected": XCircle,
+};
+
+/** Kanban card: resting elevation + hover-lift (wave-3). */
 const cardCls =
-  "rounded-[12px] border border-border bg-white transition-all duration-200 hover:border-ink/10 hover:shadow-dialog-subtle";
+  "rounded-[12px] border border-black/[0.07] bg-white shadow-e1 lift duration-200 hover:border-ink/15";
 
 const iconBtn =
   "focus-ring inline-flex h-9 w-9 items-center justify-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink";
 
-function Monogram({ name, className }: { name: string; className?: string }) {
+/** Gradient monogram avatar (wave-3) with initials derived from the name. */
+function MonogramAvatar({ name, size = 36, warm = false }: { name: string; size?: number; warm?: boolean }) {
   const initials = name
     .split(/\s+/)
     .filter(Boolean)
@@ -96,14 +119,8 @@ function Monogram({ name, className }: { name: string; className?: string }) {
     .map((w) => w[0]?.toUpperCase() ?? "")
     .join("");
   return (
-    <span
-      aria-hidden
-      className={cn(
-        "inline-flex shrink-0 items-center justify-center rounded-full bg-fog font-medium text-ink",
-        className ?? "h-9 w-9 text-xs"
-      )}
-    >
-      {initials || "?"}
+    <span aria-hidden="true">
+      <Monogram size={size} warm={warm}>{initials || "?"}</Monogram>
     </span>
   );
 }
@@ -116,12 +133,14 @@ function s(v: unknown): string {
 
 function KanbanColumn({
   label,
-  dot,
+  icon: Icon,
+  tone,
   count,
   children,
 }: {
   label: string;
-  dot: StatusVariant;
+  icon: LucideIcon;
+  tone: ChipTone;
   count: number;
   children: React.ReactNode;
 }) {
@@ -129,12 +148,15 @@ function KanbanColumn({
     <div className="w-[260px] min-w-[260px] shrink-0 snap-start lg:w-auto lg:min-w-0">
       <div className="flex items-center justify-between gap-2 px-1 pb-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className={dotClass(dot)} aria-hidden />
-          <h2 className="truncate text-[13px] font-medium text-ink">{label}</h2>
+          <IconChip icon={Icon} tone={tone} size={28} iconSize={13} />
+          <h2 className="truncate text-[11px] font-semibold uppercase tracking-[0.1em] text-ink">{label}</h2>
         </div>
         <span className="status-pill status-neutral num shrink-0">{count}</span>
       </div>
-      <div className="max-h-[calc(100vh-330px)] min-h-[200px] space-y-3 overflow-y-auto scroll-thin">{children}</div>
+      {/* Subtle column tint on lg so the white cards pop (mesh shows through). */}
+      <div className="lg:rounded-[16px] lg:border lg:border-black/[0.06] lg:bg-white/60 lg:p-2.5">
+        <div className="max-h-[calc(100vh-430px)] min-h-[220px] space-y-3 overflow-y-auto scroll-thin">{children}</div>
+      </div>
     </div>
   );
 }
@@ -170,7 +192,7 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
 
   return (
     <Dialog open={id !== null} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-lg max-h-[92vh] overflow-y-auto scroll-thin">
+      <DialogContent className="shadow-e4 sm:max-w-lg max-h-[92vh] overflow-y-auto scroll-thin">
         <DialogHeader>
           <DialogTitle className="font-display text-xl">Candidate</DialogTitle>
           <DialogDescription>Quick identity and pipeline snapshot.</DialogDescription>
@@ -186,7 +208,7 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
         ) : (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <Monogram name={fullName(detail)} className="h-10 w-10 text-xs" />
+              <MonogramAvatar name={fullName(detail)} size={40} warm />
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-ink">{fullName(detail)}</p>
                 <p className="num text-xs text-pebble">#{detail.id}</p>
@@ -419,19 +441,29 @@ export default function Candidates() {
       />
 
       {/* KPI tiles */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <KpiCard label="Total on file" value={total} icon={Users} tone="info" hint="all registered candidates" />
-        <KpiCard label="Showing" value={`${start}–${end}`} icon={List} tone="neutral" hint={`of ${total}`} />
-        <KpiCard label="Complete profiles" value={completeOnPage} icon={UserCheck} tone="ok" hint="on this page" />
-        <KpiCard label="Has login" value={accountsOnPage} icon={KeyRound} tone="neutral" hint="on this page" />
-      </div>
+      {!error && (rows === null ? (
+        <SkeletonKpis count={4} />
+      ) : (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <KpiCard label="Total on file" value={total} icon={Users} tone="info" hint="all registered candidates" />
+          <KpiCard label="Showing" value={`${start}–${end}`} icon={List} tone="neutral" hint={`of ${total}`} />
+          <KpiCard label="Complete profiles" value={completeOnPage} icon={UserCheck} tone="ok" hint="on this page" />
+          <KpiCard label="Has login" value={accountsOnPage} icon={KeyRound} tone="neutral" hint="on this page" />
+        </div>
+      ))}
 
       {/* Filter bar — one card row */}
       <div className="dlg-card flex flex-wrap items-center gap-3 px-4 py-3">
         <div className="relative min-w-0 flex-1 basis-56">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-pebble" aria-hidden />
+          <IconChip
+            icon={Search}
+            tone="slate"
+            size={28}
+            iconSize={14}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2"
+          />
           <Input
-            className="dlg-input min-h-[44px] pl-10"
+            className="dlg-input min-h-[44px] pl-12"
             placeholder="Search name, email, employee no., mobile…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -473,12 +505,18 @@ export default function Candidates() {
       </div>
 
       {error ? (
-        <div className="dlg-card space-y-4 p-8 text-center">
-          <AlertTriangle className="mx-auto h-8 w-8 text-[var(--bad)]" aria-hidden />
-          <p className="text-sm text-stone">{error}</p>
-          <button type="button" className={ghostBtn} onClick={() => void load()}>
-            Retry
-          </button>
+        <div className="dlg-card p-8">
+          <EmptyState
+            icon={AlertTriangle}
+            tone="rose"
+            title="Couldn't load candidates"
+            description={error}
+            action={
+              <button type="button" className={ghostBtn} onClick={() => void load()}>
+                Retry
+              </button>
+            }
+          />
         </div>
       ) : rows === null ? (
         <SkeletonRows rows={6} rowClassName="h-16" />
@@ -511,7 +549,7 @@ export default function Candidates() {
                         <tr key={r.id} className="group/row border-b border-border transition-colors last:border-0 hover:bg-fog/60">
                           <td className="px-5 py-3">
                             <div className="flex items-center gap-3">
-                              <Monogram name={name} className="h-7 w-7 text-[11px]" />
+                              <MonogramAvatar name={name} size={28} />
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-medium text-ink">{name}</p>
                                 <p className="num truncate text-xs text-stone">
@@ -538,7 +576,10 @@ export default function Candidates() {
                                 title="Quick view"
                                 onClick={() => setModalId(r.id)}
                               >
-                                <ArrowUpRight className="h-4 w-4" aria-hidden />
+                                <ArrowUpRight
+                                  className="h-4 w-4 transition-transform group-hover/row:translate-x-0.5"
+                                  aria-hidden
+                                />
                               </button>
                             </div>
                           </td>
@@ -582,9 +623,9 @@ export default function Candidates() {
           {PIPELINE_STAGES.map((stage) => {
             const cards = kanban[stage];
             return (
-              <KanbanColumn key={stage} label={stage} dot={STAGE_DOT[stage]} count={cards.length}>
+              <KanbanColumn key={stage} label={stage} icon={STAGE_ICON[stage]} tone={STAGE_TONE[stage]} count={cards.length}>
                 {cards.length === 0 ? (
-                  <EmptyState icon={Inbox} title="No candidates" description="Nothing in this stage right now." compact />
+                  <EmptyState icon={STAGE_ICON[stage]} tone={STAGE_TONE[stage]} title="No candidates" description="Nothing in this stage right now." compact />
                 ) : (
                   cards.map((c) => (
                     <button
@@ -593,12 +634,14 @@ export default function Candidates() {
                       className={cardCls + " focus-ring w-full cursor-pointer p-4 text-left"}
                       onClick={() => navigate("candidate", { id: String(c.applicantId) })}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="min-w-0 truncate text-sm font-medium text-ink">{fullName(c.applicant)}</p>
-                        <UserRound className="h-4 w-4 shrink-0 text-pebble" aria-hidden />
+                      <div className="flex items-start gap-2.5">
+                        <MonogramAvatar name={fullName(c.applicant)} />
+                        <div className="min-w-0 flex-1">
+                          <p className="min-w-0 truncate text-sm font-medium text-ink">{fullName(c.applicant)}</p>
+                          <p className="num mt-0.5 text-xs text-pebble">Applied {formatDate(c.dateApplied)}</p>
+                        </div>
                       </div>
                       <p className="mt-1 truncate text-xs text-stone">{humanize(c.job.title)}</p>
-                      <p className="num mt-0.5 text-xs text-pebble">Applied {formatDate(c.dateApplied)}</p>
                       <div className="mt-2.5">
                         <StatusPill status={c.status} />
                       </div>

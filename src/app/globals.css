@@ -4,13 +4,13 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ============================================================================
-   RMIS × Dialog design system — "Neutral showroom with one warm price tag."
-   Enterprise polish pass: adds a functional status-color system, focus rings,
-   skeletons, and data-viz tokens on top of the Dialog base. Light theme only.
+   RMIS × "INK & EMBER" — Premium Enterprise theme (Wave 3).
+   Depth-first: layered elevation, gradient mesh ambience, tinted icon chips,
+   dark premium rail, glass surfaces, gradient CTA. Business logic untouched.
    ========================================================================== */
 
 :root {
-  /* Dialog palette */
+  /* Dialog palette (preserved) */
   --tangerine-tag: #f69251;
   --midnight-ink: #181825;
   --graphite: #484758;
@@ -24,7 +24,16 @@
   --dusty-rose: #c97b84;
   --divider: #b2b2b2;
 
-  /* Functional status system (the one sanctioned color addition) */
+  /* Premium rail (dark sidebar) */
+  --rail-bg-top: #191925;
+  --rail-bg-bottom: #13131d;
+  --rail-border: rgba(255, 255, 255, 0.07);
+  --rail-text: #a2a3b8;
+  --rail-text-dim: #6c6d85;
+  --rail-active-bg: rgba(255, 255, 255, 0.08);
+  --rail-hover-bg: rgba(255, 255, 255, 0.045);
+
+  /* Functional status system */
   --ok: #2e7d4f;
   --ok-bg: #e9f3ec;
   --warn: #a16207;
@@ -36,14 +45,14 @@
   --neutral: #636363;
   --neutral-bg: #f1f1f1;
 
-  /* Data-viz series (charts use these in order) */
+  /* Data-viz series */
   --viz-1: #f69251;
   --viz-2: #242433;
   --viz-3: #c97b84;
   --viz-4: #8b8b8b;
   --viz-5: #b2b2b2;
 
-  /* shadcn token bridge — mapped onto Dialog surfaces */
+  /* shadcn token bridge */
   --background: #f7f7f7;
   --foreground: #181825;
   --card: #ffffff;
@@ -114,7 +123,7 @@
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
 
-  /* Dialog brand colors as Tailwind utilities */
+  /* Brand colors as Tailwind utilities */
   --color-tangerine: #f69251;
   --color-ink: #181825;
   --color-graphite: #484758;
@@ -128,7 +137,7 @@
   --color-dusty-rose: #c97b84;
   --color-divider: #b2b2b2;
 
-  /* Functional status colors as Tailwind utilities */
+  /* Status colors as Tailwind utilities */
   --color-ok: var(--ok);
   --color-ok-bg: var(--ok-bg);
   --color-warn: var(--warn);
@@ -147,7 +156,7 @@
   --color-viz-4: var(--viz-4);
   --color-viz-5: var(--viz-5);
 
-  /* Dialog radii */
+  /* Radii */
   --radius-dialog-card: 24px;
   --radius-dialog-small: 8px;
   --radius-dialog-badge: 100px;
@@ -155,7 +164,13 @@
   --radius-dialog-overlay: 32px;
   --radius-dialog-inner: 12px;
 
-  /* Dialog shadows */
+  /* Elevation system — layered, Stripe/Linear-grade depth */
+  --shadow-e1: 0 1px 2px rgba(24, 24, 37, 0.05), 0 1px 3px rgba(24, 24, 37, 0.04);
+  --shadow-e2: 0 1px 2px rgba(24, 24, 37, 0.05), 0 4px 14px -4px rgba(24, 24, 37, 0.09);
+  --shadow-e3: 0 2px 4px rgba(24, 24, 37, 0.04), 0 14px 36px -10px rgba(24, 24, 37, 0.16);
+  --shadow-e4: 0 4px 10px rgba(24, 24, 37, 0.06), 0 28px 72px -20px rgba(24, 24, 37, 0.28);
+  --shadow-cta: inset 0 1px 0 rgba(255, 255, 255, 0.38), 0 1px 2px rgba(246, 146, 81, 0.32), 0 6px 16px -4px rgba(246, 146, 81, 0.45);
+  --shadow-cta-hover: inset 0 1px 0 rgba(255, 255, 255, 0.38), 0 2px 4px rgba(246, 146, 81, 0.32), 0 10px 24px -6px rgba(246, 146, 81, 0.55);
   --shadow-dialog-subtle: rgba(24, 24, 37, 0.12) 0px 2px 3px -2px;
   --shadow-dialog-button: rgba(0, 0, 0, 0.04) 0px 1px 2px 0px, rgba(0, 0, 0, 0.02) 0px 2px 4px 0px, rgba(0, 0, 0, 0.02) 0px 4px 8px 0px;
   --shadow-dialog-fade: rgba(247, 247, 247, 0.5) 0px -40px 40px 0px;
@@ -166,13 +181,26 @@
     @apply border-border outline-ring/50;
   }
   html {
-    background: #f7f7f7;
+    background: #f4f4f5;
   }
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
     letter-spacing: -0.01em;
     font-feature-settings: "blwf", "cv03", "cv04", "cv09";
+  }
+  /* Premium ambience: fixed gradient-mesh wash behind every surface */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(1100px 700px at 88% -12%, rgba(246, 146, 81, 0.085), transparent 62%),
+      radial-gradient(900px 620px at -8% 22%, rgba(201, 123, 132, 0.055), transparent 58%),
+      radial-gradient(1000px 700px at 55% 118%, rgba(36, 36, 51, 0.05), transparent 62%),
+      linear-gradient(180deg, #f6f5f4 0%, #f4f4f5 100%);
   }
   /* Enterprise a11y: visible keyboard focus everywhere */
   :focus-visible {
@@ -194,9 +222,9 @@
 .text-display-hero {
   font-family: var(--font-radio), ui-sans-serif, system-ui, sans-serif;
   font-weight: 400;
-  font-size: clamp(40px, 6.5vw, 70px);
-  line-height: 1.15;
-  letter-spacing: -0.014em;
+  font-size: clamp(42px, 6.5vw, 74px);
+  line-height: 1.08;
+  letter-spacing: -0.022em;
   color: #000000;
 }
 .text-heading-lg {
@@ -216,40 +244,98 @@
   color: #000000;
 }
 
-/* Dialog component primitives (functional styling for shadcn overrides) */
+/* Gradient ink text for premium hero/display moments */
+.grad-ink {
+  background: linear-gradient(120deg, #181825 30%, #3d3c52 60%, #6b5545 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.grad-ember {
+  background: linear-gradient(120deg, #e0742a, #f69251 55%, #f2ab6e);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* ── Surfaces ─────────────────────────────────────────────────────────────── */
+
+/* Primary card: sheen gradient + inner highlight + layered shadow */
 .dlg-card {
-  background: #ffffff;
+  position: relative;
+  background: linear-gradient(180deg, #ffffff 0%, #fdfdfc 100%);
   border-radius: 24px;
-  box-shadow: rgba(24, 24, 37, 0.12) 0px 2px 3px -2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 1px 2px rgba(24, 24, 37, 0.05),
+    0 4px 14px -4px rgba(24, 24, 37, 0.09);
 }
 .dlg-card-plain {
-  background: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #fdfdfc 100%);
   border-radius: 24px;
 }
+
+/* Hover-lift card utility (opt-in) */
+.lift {
+  transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+}
+.lift:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 2px 4px rgba(24, 24, 37, 0.05),
+    0 16px 40px -12px rgba(24, 24, 37, 0.18);
+}
+
+/* Glass surface — sticky headers / overlays on mesh */
+.glass {
+  background: rgba(247, 247, 247, 0.72);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+}
+
+/* Premium dark rail */
+.rail {
+  background:
+    radial-gradient(560px 280px at 12% -4%, rgba(246, 146, 81, 0.09), transparent 70%),
+    linear-gradient(180deg, var(--rail-bg-top) 0%, var(--rail-bg-bottom) 100%);
+  border-right: 1px solid var(--rail-border);
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+
 .dlg-cta {
-  background: #f69251;
-  color: #000000;
+  position: relative;
+  background: linear-gradient(180deg, #f9a468 0%, #f69251 48%, #ee7f38 100%);
+  color: #20120a;
   border-radius: 28px;
-  font-weight: 500;
-  box-shadow: rgba(0, 0, 0, 0.04) 0px 1px 2px 0px, rgba(0, 0, 0, 0.02) 0px 2px 4px 0px, rgba(0, 0, 0, 0.02) 0px 4px 8px 0px;
-  transition: filter 160ms ease, transform 160ms ease;
+  font-weight: 600;
+  box-shadow: var(--shadow-cta);
+  transition: filter 160ms ease, transform 160ms ease, box-shadow 160ms ease;
 }
 .dlg-cta:hover {
-  filter: brightness(0.96);
+  filter: brightness(1.02) saturate(1.05);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-cta-hover);
 }
 .dlg-cta:active {
   transform: translateY(0.5px);
+  filter: brightness(0.98);
 }
 .dlg-ghost {
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.85);
   color: #000000;
   border-radius: 28px;
   font-weight: 500;
-  border: 1px solid #ececec;
-  transition: background 160ms ease;
+  border: 1px solid rgba(24, 24, 37, 0.09);
+  box-shadow: 0 1px 2px rgba(24, 24, 37, 0.04);
+  transition: background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 .dlg-ghost:hover {
-  background: #f7f7f7;
+  background: #ffffff;
+  box-shadow: 0 2px 6px rgba(24, 24, 37, 0.07);
 }
 .dlg-pill {
   border-radius: 100px;
@@ -258,12 +344,14 @@
   border-radius: 0px;
   background: #ffffff;
   border: 1px solid #dcdcdc;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 .dlg-input::placeholder {
   color: #949494;
 }
 .dlg-input:focus {
   border-color: #181825;
+  box-shadow: 0 0 0 3px rgba(24, 24, 37, 0.06);
 }
 .dlg-underline-input {
   border-radius: 0;
@@ -274,6 +362,63 @@
 }
 .dlg-underline-input::placeholder {
   color: #949494;
+}
+
+/* ── Tinted icon chips (the premium signal) ───────────────────────────────── */
+
+.chip {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 1px 2px rgba(24, 24, 37, 0.06);
+  border-radius: 12px;
+}
+.chip-amber {
+  background: linear-gradient(135deg, #fff2e6, #ffdfc7);
+  color: #c05a12;
+}
+.chip-emerald {
+  background: linear-gradient(135deg, #e6f3ea, #d2e9db);
+  color: #2e7d4f;
+}
+.chip-rose {
+  background: linear-gradient(135deg, #faeef1, #f4dde4);
+  color: #b3556a;
+}
+.chip-slate {
+  background: linear-gradient(135deg, #f0eff2, #e4e3e8);
+  color: #484758;
+}
+.chip-ink {
+  background: linear-gradient(135deg, #2b2b3d, #181825);
+  color: #f0ede8;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 2px 4px rgba(24, 24, 37, 0.25);
+}
+.chip-gold {
+  background: linear-gradient(135deg, #faf1dd, #f3e3bd);
+  color: #8a6414;
+}
+.chip-plum {
+  background: linear-gradient(135deg, #efedf4, #e2dfe9);
+  color: #5d5470;
+}
+
+/* Gradient monogram avatar */
+.monogram {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #2e2e42 0%, #1b1b29 100%);
+  color: #f4efe9;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 2px 4px rgba(24, 24, 37, 0.22);
+}
+.monogram-warm {
+  background: linear-gradient(145deg, #f9a468 0%, #ef8340 100%);
+  color: #2a1608;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 4px rgba(246, 146, 81, 0.35);
 }
 
 /* ── Enterprise polish additions ─────────────────────────────────────────── */
@@ -295,7 +440,7 @@
 .skel {
   position: relative;
   overflow: hidden;
-  background: #efeff1;
+  background: #ececef;
   border-radius: 12px;
 }
 .skel::after {
@@ -312,7 +457,7 @@
   }
 }
 
-/* Status pill variants (dot + tinted bg) */
+/* Status pill variants (dot + tinted bg + hairline ring) */
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -324,6 +469,7 @@
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
+  box-shadow: inset 0 0 0 1px rgba(24, 24, 37, 0.045);
 }
 .status-pill::before {
   content: "";
@@ -332,25 +478,26 @@
   border-radius: 100px;
   background: currentColor;
   flex: none;
+  box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.55);
 }
 .status-pill.status-ok {
-  background: var(--ok-bg);
+  background: linear-gradient(180deg, #ecf5ef, var(--ok-bg));
   color: var(--ok);
 }
 .status-pill.status-warn {
-  background: var(--warn-bg);
+  background: linear-gradient(180deg, #fbf5e4, var(--warn-bg));
   color: var(--warn);
 }
 .status-pill.status-bad {
-  background: var(--bad-bg);
+  background: linear-gradient(180deg, #faeff2, var(--bad-bg));
   color: var(--bad);
 }
 .status-pill.status-info {
-  background: var(--info-bg);
+  background: linear-gradient(180deg, #f1f1f3, var(--info-bg));
   color: var(--info);
 }
 .status-pill.status-neutral {
-  background: var(--neutral-bg);
+  background: linear-gradient(180deg, #f3f3f4, var(--neutral-bg));
   color: var(--neutral);
 }
 
@@ -361,13 +508,13 @@
   border-radius: 100px;
   flex: none;
 }
-.stage-dot.dot-ok { background: var(--ok); }
-.stage-dot.dot-warn { background: var(--warn); }
-.stage-dot.dot-bad { background: var(--bad); }
-.stage-dot.dot-info { background: var(--info); }
-.stage-dot.dot-neutral { background: #dcdcdc; }
+.stage-dot.dot-ok { background: var(--ok); box-shadow: 0 0 0 3px rgba(46, 125, 79, 0.14); }
+.stage-dot.dot-warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(161, 98, 7, 0.14); }
+.stage-dot.dot-bad { background: var(--bad); box-shadow: 0 0 0 3px rgba(179, 85, 106, 0.14); }
+.stage-dot.dot-info { background: var(--info); box-shadow: 0 0 0 3px rgba(72, 71, 88, 0.14); }
+.stage-dot.dot-neutral { background: #d4d4d8; box-shadow: 0 0 0 3px rgba(24, 24, 37, 0.06); }
 
-/* Long-list scrollbars (subtle, Dialog-neutral) */
+/* Long-list scrollbars (subtle) */
 .scroll-thin {
   scrollbar-width: thin;
   scrollbar-color: #dcdcdc transparent;
@@ -383,14 +530,23 @@
 .scroll-thin::-webkit-scrollbar-track {
   background: transparent;
 }
+/* Dark rail scrollbar */
+.rail .scroll-thin,
+.rail.scroll-thin {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.rail .scroll-thin::-webkit-scrollbar-thumb,
+.rail.scroll-thin::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
 
-/* Sonner toast — Dialog-restyle: white card, status dot, quiet shadow */
+/* Sonner toast — premium restyle */
 [data-sonner-toast] {
   background: #ffffff !important;
   color: #181825 !important;
-  border: 1px solid #ececec !important;
+  border: 1px solid rgba(24, 24, 37, 0.08) !important;
   border-radius: 16px !important;
-  box-shadow: rgba(24, 24, 37, 0.12) 0px 4px 12px -4px !important;
+  box-shadow: 0 4px 10px rgba(24, 24, 37, 0.06), 0 16px 44px -12px rgba(24, 24, 37, 0.22) !important;
   font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif !important;
 }
 [data-sonner-toast] [data-icon] {
@@ -443,4 +599,9 @@
   color: #181825;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+/* Hairline table polish */
+.table-card thead th {
+  border-bottom: 1px solid var(--border);
 }

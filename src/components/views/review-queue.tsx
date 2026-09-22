@@ -9,12 +9,16 @@
 // Enterprise polish pass: PageHeader toolbar, stage-dot kanban columns with
 // scroll-thin bodies, StatusPill/VerdictPill footers, table-card list with
 // hover quick actions, skeleton loading. Handlers unchanged.
+// Wave-3 premium pass: stage KpiCards, IconChip column headers with lg tint
+// cards, gradient .monogram avatars, .lift kanban cards, shadow-e4 modal.
+// Handlers byte-identical.
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
-  AlertTriangle, ArrowUpRight, Inbox, LayoutGrid, List, MailX, RefreshCw, UserRound,
+  AlertTriangle, ArrowUpRight, Inbox, LayoutGrid, List, MailX, RefreshCw, ScanSearch,
+  Star, UserRound, Users, XCircle, type LucideIcon,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -24,7 +28,10 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { EmptyState, PageHeader, SkeletonKanban, SkeletonRows } from "@/components/ui/shell";
+import {
+  EmptyState, IconChip, KpiCard, Monogram, PageHeader, SkeletonKanban, SkeletonKpis,
+  SkeletonRows, type ChipTone,
+} from "@/components/ui/shell";
 import { apiFetch, formatDate, fullName, humanize } from "@/lib/client";
 import { PIPELINE_STAGES, stageForStatus, type StageKey } from "@/lib/status";
 import { dotClass, variantForCompletion, type StatusVariant } from "@/lib/status-ui";
@@ -87,8 +94,9 @@ const ghostBtn =
 const iconBtn =
   "focus-ring inline-flex h-9 w-9 items-center justify-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink";
 
+/** Kanban card: resting elevation + hover-lift (wave-3). */
 const cardCls =
-  "rounded-[12px] border border-border bg-white transition-all duration-200 hover:border-ink/10 hover:shadow-dialog-subtle";
+  "rounded-[12px] border border-black/[0.07] bg-white shadow-e1 lift duration-200 hover:border-ink/15";
 
 /** Stage → stage-dot variant (Applicants column is neutral). */
 const STAGE_DOT: Record<StageKey, StatusVariant> = {
@@ -98,7 +106,26 @@ const STAGE_DOT: Record<StageKey, StatusVariant> = {
   "Rejected": "bad",
 };
 
-function Monogram({ name, className = "" }: { name: string; className?: string }) {
+/** Stage → IconChip tone (wave-3 semantic mapping). */
+const STAGE_TONE: Record<StageKey | "Applicants", ChipTone> = {
+  "Applicants": "slate",
+  "Applied": "plum",
+  "Under Review": "gold",
+  "Shortlisted": "emerald",
+  "Rejected": "rose",
+};
+
+/** Stage → column icon. */
+const STAGE_ICON: Record<StageKey | "Applicants", LucideIcon> = {
+  "Applicants": Users,
+  "Applied": Inbox,
+  "Under Review": ScanSearch,
+  "Shortlisted": Star,
+  "Rejected": XCircle,
+};
+
+/** Gradient monogram avatar (wave-3) with initials derived from the name. */
+function MonogramAvatar({ name, size = 36, warm = false }: { name: string; size?: number; warm?: boolean }) {
   const initials = name
     .split(/\s+/)
     .filter(Boolean)
@@ -106,11 +133,8 @@ function Monogram({ name, className = "" }: { name: string; className?: string }
     .map((w) => w[0]?.toUpperCase() ?? "")
     .join("");
   return (
-    <span
-      aria-hidden
-      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-fog text-xs font-medium text-ink ${className}`}
-    >
-      {initials || "?"}
+    <span aria-hidden="true">
+      <Monogram size={size} warm={warm}>{initials || "?"}</Monogram>
     </span>
   );
 }
@@ -129,12 +153,14 @@ function useFocusRefresh(fn: () => void) {
 
 function KanbanColumn({
   label,
-  dot,
+  icon: Icon,
+  tone,
   count,
   children,
 }: {
   label: string;
-  dot: StatusVariant;
+  icon: LucideIcon;
+  tone: ChipTone;
   count: number;
   children: React.ReactNode;
 }) {
@@ -142,12 +168,15 @@ function KanbanColumn({
     <div className="w-[260px] min-w-[260px] shrink-0 snap-start lg:w-auto lg:min-w-0">
       <div className="flex items-center justify-between gap-2 px-1 pb-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className={dotClass(dot)} aria-hidden />
-          <h2 className="truncate text-[13px] font-medium text-ink">{label}</h2>
+          <IconChip icon={Icon} tone={tone} size={28} iconSize={13} />
+          <h2 className="truncate text-[11px] font-semibold uppercase tracking-[0.1em] text-ink">{label}</h2>
         </div>
         <span className="status-pill status-neutral num shrink-0">{count}</span>
       </div>
-      <div className="max-h-[calc(100vh-330px)] min-h-[200px] space-y-3 overflow-y-auto scroll-thin">{children}</div>
+      {/* Subtle column tint on lg so the white cards pop (mesh shows through). */}
+      <div className="lg:rounded-[16px] lg:border lg:border-black/[0.06] lg:bg-white/60 lg:p-2.5">
+        <div className="max-h-[calc(100vh-430px)] min-h-[220px] space-y-3 overflow-y-auto scroll-thin">{children}</div>
+      </div>
     </div>
   );
 }
@@ -328,27 +357,46 @@ export default function ReviewQueue() {
 
       {/* Error */}
       {error && (
-        <div className="dlg-card space-y-4 p-8 text-center">
-          <AlertTriangle className="mx-auto h-8 w-8 text-[var(--bad)]" aria-hidden />
-          <p className="text-sm text-stone">{error}</p>
-          <button type="button" className={ghostBtn} onClick={() => void load()}>
-            Retry
-          </button>
+        <div className="dlg-card p-8">
+          <EmptyState
+            icon={AlertTriangle}
+            tone="rose"
+            title="Couldn't load the review queue"
+            description={error}
+            action={
+              <button type="button" className={ghostBtn} onClick={() => void load()}>
+                Retry
+              </button>
+            }
+          />
         </div>
       )}
 
       {/* Loading skeleton */}
       {!error && (queue === null || roster === null) && (
-        mode === "kanban" ? <SkeletonKanban columns={5} /> : <SkeletonRows rows={8} rowClassName="h-16" />
+        <>
+          <SkeletonKpis count={4} />
+          {mode === "kanban" ? <SkeletonKanban columns={5} /> : <SkeletonRows rows={8} rowClassName="h-16" />}
+        </>
+      )}
+
+      {/* Stage KPIs (wave-3) */}
+      {!error && queue !== null && roster !== null && (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <KpiCard label="Applied" value={kanbanColumns["Applied"].length} icon={Inbox} tone="info" hint="awaiting start" />
+          <KpiCard label="Under Review" value={kanbanColumns["Under Review"].length} icon={ScanSearch} tone="warn" hint="being screened" />
+          <KpiCard label="Shortlisted" value={kanbanColumns["Shortlisted"].length} icon={Star} tone="ok" hint="advancing" />
+          <KpiCard label="Rejected" value={kanbanColumns["Rejected"].length} icon={XCircle} tone="bad" hint="not qualified" />
+        </div>
       )}
 
       {/* Kanban */}
       {!error && queue !== null && roster !== null && mode === "kanban" && (
         <div className="flex snap-x snap-proximity gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-5 lg:overflow-visible lg:pb-0">
           {/* Applicants column (roster) */}
-          <KanbanColumn label="Applicants" dot="neutral" count={rosterCards.length}>
+          <KanbanColumn label="Applicants" icon={STAGE_ICON["Applicants"]} tone={STAGE_TONE["Applicants"]} count={rosterCards.length}>
             {rosterCards.length === 0 ? (
-              <EmptyState icon={Inbox} title="No applicants" description="Registered applicants waiting to apply appear here." compact />
+              <EmptyState icon={Users} tone="slate" title="No applicants" description="Registered applicants waiting to apply appear here." compact />
             ) : (
               rosterCards.map((r) => (
                 <button
@@ -358,12 +406,11 @@ export default function ReviewQueue() {
                   onClick={() => navigate("candidate", { id: String(r.id) })}
                 >
                   <div className="flex items-start gap-2.5">
-                    <Monogram name={fullName(r)} />
+                    <MonogramAvatar name={fullName(r)} />
                     <div className="min-w-0 flex-1">
                       <p className="min-w-0 truncate text-sm font-medium text-ink">{fullName(r)}</p>
                       <p className="mt-0.5 truncate text-xs text-stone">{r.emailAddress || "No email on record"}</p>
                     </div>
-                    <UserRound className="h-4 w-4 shrink-0 text-pebble" aria-hidden />
                   </div>
                   <div className="mt-2.5">
                     <StatusPill
@@ -380,9 +427,9 @@ export default function ReviewQueue() {
           {PIPELINE_STAGES.map((stage) => {
             const rows = kanbanColumns[stage];
             return (
-              <KanbanColumn key={stage} label={stage} dot={STAGE_DOT[stage]} count={rows.length}>
+              <KanbanColumn key={stage} label={stage} icon={STAGE_ICON[stage]} tone={STAGE_TONE[stage]} count={rows.length}>
                 {rows.length === 0 ? (
-                  <EmptyState icon={Inbox} title="No applications" description="Nothing in this stage right now." compact />
+                  <EmptyState icon={STAGE_ICON[stage]} tone={STAGE_TONE[stage]} title="No applications" description="Nothing in this stage right now." compact />
                 ) : (
                   rows.map((row) => {
                     const position = row.job.position?.positionTitle || row.job.title;
@@ -398,11 +445,8 @@ export default function ReviewQueue() {
                         aria-label={`Review application from ${fullName(row.applicant)}`}
                       >
                         <div className="flex items-start gap-2.5">
-                          <Monogram name={fullName(row.applicant)} />
-                          <div className="min-w-0 flex-1">
-                            <p className="min-w-0 truncate text-sm font-medium text-ink">{fullName(row.applicant)}</p>
-                            <p className="num mt-0.5 text-xs text-pebble">Applied {formatDate(row.dateApplied)}</p>
-                          </div>
+                          <MonogramAvatar name={fullName(row.applicant)} />
+                          <p className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{fullName(row.applicant)}</p>
                           <button
                             type="button"
                             className={iconBtn + " -mr-1.5 -mt-1 h-8 w-8 shrink-0"}
@@ -415,6 +459,7 @@ export default function ReviewQueue() {
                             <UserRound className="h-4 w-4" aria-hidden />
                           </button>
                         </div>
+                        <p className="num mt-0.5 whitespace-nowrap text-xs text-pebble">Applied {formatDate(row.dateApplied)}</p>
                         <p className="mt-1 truncate text-xs text-stone">
                           {[humanize(position), place].filter(Boolean).join(" · ")}
                         </p>
@@ -467,7 +512,7 @@ export default function ReviewQueue() {
                         <tr key={row.id} className="group/row border-b border-border transition-colors last:border-0 hover:bg-fog/60">
                           <td className="px-5 py-3">
                             <div className="flex items-center gap-3">
-                              <Monogram name={name} />
+                              <MonogramAvatar name={name} />
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-medium text-ink">{name}</p>
                                 <p className="truncate text-xs text-stone">{row.applicant.emailAddress || "No email on record"}</p>
@@ -516,7 +561,7 @@ export default function ReviewQueue() {
 
       {/* Review modal */}
       <Dialog open={selectedId !== null} onOpenChange={(v) => !v && setSelectedId(null)}>
-        <DialogContent className="sm:max-w-6xl w-[min(96vw,1152px)] max-h-[92vh] overflow-y-auto scroll-thin">
+        <DialogContent className="shadow-e4 sm:max-w-6xl w-[min(96vw,1152px)] max-h-[92vh] overflow-y-auto scroll-thin">
           <DialogHeader className="sr-only">
             <DialogTitle>Review application</DialogTitle>
             <DialogDescription>Applicant dossier and decision rail</DialogDescription>

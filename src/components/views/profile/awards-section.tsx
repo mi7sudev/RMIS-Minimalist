@@ -85,6 +85,7 @@ export default function AwardsSection({
   return (
     <SectionCard
       icon={Trophy}
+      chipTone="gold"
       title="Awards"
       description="Non-academic distinctions and accomplishments."
       actions={
@@ -104,7 +105,7 @@ export default function AwardsSection({
       }
     >
       {items.length === 0 ? (
-        <EmptyState compact icon={Trophy} title="No awards recorded yet" description="Recognition and accomplishments you have received." />
+        <EmptyState compact icon={Trophy} tone="gold" title="No awards recorded yet" description="Recognition and accomplishments you have received." />
       ) : (
         <div className="space-y-3">
           {items.map((row) => (

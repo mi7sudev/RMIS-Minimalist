@@ -19,6 +19,7 @@ import {
   ChevronRight,
   FileText,
   RefreshCw,
+  UserRound,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -30,7 +31,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { SkeletonRows, StatusPill } from "@/components/ui/shell";
+import { IconChip, Monogram, SkeletonRows, StatusPill } from "@/components/ui/shell";
 import { apiFetch, fullName } from "@/lib/client";
 import { variantForCompletion } from "@/lib/status-ui";
 import { useSession } from "@/components/session-provider";
@@ -151,7 +152,7 @@ export default function ProfileView() {
       <div>
         <div className="dlg-card-plain border border-border p-6">
           <div className="flex items-center gap-4">
-            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full">
+            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-[14px]">
               <div className="skel h-full w-full" />
             </div>
             <div className="min-w-0 flex-1 space-y-2">
@@ -194,12 +195,16 @@ export default function ProfileView() {
       {/* ── Header card ─────────────────────────────────────────────────────── */}
       <section className="dlg-card p-6">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
-          {/* Avatar */}
-          <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full bg-ink">
+          {/* Avatar — gradient monogram tile when no photo is on file */}
+          <div className="h-14 w-14 shrink-0">
             {pictureDoc ? (
-              <img src={`/api/files/${pictureDoc.filePath}`} alt="Profile picture" className="h-full w-full rounded-full object-cover" />
+              <img
+                src={`/api/files/${pictureDoc.filePath}`}
+                alt="Profile picture"
+                className="h-14 w-14 rounded-[14px] object-cover shadow-e1"
+              />
             ) : (
-              <span className="flex h-full w-full items-center justify-center font-display text-lg text-white">{initials}</span>
+              <Monogram size={56}>{initials}</Monogram>
             )}
           </div>
 
@@ -236,7 +241,10 @@ export default function ProfileView() {
               aria-valuenow={completedCount}
               aria-label={`${completedCount} of 7 sections completed`}
             >
-              <div className="h-full rounded-full bg-ink transition-all" style={{ width: `${(completedCount / 7) * 100}%` }} />
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-[#f69251] to-[#ef8340] motion-safe:transition-[width] duration-500 ease-out"
+                style={{ width: `${(completedCount / 7) * 100}%` }}
+              />
             </div>
             {canMarkComplete && (
               <button
@@ -258,23 +266,26 @@ export default function ProfileView() {
 
       {/* ── Section navigation + content ───────────────────────────────────── */}
       <div className="mt-6 grid gap-6 lg:grid-cols-[16rem_minmax(0,1fr)] lg:items-start">
-        {/* Mobile stepper strip */}
+        {/* Mobile stepper strip — tonal chips (ink active / emerald done / slate upcoming) */}
         <div className="lg:hidden">
-          <div className="flex gap-1 overflow-x-auto scroll-thin pb-1">
-            {SECTIONS.map((s) => (
-              <button
-                key={s.n}
-                type="button"
-                onClick={() => setActive(s.n)}
-                aria-label={s.label}
-                aria-current={active === s.n ? "step" : undefined}
-                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
-                  active === s.n ? "bg-ink text-white" : "border border-border bg-white text-stone"
-                }`}
-              >
-                {s.num}
-              </button>
-            ))}
+          <div className="flex gap-1.5 overflow-x-auto scroll-thin pb-1">
+            {SECTIONS.map((s) => {
+              const done = sectionDone[s.n - 1];
+              return (
+                <button
+                  key={s.n}
+                  type="button"
+                  onClick={() => setActive(s.n)}
+                  aria-label={s.label}
+                  aria-current={active === s.n ? "step" : undefined}
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center text-xs font-medium transition-transform ${
+                    active === s.n ? "chip chip-ink" : done ? "chip chip-emerald" : "chip chip-slate"
+                  }`}
+                >
+                  {done && active !== s.n ? <Check className="h-4 w-4" /> : s.num}
+                </button>
+              );
+            })}
           </div>
           <div className="mt-2 flex items-center justify-between">
             <button
@@ -299,9 +310,31 @@ export default function ProfileView() {
           </div>
         </div>
 
-        {/* Desktop step rail — sticky card with 28px chips (check chip when done) */}
+        {/* Desktop step rail — sticky card with tonal chips + ember progress */}
         <nav className="hidden self-start lg:sticky lg:top-24 lg:block" aria-label="Profile sections">
-          <div className="dlg-card p-3">
+          <div className="dlg-card p-4">
+            <div className="mb-3 flex items-center gap-3 px-1 pt-1">
+              <IconChip icon={UserRound} tone="slate" size={38} iconSize={17} />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-ink">Profile Sections</p>
+                <p className="text-xs text-stone">
+                  <span className="num">{completedCount}</span> of <span className="num">7</span> complete
+                </p>
+              </div>
+            </div>
+            <div
+              className="mx-1 mb-4 h-1.5 overflow-hidden rounded-full bg-fog"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={7}
+              aria-valuenow={completedCount}
+              aria-label={`Profile sections: ${completedCount} of 7 completed`}
+            >
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-[#f69251] to-[#ef8340] motion-safe:transition-[width] duration-500 ease-out"
+                style={{ width: `${(completedCount / 7) * 100}%` }}
+              />
+            </div>
             <ol>
               {SECTIONS.map((s) => {
                 const isActive = active === s.n;
@@ -317,15 +350,11 @@ export default function ProfileView() {
                       }`}
                     >
                       <span
-                        className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-medium ${
-                          isActive
-                            ? "bg-ink text-white"
-                            : done
-                              ? "bg-[var(--ok-bg)] text-[var(--ok)]"
-                              : "bg-fog text-stone"
+                        className={`grid h-7 w-7 shrink-0 place-items-center text-[11px] font-medium ${
+                          isActive ? "chip chip-ink" : done ? "chip chip-emerald" : "chip chip-slate"
                         }`}
                       >
-                        {done ? <Check className="h-3.5 w-3.5" /> : s.num}
+                        {done && !isActive ? <Check className="h-3.5 w-3.5" /> : s.num}
                       </span>
                       <span className={`flex-1 truncate ${isActive ? "font-medium text-ink" : ""}`}>{s.label}</span>
                       {done && !isActive && <span className="stage-dot dot-ok" aria-hidden="true" />}
