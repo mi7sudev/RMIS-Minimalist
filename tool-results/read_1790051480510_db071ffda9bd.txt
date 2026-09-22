@@ -1,0 +1,631 @@
+     1→"use client";
+     2→
+     3→// =============================================================================
+     4→// RMIS — Applicant Profile View (enterprise workspace scope)
+     5→// Restrained enterprise HR surface: cool-gray canvas, pure-white surfaces,
+     6→// neutral hairlines, one cohesive workspace. Hierarchy comes from typography,
+     7→// spacing, and alignment — not decoration. Blue #1591DC is rationed to
+     8→// progress, CTA, focus, and active navigation.
+     9→//
+    10→// Page layers (top → bottom):
+    11→//   A. Profile header   — employee record (identity + completion indicator)
+    12→//   B. Completion note  — quiet informational banner (never an alert)
+    13→//   C. Import workspace — PDS upload / AI auto-fill horizontal strip
+    14→//   D. Section nav      — premium numbered workflow (sticky on desktop)
+    15→//   E. Section header   — title + subtitle + Save CTA
+    16→//   F. Form content     — one clean surface per section
+    17→//
+    18→// The `premium` class on the root opts this subtree into the enterprise
+    19→// geometry + token sheet defined in globals.css (light mode). All data logic
+    20→// lives in use-profile-data; this file is chrome.
+    21→// =============================================================================
+    22→
+    23→import { Fragment, useRef } from "react";
+    24→import { AnimatePresence, motion } from "motion/react";
+    25→import { useSession } from "@/components/session-provider";
+    26→import { apiFetch } from "@/lib/client";
+    27→import { Button } from "@/components/ui/button";
+    28→import { toast } from "sonner";
+    29→import {
+    30→  AlertDialog,
+    31→  AlertDialogContent,
+    32→  AlertDialogHeader,
+    33→  AlertDialogFooter,
+    34→  AlertDialogTitle,
+    35→  AlertDialogDescription,
+    36→  AlertDialogAction,
+    37→  AlertDialogCancel,
+    38→} from "@/components/ui/alert-dialog";
+    39→import { fullName } from "@/lib/client";
+    40→import {
+    41→  CheckCircle2,
+    42→  Clock,
+    43→  Loader2,
+    44→  ShieldCheck,
+    45→  Info,
+    46→  Check,
+    47→  ChevronLeft,
+    48→  ChevronRight,
+    49→  Sparkles,
+    50→  FileStack,
+    51→} from "lucide-react";
+    52→import { Eyebrow, Skeleton, ErrorState } from "@/components/primitives/workspace";
+    53→
+    54→import { SECTIONS, type SectionId } from "./profile/types";
+    55→import { useProfileData } from "./profile/use-profile-data";
+    56→import { ProfileAvatar } from "./profile/profile-avatar";
+    57→import { PersonalInfoSection } from "./profile/personal-info-section";
+    58→import { EducationSection } from "./profile/education-section";
+    59→import { WorkExperienceSection } from "./profile/work-experience-section";
+    60→import { TrainingSection } from "./profile/training-section";
+    61→import { EligibilitySection } from "./profile/eligibility-section";
+    62→import { AwardsSection } from "./profile/awards-section";
+    63→import { DocumentsSection } from "./profile/documents-section";
+    64→import { UploadPdsCard } from "./upload-pds-card";
+    65→
+    66→// Mirrors the extract route's EXTRACTABLE_CATEGORIES — categories whose
+    67→// extraction populates profile forms (everything else is a storage-only
+    68→// attachment and never locks the uploader).
+    69→const EXTRACTABLE_DOC_CATEGORIES: ReadonlySet<string> = new Set([
+    70→  "PDS",
+    71→  "RESUME",
+    72→  "EDUCATION",
+    73→  "WORK_EXPERIENCE",
+    74→  "TRAINING",
+    75→  "ELIGIBILITY",
+    76→  "AWARD",
+    77→  "ACCOMPLISHMENT",
+    78→]);
+    79→
+    80→// -----------------------------------------------------------------------------
+    81→// CompletionRing — compact radial indicator (the record header's only graph).
+    82→// Flat primary stroke on a hairline track; the percentage sits centered.
+    83→// -----------------------------------------------------------------------------
+    84→function CompletionRing({ percent, size = 72 }: { percent: number; size?: number }) {
+    85→  const stroke = 6;
+    86→  const r = (size - stroke) / 2;
+    87→  const c = 2 * Math.PI * r;
+    88→  const offset = c - (Math.min(100, Math.max(0, percent)) / 100) * c;
+    89→  return (
+    90→    <div className="relative shrink-0" style={{ width: size, height: size }}>
+    91→      <svg width={size} height={size} className="-rotate-90" aria-hidden>
+    92→        <circle
+    93→          cx={size / 2}
+    94→          cy={size / 2}
+    95→          r={r}
+    96→          fill="none"
+    97→          strokeWidth={stroke}
+    98→          className="stroke-border"
+    99→        />
+   100→        <motion.circle
+   101→          cx={size / 2}
+   102→          cy={size / 2}
+   103→          r={r}
+   104→          fill="none"
+   105→          strokeWidth={stroke}
+   106→          strokeLinecap="round"
+   107→          className="stroke-primary"
+   108→          strokeDasharray={c}
+   109→          initial={{ strokeDashoffset: c }}
+   110→          animate={{ strokeDashoffset: offset }}
+   111→          transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+   112→        />
+   113→      </svg>
+   114→      <div className="absolute inset-0 grid place-items-center" aria-hidden>
+   115→        <span className="text-[17px] font-semibold tabular-nums tracking-[-0.01em] text-foreground">
+   116→          {percent}
+   117→          <span className="text-[11px] font-medium text-muted-foreground">%</span>
+   118→        </span>
+   119→      </div>
+   120→      <span className="sr-only" role="status">{`Profile ${percent} percent complete`}</span>
+   121→    </div>
+   122→  );
+   123→}
+   124→
+   125→// -----------------------------------------------------------------------------
+   126→// SectionNav (lg+) — premium horizontal workflow. Compact numbered circles
+   127→// (check once completed, primary circle = current, hairline circle = ahead)
+   128→// joined by hairline connectors that stretch to fill the row; each step
+   129→// carries a two-line label (name + "Approx N Min" estimate — Documents is
+   130→// open-ended, so it carries none). The band is sticky under the workspace
+   131→// header so navigation is reachable anywhere in a long form.
+   132→// -----------------------------------------------------------------------------
+   133→
+   134→// Compact step labels; full names live in aria-labels.
+   135→const STEP_LABELS: Record<SectionId, string> = {
+   136→  personal: "Personal",
+   137→  education: "Education",
+   138→  work: "Work",
+   139→  training: "Training",
+   140→  eligibility: "Eligibility",
+   141→  awards: "Awards",
+   142→  documents: "Documents",
+   143→};
+   144→
+   145→function SectionNav({
+   146→  active,
+   147→  checks,
+   148→  onSelect,
+   149→}: {
+   150→  active: SectionId;
+   151→  checks: Record<SectionId, boolean>;
+   152→  onSelect: (id: SectionId) => void;
+   153→}) {
+   154→  return (
+   155→    <nav
+   156→      aria-label="Profile sections"
+   157→      className="sticky top-16 z-20 -mx-4 mt-6 hidden border-b border-border/70 bg-background/90 px-4 py-3 backdrop-blur-sm sm:-mx-6 sm:px-6 lg:block lg:-mx-8 lg:px-8"
+   158→    >
+   159→      <ol className="flex items-center">
+   160→        {SECTIONS.map((s, i) => {
+   161→          const isActive = active === s.id;
+   162→          const done = checks[s.id];
+   163→          const reached = done || isActive;
+   164→          const approx = s.id === "documents" ? null : `Approx ${s.minutes} Min`;
+   165→          return (
+   166→            <Fragment key={s.id}>
+   167→              {i > 0 && (
+   168→                <li aria-hidden className="h-px min-w-3 flex-1 bg-border xl:min-w-4" />
+   169→              )}
+   170→              <li className="shrink-0">
+   171→                <button
+   172→                  type="button"
+   173→                  onClick={() => onSelect(s.id)}
+   174→                  aria-current={isActive ? "step" : undefined}
+   175→                  aria-label={`Section ${i + 1}: ${s.label}`}
+   176→                  className="group flex items-center gap-2.5 rounded-[10px] py-1 pl-0.5 pr-1 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+   177→                >
+   178→                  <span
+   179→                    aria-hidden
+   180→                    className={`grid size-8 shrink-0 place-items-center rounded-full border text-[12px] font-semibold tabular-nums transition-colors duration-200 ${
+   181→                      reached
+   182→                        ? "border-primary bg-primary text-primary-foreground"
+   183→                        : "border-border bg-card text-muted-foreground group-hover:border-primary/40 group-hover:text-foreground"
+   184→                    }`}
+   185→                  >
+   186→                    {done ? (
+   187→                      <Check className="size-3.5" strokeWidth={3} />
+   188→                    ) : (
+   189→                      String(i + 1).padStart(2, "0")
+   190→                    )}
+   191→                  </span>
+   192→                  <span className="flex min-w-0 flex-col leading-tight">
+   193→                    <span
+   194→                      className={`whitespace-nowrap text-[13.5px] font-semibold transition-colors ${
+   195→                        reached
+   196→                          ? "text-foreground"
+   197→                          : "text-muted-foreground group-hover:text-foreground"
+   198→                      }`}
+   199→                    >
+   200→                      {STEP_LABELS[s.id]}
+   201→                    </span>
+   202→                    {approx && (
+   203→                      <span className="mt-0.5 whitespace-nowrap text-[11px] leading-none text-muted-foreground">
+   204→                        {approx}
+   205→                      </span>
+   206→                    )}
+   207→                  </span>
+   208→                </button>
+   209→              </li>
+   210→            </Fragment>
+   211→          );
+   212→        })}
+   213→      </ol>
+   214→    </nav>
+   215→  );
+   216→}
+   217→
+   218→export function ProfileView() {
+   219→  const { user, refresh: refreshSession } = useSession();
+   220→  const data = useProfileData();
+   221→  const sectionsRef = useRef<HTMLDivElement>(null);
+   222→  const {
+   223→    loading, error, profile, loadAll, activeSection, setActiveSection,
+   224→    reference, personalForm, personalDirty,
+   225→    savingPersonal, updatePersonalField, savePersonal, autosaveStatus,
+   226→    educations, workExperiences, trainings, eligibilities, awards,
+   227→    educationHandlers, workHandlers, trainingHandlers, eligibilityHandlers,
+   228→    awardsHandlers, documentsHandlers, documents,
+   229→    completeOpen, setCompleteOpen, markingComplete, handleMarkComplete,
+   230→    completion, canMarkComplete,
+   231→  } = data;
+   232→
+   233→  void user;
+   234→
+   235→  // Mobile stepper: switch section AND bring the rail back into view —
+   236→  // tapping "04" while stranded deep inside section 01's long form must not
+   237→  // leave the viewport mid-scroll in the old section. Desktop (lg+) skips
+   238→  // this: the nav is sticky above the content, no jump needed.
+   239→  function handleMobileSectionChange(id: SectionId) {
+   240→    if (id === activeSection) return;
+   241→    setActiveSection(id);
+   242→    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+   243→      requestAnimationFrame(() => {
+   244→        sectionsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+   245→      });
+   246→    }
+   247→  }
+   248→
+   249→  // Index of the active section — drives the mobile caption + prev/next.
+   250→  const activeIdx = Math.max(0, SECTIONS.findIndex((s) => s.id === activeSection));
+   251→
+   252→  // ── ONE-EXTRACTION LOCK ──
+   253→  // A document with a live extraction result (EXTRACTED / PARTIALLY_EXTRACTED
+   254→  // in an extractable category) means the auto-apply already wrote into the
+   255→  // forms. The upload strip stays locked until "Clear Forms & Re-upload"
+   256→  // wipes the profile (POST /api/applicant/profile/clear resets these doc
+   257→  // statuses to UPLOADED — which is exactly what unlocks the strip again).
+   258→  const pdsLocked = documents.some(
+   259→    (d) =>
+   260→      EXTRACTABLE_DOC_CATEGORIES.has(d.category) &&
+   261→      (d.status === "EXTRACTED" || d.status === "PARTIALLY_EXTRACTED")
+   262→  );
+   263→
+   264→  // Confirmation-gated in the UploadPdsCard's AlertDialog — this only runs on
+   265→  // "Yes, Clear Everything". Wipes ALL profile data (extracted + manually
+   266→  // typed) so the next upload overwrites from scratch; returns true when the
+   267→  // wipe succeeded so the card can flip back to the idle dropzone.
+   268→  async function handleClearForms(): Promise<boolean> {
+   269→    try {
+   270→      await apiFetch("/api/applicant/profile/clear", { method: "POST" });
+   271→      // Silent reload — sections now show empty; document statuses dropped
+   272→      // back to UPLOADED so `pdsLocked` recomputes to false (dropzone back).
+   273→      await loadAll(true);
+   274→      // isProfileComplete flipped false server-side — re-sync the session so
+   275→      // the home banner / apply gate reflect it immediately.
+   276→      await refreshSession();
+   277→      return true;
+   278→    } catch (e) {
+   279→      toast.error(
+   280→        e instanceof Error ? e.message : "Failed to clear the forms. Please try again."
+   281→      );
+   282→      return false;
+   283→    }
+   284→  }
+   285→
+   286→  if (loading) {
+   287→    return (
+   288→      <div className="premium min-h-screen bg-background text-foreground">
+   289→        <div className="relative z-10 mx-auto max-w-[1240px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+   290→          <header className="pb-6">
+   291→            <Eyebrow>Profile</Eyebrow>
+   292→            <div className="mt-1.5 h-7 w-40 animate-pulse rounded-md bg-muted" />
+   293→          </header>
+   294→          <Skeleton className="h-[104px] w-full rounded-xl" />
+   295→          <Skeleton className="mt-3 h-12 w-full rounded-[10px]" />
+   296→          <Skeleton className="mt-3 h-20 w-full rounded-xl" />
+   297→          <Skeleton className="mt-5 h-11 w-full rounded-lg" />
+   298→          <Skeleton className="mt-4 h-96 w-full rounded-xl" />
+   299→        </div>
+   300→      </div>
+   301→    );
+   302→  }
+   303→
+   304→  if (error || !profile) {
+   305→    return (
+   306→      <div className="premium min-h-screen bg-background text-foreground">
+   307→        <div className="relative z-10 mx-auto max-w-[1240px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+   308→          <header className="pb-6">
+   309→            <Eyebrow>Profile</Eyebrow>
+   310→            <h1 className="mt-1 text-[28px] font-semibold leading-[1.15] tracking-[-0.02em] text-foreground">
+   311→              My Profile
+   312→            </h1>
+   313→          </header>
+   314→          <div className="pui-card mt-2">
+   315→            <ErrorState message={error || "Profile not found"} onRetry={loadAll} />
+   316→          </div>
+   317→        </div>
+   318→      </div>
+   319→    );
+   320→  }
+   321→
+   322→  const applicantName = fullName({
+   323→    firstName: profile.firstName,
+   324→    middleName: profile.middleName,
+   325→    lastName: profile.lastName,
+   326→    extensionName: profile.extensionName,
+   327→  });
+   328→
+   329→  // Initials for the avatar block ("Maria C. Santos" → "MS").
+   330→  const initials = (applicantName || "?")
+   331→    .split(/\s+/)
+   332→    .filter((w) => w && w !== "Jr." && w !== "Sr." && w !== "III")
+   333→    .map((w) => w.charAt(0))
+   334→    .slice(0, 2)
+   335→    .join("")
+   336→    .toUpperCase();
+   337→
+   338→  // Profile photo — latest PROFILE_PICTURE document (PDS-extracted 1×1 or a
+   339→  // manual upload; documents arrive newest-first). Clicking the avatar lets
+   340→  // the applicant replace it manually.
+   341→  const photoDoc = documents.find((d) => d.category === "PROFILE_PICTURE");
+   342→  const photoUrl = photoDoc ? `/api/files/${photoDoc.filePath}` : null;
+   343→
+   344→  // Compact enterprise status pill — quiet neutral for "Incomplete" (a
+   345→  // work-in-progress state, not an error); success tint only when complete.
+   346→  const statusBadge = profile.isProfileComplete ? (
+   347→    <span className="inline-flex items-center gap-1.5 rounded-full border border-success/25 bg-success/10 px-2.5 py-1 text-xs font-medium leading-none text-success-ink">
+   348→      <CheckCircle2 className="size-3" strokeWidth={2} />
+   349→      Complete
+   350→    </span>
+   351→  ) : (
+   352→    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary px-2.5 py-1 text-xs font-medium leading-none text-muted-foreground">
+   353→      <Clock className="size-3" strokeWidth={2} />
+   354→      Incomplete
+   355→    </span>
+   356→  );
+   357→
+   358→  return (
+   359→    <div className="premium min-h-screen bg-background text-foreground">
+   360→      <div className="mx-auto max-w-[1240px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+   361→        {/* ── A–C. Employee record — ONE cohesive card: identity + completion
+   362→                indicator, the quiet completion note, and the PDS import
+   363→                workspace. Flat enterprise surfaces, no floating card stack. ── */}
+   364→        <section aria-label="Profile record" className="pui-card p-4 sm:p-6">
+   365→          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
+   366→            {/* Identity — avatar, name, status pill, document count */}
+   367→            <div className="flex min-w-0 items-center gap-4">
+   368→              <ProfileAvatar
+   369→                photoUrl={photoUrl}
+   370→                initials={initials}
+   371→                name={applicantName || "Applicant"}
+   372→                onPhotoChanged={() => void loadAll(true)}
+   373→              />
+   374→              <div className="min-w-0">
+   375→                <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+   376→                  <h2 className="text-[20px] font-semibold tracking-[-0.02em] text-foreground sm:text-[22px]">
+   377→                    {applicantName}
+   378→                  </h2>
+   379→                  {statusBadge}
+   380→                  {pdsLocked && (
+   381→                    <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/[0.07] px-2 py-1 text-[11px] font-medium leading-none text-primary">
+   382→                      <Sparkles className="size-2.5" /> AI-assisted
+   383→                    </span>
+   384→                  )}
+   385→                </div>
+   386→                <p className="mt-1.5 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+   387→                  <FileStack className="size-3.5" strokeWidth={1.5} />
+   388→                  {documents.length} document{documents.length === 1 ? "" : "s"}
+   389→                </p>
+   390→              </div>
+   391→            </div>
+   392→
+   393→            {/* Completion indicator — enterprise analytics lockup: ring +
+   394→                position readout (and the finalize CTA when eligible). */}
+   395→            <div className="flex items-center gap-4 lg:shrink-0 lg:border-l lg:border-border lg:pl-8">
+   396→              <div className="flex items-center gap-4">
+   397→                <CompletionRing percent={completion.percent} />
+   398→                <div>
+   399→                  <p className="text-[14px] font-semibold leading-tight text-foreground">
+   400→                    {completion.filled} of {completion.total} sections
+   401→                  </p>
+   402→                  <p className="mt-0.5 text-[13px] leading-tight text-muted-foreground">
+   403→                    {profile.isProfileComplete ? "All sections complete" : "to go"}
+   404→                  </p>
+   405→                </div>
+   406→              </div>
+   407→              {!profile.isProfileComplete && canMarkComplete && (
+   408→                <Button onClick={() => setCompleteOpen(true)} disabled={markingComplete} size="sm" className="shrink-0">
+   409→                  <ShieldCheck className="size-4" strokeWidth={1.5} />
+   410→                  Mark Complete
+   411→                </Button>
+   412→              )}
+   413→            </div>
+   414→          </div>
+   415→
+   416→          {/* ── B. Completion note — quiet informational banner (never an alert).
+   417→                  Blue wash + hairline + small filled icon; concise copy. ── */}
+   418→          {!canMarkComplete && !profile.isProfileComplete && (
+   419→            <div className="mt-5 flex items-start gap-3 rounded-[10px] border border-primary/15 bg-primary/[0.06] px-4 py-3">
+   420→              <span
+   421→                aria-hidden
+   422→                className="mt-0.5 grid size-4 shrink-0 place-items-center rounded-full bg-primary"
+   423→              >
+   424→                <Info className="size-2.5 text-primary-foreground" strokeWidth={3} />
+   425→              </span>
+   426→              <p className="text-[13.5px] leading-relaxed text-foreground/85">
+   427→                Profile completion requires your Personal Information (first
+   428→                name, last name, and email) and at least one entry each in
+   429→                Education and Work Experiences.
+   430→              </p>
+   431→            </div>
+   432→          )}
+   433→
+   434→          {/* ── C. Import workspace — PDS Upload · AI Auto-Fill ── */}
+   435→          <div className="mt-4 sm:mt-5">
+   436→            <UploadPdsCard
+   437→              locked={pdsLocked}
+   438→              onClearForms={handleClearForms}
+   439→              onApplied={() => loadAll(true)}
+   440→              onReview={() => {
+   441→                setActiveSection("personal");
+   442→                requestAnimationFrame(() => {
+   443→                  sectionsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+   444→                });
+   445→              }}
+   446→            />
+   447→          </div>
+   448→        </section>
+   449→
+   450→        {/* ── D. Section navigation (lg+) — sticky premium workflow band ── */}
+   451→        <SectionNav
+   452→          active={activeSection}
+   453→          checks={completion.checks}
+   454→          onSelect={setActiveSection}
+   455→        />
+   456→
+   457→        {/* Desktop owns navigation via the sticky band above; this grid is a
+   458→            single full-width column. On phones the step strip is its own grid
+   459→            child so it can STICK under the workspace header — navigation stays
+   460→            reachable anywhere in the wizard. */}
+   461→        <div ref={sectionsRef} className="mt-4 grid scroll-mt-32 grid-cols-[minmax(0,1fr)] gap-4 sm:gap-5 lg:mt-5">
+   462→          {/* MOBILE (< lg) — sticky segmented strip + caption + prev/next.
+   463→              A direct grid child so its sticky containing block is the full
+   464→              grid: the whole card pins below the workspace header while the
+   465→              forms scroll beneath it. The active cell is a sliding pill
+   466→              (motion layoutId) — one saturated element, no double borders. */}
+   467→          <nav
+   468→            aria-label="Profile sections"
+   469→            className="pui-card sticky top-16 z-30 p-1.5 lg:hidden"
+   470→          >
+   471→            <div className="grid grid-cols-7 gap-1">
+   472→              {SECTIONS.map((s, i) => {
+   473→                const isActive = activeSection === s.id;
+   474→                const filled = completion.checks[s.id];
+   475→                return (
+   476→                  <button
+   477→                    key={s.id}
+   478→                    onClick={() => handleMobileSectionChange(s.id)}
+   479→                    aria-label={`Section ${i + 1}: ${s.label}`}
+   480→                    aria-current={isActive ? "page" : undefined}
+   481→                    className={`relative isolate flex min-h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-0.5 transition-colors ${
+   482→                      isActive
+   483→                        ? "text-primary-foreground"
+   484→                        : "text-foreground hover:bg-secondary"
+   485→                    }`}
+   486→                  >
+   487→                    {/* Sliding pill — rendered INSIDE the active cell so
+   488→                        inset-0 matches the cell bounds; layoutId slides it
+   489→                        between cells on section change. (Rendered once at
+   490→                        grid level, inset-0 would cover the entire strip.) */}
+   491→                    {isActive && (
+   492→                      <motion.span
+   493→                        aria-hidden
+   494→                        layoutId="pui-mobile-seg"
+   495→                        className="absolute inset-0 -z-10 rounded-lg bg-primary"
+   496→                        transition={{ type: "spring", stiffness: 500, damping: 42 }}
+   497→                      />
+   498→                    )}
+   499→                    <span
+   500→                      className={`text-[10px] font-semibold leading-none tabular-nums ${
+   501→                        isActive ? "text-primary-foreground/85" : "text-muted-foreground"
+   502→                      }`}
+   503→                    >
+   504→                      {String(i + 1).padStart(2, "0")}
+   505→                    </span>
+   506→                    {filled ? (
+   507→                      <CheckCircle2
+   508→                        className={`size-3.5 shrink-0 ${isActive ? "text-primary-foreground" : "text-success"}`}
+   509→                        strokeWidth={2}
+   510→                      />
+   511→                    ) : (
+   512→                      <span
+   513→                        aria-hidden
+   514→                        className={`size-1.5 shrink-0 rounded-full ${
+   515→                          isActive ? "bg-primary-foreground/60" : "bg-muted-foreground/35"
+   516→                        }`}
+   517→                      />
+   518→                    )}
+   519→                  </button>
+   520→                );
+   521→              })}
+   522→            </div>
+   523→            {/* Caption + sequential stepping — hairline footer bar with ghost
+   524→                chevrons and an aria-live position readout. */}
+   525→            <div className="mt-1.5 flex items-stretch border-t border-border/60">
+   526→              <button
+   527→                type="button"
+   528→                onClick={() => activeIdx > 0 && handleMobileSectionChange(SECTIONS[activeIdx - 1].id)}
+   529→                disabled={activeIdx === 0}
+   530→                aria-label="Previous section"
+   531→                className="grid w-12 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary disabled:opacity-40"
+   532→              >
+   533→                <ChevronLeft className="size-4" strokeWidth={1.5} />
+   534→              </button>
+   535→              <p aria-live="polite" className="min-w-0 flex-1 truncate py-2.5 text-center text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+   536→                {`Section ${activeIdx + 1} of ${SECTIONS.length} · ${SECTIONS[activeIdx]?.label ?? ""}`}
+   537→              </p>
+   538→              <button
+   539→                type="button"
+   540→                onClick={() => activeIdx < SECTIONS.length - 1 && handleMobileSectionChange(SECTIONS[activeIdx + 1].id)}
+   541→                disabled={activeIdx === SECTIONS.length - 1}
+   542→                aria-label="Next section"
+   543→                className="grid w-12 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary disabled:opacity-40"
+   544→              >
+   545→                <ChevronRight className="size-4" strokeWidth={1.5} />
+   546→              </button>
+   547→            </div>
+   548→          </nav>
+   549→
+   550→          {/* SECTION CONTENT — cards swap with a quiet fade/rise (180ms):
+   551→              perceptible placement without choreography. */}
+   552→          <div className="min-w-0">
+   553→            <AnimatePresence mode="wait" initial={false}>
+   554→              <motion.div
+   555→                key={activeSection}
+   556→                initial={{ opacity: 0, y: 8 }}
+   557→                animate={{ opacity: 1, y: 0 }}
+   558→                exit={{ opacity: 0, y: -6 }}
+   559→                transition={{ duration: 0.18, ease: "easeOut" }}
+   560→              >
+   561→                {activeSection === "personal" && (
+   562→                  <PersonalInfoSection
+   563→                    form={personalForm}
+   564→                    dirty={personalDirty}
+   565→                    saving={savingPersonal}
+   566→                    autosave={autosaveStatus}
+   567→                    onChange={updatePersonalField}
+   568→                    onSave={savePersonal}
+   569→                  />
+   570→                )}
+   571→                {activeSection === "education" && (
+   572→                  <EducationSection items={educations} {...educationHandlers} />
+   573→                )}
+   574→                {activeSection === "work" && (
+   575→                  <WorkExperienceSection items={workExperiences} {...workHandlers} />
+   576→                )}
+   577→                {activeSection === "training" && (
+   578→                  <TrainingSection items={trainings} {...trainingHandlers} />
+   579→                )}
+   580→                {activeSection === "eligibility" && (
+   581→                  <EligibilitySection items={eligibilities} reference={reference} {...eligibilityHandlers} />
+   582→                )}
+   583→                {activeSection === "awards" && (
+   584→                  <AwardsSection items={awards} {...awardsHandlers} />
+   585→                )}
+   586→                {activeSection === "documents" && (
+   587→                  <DocumentsSection documents={documents} {...documentsHandlers} />
+   588→                )}
+   589→              </motion.div>
+   590→            </AnimatePresence>
+   591→          </div>
+   592→        </div>
+   593→
+   594→        {/* Mark Profile Complete Confirmation */}
+   595→        <AlertDialog open={completeOpen} onOpenChange={setCompleteOpen}>
+   596→          <AlertDialogContent className="premium">
+   597→            <AlertDialogHeader className="shrink-0">
+   598→              <AlertDialogTitle className="text-lg font-semibold tracking-[-0.01em] text-foreground">
+   599→                Mark Profile as Complete?
+   600→              </AlertDialogTitle>
+   601→              <AlertDialogDescription className="leading-relaxed">
+   602→                This will finalize your profile and allow you to apply for job
+   603→                postings. You can still edit your profile afterward, but the
+   604→                system will treat it as &quot;ready for application.&quot;
+   605→                <br /><br />
+   606→                Please ensure all information is accurate. Submitted profiles are
+   607→                subject to verification by the HR office.
+   608→              </AlertDialogDescription>
+   609→            </AlertDialogHeader>
+   610→            <AlertDialogFooter className="shrink-0">
+   611→              <AlertDialogCancel disabled={markingComplete}>
+   612→                Cancel
+   613→              </AlertDialogCancel>
+   614→              <AlertDialogAction
+   615→                onClick={handleMarkComplete}
+   616→                disabled={markingComplete}
+   617→              >
+   618→                {markingComplete ? (
+   619→                  <><Loader2 className="size-4 animate-spin" /> Submitting…</>
+   620→                ) : (
+   621→                  <><ShieldCheck className="size-4" /> Yes, Mark Complete</>
+   622→                )}
+   623→              </AlertDialogAction>
+   624→            </AlertDialogFooter>
+   625→          </AlertDialogContent>
+   626→        </AlertDialog>
+   627→      </div>
+   628→    </div>
+   629→  );
+   630→}
+   631→

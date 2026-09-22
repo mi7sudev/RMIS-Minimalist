@@ -1,0 +1,1509 @@
+     1→// ============================================================================
+     2→// RMIS — Recruitment Management Information System (DOST-MIRDC)
+     3→// Prisma schema mapping EXACTLY to the RMIS production SQLite database
+     4→// (db/production-data.db) — the database is owned and accessed 100% by this
+     5→// Next.js app via Prisma.
+     6→//
+     7→// IMPORTANT — READ BEFORE EDITING:
+     8→//   * This schema is a PURE MAPPING. NEVER run `prisma db push` or migrations
+     9→//     against the production DB — it would destroy real data.
+    10→//   * Every model uses `@@map("table_name")` to map to the physical table.
+    11→//   * Every field uses `@map("column_name")` to map to the physical column.
+    12→//   * Legacy junction tables (`*_lnk`) are modelled as explicit join models (no Prisma
+    13→//     `@relation` declarations) because they carry extra `*_ord` columns that
+    14→//     Prisma's implicit m2m cannot represent.
+    15→//   * DATE columns stored as TEXT ("1993-07-25") are typed as `String?`.
+    16→//   * DATETIME columns stored as epoch milliseconds are typed as `DateTime?`.
+    17→//   * JSON-typed SQLite columns are declared as `Unsupported("json")?`.
+    18→//     DEVIATION from the task spec: Prisma 6.11's SQLite connector cannot
+    19→//     deserialize SQLite `json`-declared columns — it throws
+    20→//     "Conversion failed: Value json not supported" whenever a query returns
+    21→//     a row with NULL in such a column. `Unsupported` makes Prisma skip the
+    22→//     column entirely, so `findMany` works for all rows. To READ a json
+    23→//     column's value, use `db.$queryRaw` (see `src/lib/raw-json.ts` helper).
+    24→//     This matches the original Prisma introspection's choice.
+    25→//   * `govt_id_date_issued` and `govt_id_valid_until` are varchar → `String?`.
+    26→//   * Internal framework housekeeping tables (admin_*, strapi_*, i18n_locale,
+    27→//     sqlite_sequence) are intentionally excluded — the app does not need them.
+    28→// ============================================================================
+    29→
+    30→generator client {
+    31→  provider = "prisma-client-js"
+    32→}
+    33→
+    34→datasource db {
+    35→  provider = "sqlite"
+    36→  url      = env("DATABASE_URL")
+    37→}
+    38→
+    39→// ============================================================================
+    40→// SECTION 1 — AUTH & USERS
+    41→// ============================================================================
+    42→
+    43→/// Users table (`up_users`) — legacy RMIS user accounts.
+    44→model User {
+    45→  id                  Int       @id @default(autoincrement()) @map("id")
+    46→  documentId          String?   @map("document_id")
+    47→  username            String?   @map("username")
+    48→  email               String?   @map("email")
+    49→  provider            String?   @map("provider")
+    50→  password            String?   @map("password")
+    51→  resetPasswordToken  String?   @map("reset_password_token")
+    52→  confirmationToken   String?   @map("confirmation_token")
+    53→  confirmed           Boolean?  @map("confirmed")
+    54→  blocked             Boolean?  @map("blocked")
+    55→  createdAt           DateTime? @map("created_at")
+    56→  updatedAt           DateTime? @map("updated_at")
+    57→  publishedAt         DateTime? @map("published_at")
+    58→  createdById         Int?      @map("created_by_id")
+    59→  updatedById         Int?      @map("updated_by_id")
+    60→  locale              String?   @map("locale")
+    61→  isAdmin             Boolean?  @map("is_admin")
+    62→  isApplicant         Boolean?  @map("is_applicant")
+    63→  firstName           String?   @map("first_name")
+    64→  middleName          String?   @map("middle_name")
+    65→  lastName            String?   @map("last_name")
+    66→  otp                 String?   @map("otp")
+    67→  encryptedId         String?   @map("encrypted_id")
+    68→  noOfAttempts        Int?      @map("no_of_attemps")
+    69→  informationFillouted Boolean?  @map("information_fillouted")
+    70→
+    71→  @@index([createdById], map: "up_users_created_by_id_fk")
+    72→  @@index([updatedById], map: "up_users_updated_by_id_fk")
+    73→  @@index([documentId, locale, publishedAt], map: "up_users_documents_idx")
+    74→  @@map("up_users")
+    75→}
+    76→
+    77→model Role {
+    78→  id          Int       @id @default(autoincrement()) @map("id")
+    79→  documentId  String?   @map("document_id")
+    80→  name        String?   @map("name")
+    81→  description String?   @map("description")
+    82→  type        String?   @map("type")
+    83→  createdAt   DateTime? @map("created_at")
+    84→  updatedAt   DateTime? @map("updated_at")
+    85→  publishedAt DateTime? @map("published_at")
+    86→  createdById Int?      @map("created_by_id")
+    87→  updatedById Int?      @map("updated_by_id")
+    88→  locale      String?   @map("locale")
+    89→
+    90→  @@index([createdById], map: "up_roles_created_by_id_fk")
+    91→  @@index([updatedById], map: "up_roles_updated_by_id_fk")
+    92→  @@index([documentId, locale, publishedAt], map: "up_roles_documents_idx")
+    93→  @@map("up_roles")
+    94→}
+    95→
+    96→model UserRoleLink {
+    97→  id     Int   @id @default(autoincrement()) @map("id")
+    98→  userId Int?   @map("user_id")
+    99→  roleId Int?   @map("role_id")
+   100→  userOrd Float? @map("user_ord")
+   101→
+   102→  @@index([userId], map: "up_users_role_lnk_user_fk")
+   103→  @@index([roleId], map: "up_users_role_lnk_role_fk")
+   104→  @@index([userOrd], map: "up_users_role_lnk_user_ord_fk")
+   105→  @@map("up_users_role_lnk")
+   106→}
+   107→
+   108→model UserApplicantLink {
+   109→  id          Int @id @default(autoincrement()) @map("id")
+   110→  userId      Int? @map("user_id")
+   111→  applicantId Int? @map("applicant_id")
+   112→
+   113→  @@index([userId], map: "up_users_applicant_id_lnk_user_fk")
+   114→  @@index([applicantId], map: "up_users_applicant_id_lnk_applicant_fk")
+   115→  @@map("up_users_applicant_id_lnk")
+   116→}
+   117→
+   118→model UserPositionLink {
+   119→  id        Int   @id @default(autoincrement()) @map("id")
+   120→  userId    Int?   @map("user_id")
+   121→  postionId Int?   @map("postion_id")
+   122→  userOrd   Float? @map("user_ord")
+   123→
+   124→  @@index([userId], map: "up_users_postion_lnk_user_fk")
+   125→  @@index([postionId], map: "up_users_postion_lnk_postion_fk")
+   126→  @@index([userOrd], map: "up_users_postion_lnk_user_ord_fk")
+   127→  @@map("up_users_postion_lnk")
+   128→}
+   129→
+   130→model UserPositionUpdateLink {
+   131→  id        Int   @id @default(autoincrement()) @map("id")
+   132→  userId    Int?   @map("user_id")
+   133→  postionId Int?   @map("postion_id")
+   134→  userOrd   Float? @map("user_ord")
+   135→
+   136→  @@index([userId], map: "up_users_postion_update_lnk_user_fk")
+   137→  @@index([postionId], map: "up_users_postion_update_lnk_postion_fk")
+   138→  @@index([userOrd], map: "up_users_postion_update_lnk_user_ord_fk")
+   139→  @@map("up_users_postion_update_lnk")
+   140→}
+   141→
+   142→model Permission {
+   143→  id          Int       @id @default(autoincrement()) @map("id")
+   144→  documentId  String?   @map("document_id")
+   145→  action      String?   @map("action")
+   146→  createdAt   DateTime? @map("created_at")
+   147→  updatedAt   DateTime? @map("updated_at")
+   148→  publishedAt DateTime? @map("published_at")
+   149→  createdById Int?      @map("created_by_id")
+   150→  updatedById Int?      @map("updated_by_id")
+   151→  locale      String?   @map("locale")
+   152→
+   153→  @@index([createdById], map: "up_permissions_created_by_id_fk")
+   154→  @@index([updatedById], map: "up_permissions_updated_by_id_fk")
+   155→  @@index([documentId, locale, publishedAt], map: "up_permissions_documents_idx")
+   156→  @@map("up_permissions")
+   157→}
+   158→
+   159→model PermissionRoleLink {
+   160→  id           Int   @id @default(autoincrement()) @map("id")
+   161→  permissionId Int?   @map("permission_id")
+   162→  roleId       Int?   @map("role_id")
+   163→  permissionOrd Float? @map("permission_ord")
+   164→
+   165→  @@index([permissionId], map: "up_permissions_role_lnk_perm_fk")
+   166→  @@index([roleId], map: "up_permissions_role_lnk_role_fk")
+   167→  @@index([permissionOrd], map: "up_permissions_role_lnk_perm_ord_fk")
+   168→  @@map("up_permissions_role_lnk")
+   169→}
+   170→
+   171→// ============================================================================
+   172→// SECTION 2 — APPLICANT & PROFILE
+   173→// ============================================================================
+   174→
+   175→/// Core applicant profile — ~90 columns. Note: `birth_date` and `crime_date`
+   176→/// are stored as TEXT ("1993-07-25") so they are typed `String?`.
+   177→/// `govt_id_date_issued` / `govt_id_valid_until` are varchar → `String?`.
+   178→model Applicant {
+   179→  id                        Int       @id @default(autoincrement()) @map("id")
+   180→  documentId                String?   @map("document_id")
+   181→  employeeNumber            String?   @map("employee_number")
+   182→  firstName                 String?   @map("first_name")
+   183→  middleName                String?   @map("middle_name")
+   184→  lastName                  String?   @map("last_name")
+   185→  extensionName             String?   @map("extension_name")
+   186→  nickname                  String?   @map("nickname")
+   187→  mobileNumber              BigInt?   @map("mobile_number")
+   188→  contactNumber             String?   @map("contact_number")
+   189→  telephoneNumber           String?   @map("telephone_number")
+   190→  publication               String?   @map("publication")
+   191→  birthDate                 String?   @map("birth_date")
+   192→  birthPlace                String?   @map("birth_place")
+   193→  emailAddress              String?   @map("email_address")
+   194→  gender                    String?   @map("gender")
+   195→  civilStatus               String?   @map("civil_status")
+   196→  citizenship               String?   @map("citizenship")
+   197→  naturalized               String?   @map("naturalized")
+   198→  height                    String?   @map("height")
+   199→  weight                    String?   @map("weight")
+   200→  bloodType                 String?   @map("blood_type")
+   201→  createdAt                 DateTime? @map("created_at")
+   202→  updatedAt                 DateTime? @map("updated_at")
+   203→  publishedAt               DateTime? @map("published_at")
+   204→  createdById               Int?      @map("created_by_id")
+   205→  updatedById               Int?      @map("updated_by_id")
+   206→  locale                    String?   @map("locale")
+   207→  pagibig                   String?   @map("pagibig")
+   208→  gsis                      String?   @map("gsis")
+   209→  philhealth                String?   @map("philhealth")
+   210→  tin                       String?   @map("tin")
+   211→  sss                       String?   @map("sss")
+   212→  govtIssuedId              String?   @map("govt_issued_id")
+   213→  govtIdIssuedNumber        String?   @map("govt_id_issued_number")
+   214→  govtIdIssuedPlace         String?   @map("govt_id_issued_place")
+   215→  govtIdDateIssued          String?   @map("govt_id_date_issued")
+   216→  govtIdValidUntil          String?   @map("govt_id_valid_until")
+   217→  houseNumber               String?   @map("house_number")
+   218→  street                    String?   @map("street")
+   219→  subdivision               String?   @map("subdivision")
+   220→  barangay                  String?   @map("barangay")
+   221→  city                      String?   @map("city")
+   222→  province                  String?   @map("province")
+   223→  country                   String?   @map("country")
+   224→  permanentHouseNumber      String?   @map("permanent_house_number")
+   225→  permanentStreet           String?   @map("permanent_street")
+   226→  permanentSubdivision      String?   @map("permanent_subdivision")
+   227→  permanentBarangay         String?   @map("permanent_barangay")
+   228→  permanentCity             String?   @map("permanent_city")
+   229→  permanentProvince         String?   @map("permanent_province")
+   230→  permanentCountry          String?   @map("permanent_country")
+   231→  permanentTelephoneNumber  String?   @map("permanent_telephone_number")
+   232→  imagePath                 String?   @map("image_path")
+   233→  applicationLetterPath     String?   @map("application_letter_path")
+   234→  pdsPath                   String?   @map("pds_path")
+   235→  employmentCertificatePath String?   @map("employment_certificate_path")
+   236→  torPath                   String?   @map("tor_path")
+   237→  coePath                   String?   @map("coe_path")
+   238→  trainingCertificatePath   String?   @map("training_certificate_path")
+   239→  infoSheetPath             String?   @map("info_sheet_path")
+   240→  curriculumVitaePath       String?   @map("curriculum_vitae_path")
+   241→  performancePath           String?   @map("performance_path")
+   242→  wexpPath                  String?   @map("wexp_path")
+   243→  pendingCases              String?   @map("pending_cases")
+   244→  specifyReferral           String?   @map("specify_referral")
+   245→  remarks                   String?   @map("remarks")
+   246→  qualified                 Boolean?  @map("qualified")
+   247→  zipCode                   String?   @map("zip_code")
+   248→  permanentZipCode          String?   @map("permanent_zip_code")
+   249→  employeeId                String?   @map("employee_id")
+   250→  statusOfEployment         String?   @map("status_of_eployment")
+   251→  submittedDate             DateTime? @map("submitted_date")
+   252→  institution               Boolean?  @map("institution")
+   253→  applicationStatus         Boolean?  @map("application_status")
+   254→  placeOfBirth              String?   @map("place_of_birth")
+   255→  isPwd                     Boolean?  @map("is_pwd")
+   256→  isGovernment              Boolean?  @map("is_government")
+   257→  respondentTo              String?   @map("respondent_to")
+   258→  religion                  String?   @map("religion")
+   259→  presentAddress            String?   @map("present_address")
+   260→  ethnicity                 String?   @map("ethnicity")
+   261→  characterReference        Unsupported("json")? @map("character_reference")
+   262→  contactNumberSecondary    String?   @map("contact_number_secondary")
+   263→  adminCase                 Boolean?  @map("admin_case")
+   264→  adminCaseDetails          String?   @map("admin_case_details")
+   265→  crimeCharge               Boolean?  @map("crime_charge")
+   266→  crimeDate                 String?   @map("crime_date")
+   267→  crimeCaseStatus           String?   @map("crime_case_status")
+   268→  isFillouted               Boolean?  @map("is_fillouted")
+   269→
+   270→  @@index([createdById], map: "applicants_created_by_id_fk")
+   271→  @@index([updatedById], map: "applicants_updated_by_id_fk")
+   272→  @@index([documentId, locale, publishedAt], map: "applicants_documents_idx")
+   273→  @@map("applicants")
+   274→}
+   275→
+   276→model ApplicantEducation {
+   277→  id                 Int       @id @default(autoincrement()) @map("id")
+   278→  documentId         String?   @map("document_id")
+   279→  educationLevel     String?   @map("education_level")
+   280→  degree             String?   @map("degree")
+   281→  course             String?   @map("course")
+   282→  specifyOthers      String?   @map("specify_others")
+   283→  schoolName         String?   @map("school_name")
+   284→  ongoing            Boolean?  @map("ongoing")
+   285→  isHighestEducation Boolean?  @map("is_highest_education")
+   286→  /// Stored as TEXT ("2006-01-01" or year string). DO NOT change to DateTime.
+   287→  yearFrom           String?   @map("year_from")
+   288→  /// Stored as TEXT ("2010-01-01" or year string). DO NOT change to DateTime.
+   289→  yearTo             String?   @map("year_to")
+   290→  highestLevel       String?   @map("highest_level")
+   291→  unitsEarned        String?   @map("units_earned")
+   292→  yearGraduated      String?   @map("year_graduated")
+   293→  awards             String?   @map("awards")
+   294→  hrRemarks          String?   @map("hr_remarks")
+   295→  createdAt          DateTime? @map("created_at")
+   296→  updatedAt          DateTime? @map("updated_at")
+   297→  publishedAt        DateTime? @map("published_at")
+   298→  createdById        Int?      @map("created_by_id")
+   299→  updatedById        Int?      @map("updated_by_id")
+   300→  locale             String?   @map("locale")
+   301→
+   302→  @@index([createdById], map: "applicant_educations_created_by_id_fk")
+   303→  @@index([updatedById], map: "applicant_educations_updated_by_id_fk")
+   304→  @@index([documentId, locale, publishedAt], map: "applicant_educations_documents_idx")
+   305→  @@map("applicant_educations")
+   306→}
+   307→
+   308→model ApplicantEducationLink {
+   309→  id                    Int   @id @default(autoincrement()) @map("id")
+   310→  applicantEducationId  Int?   @map("applicant_education_id")
+   311→  applicantId           Int?   @map("applicant_id")
+   312→  applicantEducationOrd Float? @map("applicant_education_ord")
+   313→
+   314→  @@index([applicantEducationId], map: "appl_edu_lnk_edu_fk")
+   315→  @@index([applicantId], map: "appl_edu_lnk_appl_fk")
+   316→  @@index([applicantEducationOrd], map: "appl_edu_lnk_ord_fk")
+   317→  @@map("applicant_educations_applicant_id_lnk")
+   318→}
+   319→
+   320→model ApplicantWorkExperience {
+   321→  id                 Int       @id @default(autoincrement()) @map("id")
+   322→  documentId         String?   @map("document_id")
+   323→  positionTitle      String?   @map("position_title")
+   324→  isPresentWork      Boolean?  @map("is_present_work")
+   325→  isGovtService      Boolean?  @map("is_govt_service")
+   326→  inclusiveDateFrom  DateTime? @map("inclusive_date_from")
+   327→  inclusiveDateTo    DateTime? @map("inclusive_date_to")
+   328→  statusOfEmployment String?   @map("status_of_employment")
+   329→  monthlySalary      Float?    @map("monthly_salary")
+   330→  employerName       String?   @map("employer_name")
+   331→  employerAddress    String?   @map("employer_address")
+   332→  supervisorName     String?   @map("supervisor_name")
+   333→  supervisorPosition String?   @map("supervisor_position")
+   334→  office             String?   @map("office")
+   335→  reasonForLeaving   String?   @map("reason_for_leaving")
+   336→  accomplishment     String?   @map("accomplishment")
+   337→  actualDuties       String?   @map("actual_duties")
+   338→  hrRemarks          String?   @map("hr_remarks")
+   339→  createdAt          DateTime? @map("created_at")
+   340→  updatedAt          DateTime? @map("updated_at")
+   341→  publishedAt        DateTime? @map("published_at")
+   342→  createdById        Int?      @map("created_by_id")
+   343→  updatedById        Int?      @map("updated_by_id")
+   344→  locale             String?   @map("locale")
+   345→  yearDecimal        Float?    @map("year_decimal")
+   346→
+   347→  @@index([createdById], map: "appl_wexp_created_by_id_fk")
+   348→  @@index([updatedById], map: "appl_wexp_updated_by_id_fk")
+   349→  @@index([documentId, locale, publishedAt], map: "appl_wexp_documents_idx")
+   350→  @@map("applicant_work_experiences")
+   351→}
+   352→
+   353→model ApplicantWorkExperienceLink {
+   354→  id                          Int   @id @default(autoincrement()) @map("id")
+   355→  applicantWorkExperienceId   Int?   @map("applicant_work_experience_id")
+   356→  applicantId                 Int?   @map("applicant_id")
+   357→  applicantWorkExperienceOrd  Float? @map("applicant_work_experience_ord")
+   358→
+   359→  @@index([applicantWorkExperienceId], map: "appl_wexp_lnk_wexp_fk")
+   360→  @@index([applicantId], map: "appl_wexp_lnk_appl_fk")
+   361→  @@index([applicantWorkExperienceOrd], map: "appl_wexp_lnk_ord_fk")
+   362→  @@map("applicant_work_experiences_applicant_id_lnk")
+   363→}
+   364→
+   365→model ApplicantTraining {
+   366→  id                Int       @id @default(autoincrement()) @map("id")
+   367→  documentId        String?   @map("document_id")
+   368→  titleOfTraining   String?   @map("title_of_training")
+   369→  isPresentWork     Boolean?  @map("is_present_work")
+   370→  isGovtService     Boolean?  @map("is_govt_service")
+   371→  inclusiveDateFrom DateTime? @map("inclusive_date_from")
+   372→  inclusiveDateTo   DateTime? @map("inclusive_date_to")
+   373→  numberHours       Int?      @map("number_hours")
+   374→  typeOfTraining    String?   @map("type_of_training")
+   375→  specifyTraining   String?   @map("specify_training")
+   376→  hrRemarks         String?   @map("hr_remarks")
+   377→  createdAt         DateTime? @map("created_at")
+   378→  updatedAt         DateTime? @map("updated_at")
+   379→  publishedAt       DateTime? @map("published_at")
+   380→  createdById       Int?      @map("created_by_id")
+   381→  updatedById       Int?      @map("updated_by_id")
+   382→  locale            String?   @map("locale")
+   383→  hourDecimal       Float?    @map("hour_decimal")
+   384→
+   385→  @@index([createdById], map: "appl_trn_created_by_id_fk")
+   386→  @@index([updatedById], map: "appl_trn_updated_by_id_fk")
+   387→  @@index([documentId, locale, publishedAt], map: "appl_trn_documents_idx")
+   388→  @@map("applicant_trainings")
+   389→}
+   390→
+   391→model ApplicantTrainingLink {
+   392→  id                  Int   @id @default(autoincrement()) @map("id")
+   393→  applicantTrainingId Int?   @map("applicant_training_id")
+   394→  applicantId         Int?   @map("applicant_id")
+   395→  applicantTrainingOrd Float? @map("applicant_training_ord")
+   396→
+   397→  @@index([applicantTrainingId], map: "appl_trn_lnk_trn_fk")
+   398→  @@index([applicantId], map: "appl_trn_lnk_appl_fk")
+   399→  @@index([applicantTrainingOrd], map: "appl_trn_lnk_ord_fk")
+   400→  @@map("applicant_trainings_applicant_id_lnk")
+   401→}
+   402→
+   403→model ApplicantEligibility {
+   404→  id              Int       @id @default(autoincrement()) @map("id")
+   405→  documentId      String?   @map("document_id")
+   406→  rating          String?   @map("rating")
+   407→  examDate        DateTime? @map("exam_date")
+   408→  examPlace       String?   @map("exam_place")
+   409→  licenseNumber   String?   @map("license_number")
+   410→  licenseValidity DateTime? @map("license_validity")
+   411→  hrRemarks       String?   @map("hr_remarks")
+   412→  createdAt       DateTime? @map("created_at")
+   413→  updatedAt       DateTime? @map("updated_at")
+   414→  publishedAt     DateTime? @map("published_at")
+   415→  createdById     Int?      @map("created_by_id")
+   416→  updatedById     Int?      @map("updated_by_id")
+   417→  locale          String?   @map("locale")
+   418→
+   419→  @@index([createdById], map: "appl_elig_created_by_id_fk")
+   420→  @@index([updatedById], map: "appl_elig_updated_by_id_fk")
+   421→  @@index([documentId, locale, publishedAt], map: "appl_elig_documents_idx")
+   422→  @@map("applicant_eligibilities")
+   423→}
+   424→
+   425→model ApplicantEligibilityLink {
+   426→  id                     Int   @id @default(autoincrement()) @map("id")
+   427→  applicantEligibilityId Int?   @map("applicant_eligibility_id")
+   428→  applicantId            Int?   @map("applicant_id")
+   429→  applicantEligibilityOrd Float? @map("applicant_eligibility_ord")
+   430→
+   431→  @@index([applicantEligibilityId], map: "appl_elig_lnk_elig_fk")
+   432→  @@index([applicantId], map: "appl_elig_lnk_appl_fk")
+   433→  @@index([applicantEligibilityOrd], map: "appl_elig_lnk_ord_fk")
+   434→  @@map("applicant_eligibilities_applicant_lnk")
+   435→}
+   436→
+   437→model ApplicantEligibilityCategoryLink {
+   438→  id                     Int   @id @default(autoincrement()) @map("id")
+   439→  applicantEligibilityId Int?   @map("applicant_eligibility_id")
+   440→  eligibilityId          Int?   @map("eligibility_id")
+   441→  eligibilityOrd         Float? @map("eligibility_ord")
+   442→  applicantEligibilityOrd Float? @map("applicant_eligibility_ord")
+   443→
+   444→  @@index([applicantEligibilityId], map: "appl_elig_cat_lnk_elig_fk")
+   445→  @@index([eligibilityId], map: "appl_elig_cat_lnk_cat_fk")
+   446→  @@map("applicant_eligibilities_eligibility_category_lnk")
+   447→}
+   448→
+   449→model ApplicantAward {
+   450→  id                    Int       @id @default(autoincrement()) @map("id")
+   451→  documentId            String?   @map("document_id")
+   452→  /// Stored as TEXT ("2025-09-15"). DO NOT change to DateTime.
+   453→  dateGranted           String?   @map("date_granted")
+   454→  createdAt             DateTime? @map("created_at")
+   455→  updatedAt             DateTime? @map("updated_at")
+   456→  publishedAt           DateTime? @map("published_at")
+   457→  createdById           Int?      @map("created_by_id")
+   458→  updatedById           Int?      @map("updated_by_id")
+   459→  locale                String?   @map("locale")
+   460→  points                Int?      @map("points")
+   461→  hrRemarks             String?   @map("hr_remarks")
+   462→  number                Int?      @map("number")
+   463→  recognitionProvider   String?   @map("recognition_provider")
+   464→  recognitionType       String?   @map("recognition_type")
+   465→  awardType             String?   @map("award_type")
+   466→  recognitionScope      String?   @map("recognition_scope")
+   467→  recognitionCategory   String?   @map("recognition_category")
+   468→  recognitionSubcategory String?  @map("recognition_subcategory")
+   469→  recognitionDetails    String?   @map("recognition_details")
+   470→
+   471→  @@index([createdById], map: "appl_awd_created_by_id_fk")
+   472→  @@index([updatedById], map: "appl_awd_updated_by_id_fk")
+   473→  @@index([documentId, locale, publishedAt], map: "appl_awd_documents_idx")
+   474→  @@map("applicant_awards")
+   475→}
+   476→
+   477→model ApplicantAwardLink {
+   478→  id              Int   @id @default(autoincrement()) @map("id")
+   479→  applicantAwardId Int?  @map("applicant_award_id")
+   480→  applicantId     Int?   @map("applicant_id")
+   481→  applicantAwardOrd Float? @map("applicant_award_ord")
+   482→
+   483→  @@index([applicantAwardId], map: "appl_awd_lnk_awd_fk")
+   484→  @@index([applicantId], map: "appl_awd_lnk_appl_fk")
+   485→  @@index([applicantAwardOrd], map: "appl_awd_lnk_ord_fk")
+   486→  @@map("applicant_awards_applicant_lnk")
+   487→}
+   488→
+   489→model ApplicantAwardPositionLink {
+   490→  id              Int   @id @default(autoincrement()) @map("id")
+   491→  applicantAwardId Int?  @map("applicant_award_id")
+   492→  postionId       Int?   @map("postion_id")
+   493→  postionOrd      Float? @map("postion_ord")
+   494→  applicantAwardOrd Float? @map("applicant_award_ord")
+   495→
+   496→  @@index([applicantAwardId], map: "appl_awd_pos_lnk_awd_fk")
+   497→  @@index([postionId], map: "appl_awd_pos_lnk_pos_fk")
+   498→  @@map("applicant_awards_positions_lnk")
+   499→}
+   500→
+   501→model ApplicantAccomplishment {
+   502→  id          Int       @id @default(autoincrement()) @map("id")
+   503→  documentId  String?   @map("document_id")
+   504→  title       String?   @map("title")
+   505→  createdAt   DateTime? @map("created_at")
+   506→  updatedAt   DateTime? @map("updated_at")
+   507→  publishedAt DateTime? @map("published_at")
+   508→  createdById Int?      @map("created_by_id")
+   509→  updatedById Int?      @map("updated_by_id")
+   510→  locale      String?   @map("locale")
+   511→  /// Stored as TEXT. DO NOT change to DateTime.
+   512→  dateGranted String?   @map("date_granted")
+   513→  category    String?   @map("category")
+   514→  type        String?   @map("type")
+   515→  points      Int?      @map("points")
+   516→  hrRemarks   String?   @map("hr_remarks")
+   517→
+   518→  @@index([createdById], map: "appl_acc_created_by_id_fk")
+   519→  @@index([updatedById], map: "appl_acc_updated_by_id_fk")
+   520→  @@index([documentId, locale, publishedAt], map: "appl_acc_documents_idx")
+   521→  @@map("applicant_accomplishments")
+   522→}
+   523→
+   524→model ApplicantAccomplishmentLink {
+   525→  id                       Int   @id @default(autoincrement()) @map("id")
+   526→  applicantAccomplishmentId Int?  @map("applicant_accomplishment_id")
+   527→  applicantId              Int?   @map("applicant_id")
+   528→  applicantAccomplishmentOrd Float? @map("applicant_accomplishment_ord")
+   529→
+   530→  @@index([applicantAccomplishmentId], map: "appl_acc_lnk_acc_fk")
+   531→  @@index([applicantId], map: "appl_acc_lnk_appl_fk")
+   532→  @@index([applicantAccomplishmentOrd], map: "appl_acc_lnk_ord_fk")
+   533→  @@map("applicant_accomplishments_applicant_lnk")
+   534→}
+   535→
+   536→model ApplicantAccomplishmentPositionLink {
+   537→  id                       Int   @id @default(autoincrement()) @map("id")
+   538→  applicantAccomplishmentId Int?  @map("applicant_accomplishment_id")
+   539→  postionId                Int?   @map("postion_id")
+   540→  postionOrd               Float? @map("postion_ord")
+   541→  applicantAccomplishmentOrd Float? @map("applicant_accomplishment_ord")
+   542→
+   543→  @@index([applicantAccomplishmentId], map: "appl_acc_pos_lnk_acc_fk")
+   544→  @@index([postionId], map: "appl_acc_pos_lnk_pos_fk")
+   545→  @@map("applicant_accomplishments_positions_lnk")
+   546→}
+   547→
+   548→/// Legacy applicant-form content table. The actual attachment
+   549→/// relations are stored in `files_related_mph` (FileRelatedLink).
+   550→model ApplicantForm {
+   551→  id          Int       @id @default(autoincrement()) @map("id")
+   552→  documentId  String?   @map("document_id")
+   553→  createdAt   DateTime? @map("created_at")
+   554→  updatedAt   DateTime? @map("updated_at")
+   555→  publishedAt DateTime? @map("published_at")
+   556→  createdById Int?      @map("created_by_id")
+   557→  updatedById Int?      @map("updated_by_id")
+   558→  locale      String?   @map("locale")
+   559→
+   560→  @@index([createdById], map: "appl_frm_created_by_id_fk")
+   561→  @@index([updatedById], map: "appl_frm_updated_by_id_fk")
+   562→  @@index([documentId, locale, publishedAt], map: "appl_frm_documents_idx")
+   563→  @@map("applicant_forms")
+   564→}
+   565→
+   566→model ApplicantFormLink {
+   567→  id             Int @id @default(autoincrement()) @map("id")
+   568→  applicantFormId Int? @map("applicant_form_id")
+   569→  applicantId    Int? @map("applicant_id")
+   570→
+   571→  @@index([applicantFormId], map: "appl_frm_lnk_frm_fk")
+   572→  @@index([applicantId], map: "appl_frm_lnk_appl_fk")
+   573→  @@map("applicant_forms_applicant_lnk")
+   574→}
+   575→
+   576→model ApplicantSummaryProfile {
+   577→  id          Int       @id @default(autoincrement()) @map("id")
+   578→  documentId  String?   @map("document_id")
+   579→  year        String?   @map("year")
+   580→  createdAt   DateTime? @map("created_at")
+   581→  updatedAt   DateTime? @map("updated_at")
+   582→  publishedAt DateTime? @map("published_at")
+   583→  createdById Int?      @map("created_by_id")
+   584→  updatedById Int?      @map("updated_by_id")
+   585→  locale      String?   @map("locale")
+   586→
+   587→  @@index([createdById], map: "appl_sum_created_by_id_fk")
+   588→  @@index([updatedById], map: "appl_sum_updated_by_id_fk")
+   589→  @@index([documentId, locale, publishedAt], map: "appl_sum_documents_idx")
+   590→  @@map("applicant_summary_profiles")
+   591→}
+   592→
+   593→model ApplicantSummaryProfileLink {
+   594→  id                         Int @id @default(autoincrement()) @map("id")
+   595→  applicantSummaryProfileId  Int? @map("applicant_summary_profile_id")
+   596→  applicantId                Int? @map("applicant_id")
+   597→
+   598→  @@index([applicantSummaryProfileId], map: "appl_sum_lnk_sum_fk")
+   599→  @@index([applicantId], map: "appl_sum_lnk_appl_fk")
+   600→  @@map("applicant_summary_profiles_applicant_lnk")
+   601→}
+   602→
+   603→// ============================================================================
+   604→// SECTION 3 — JOBS & POSITIONS
+   605→// ============================================================================
+   606→
+   607→model JobPosting {
+   608→  id                            Int       @id @default(autoincrement()) @map("id")
+   609→  documentId                    String?   @map("document_id")
+   610→  createdAt                     DateTime? @map("created_at")
+   611→  updatedAt                     DateTime? @map("updated_at")
+   612→  publishedAt                   DateTime? @map("published_at")
+   613→  createdById                   Int?      @map("created_by_id")
+   614→  updatedById                   Int?      @map("updated_by_id")
+   615→  locale                        String?   @map("locale")
+   616→  positionType                  String?   @map("position_type")
+   617→  dutiesResponsibilities        String?   @map("duties_responsibilities")
+   618→  contractDateFrom              DateTime? @map("contract_date_from")
+   619→  contractDateTo                DateTime? @map("contract_date_to")
+   620→  publishDate                   DateTime? @map("publish_date")
+   621→  deadlineDate                  DateTime? @map("deadline_date")
+   622→  processingDate                DateTime? @map("processing_date")
+   623→  briefDescription              String?   @map("brief_description")
+   624→  compensationPackage           String?   @map("compensation_package")
+   625→  otherQualifications           String?   @map("other_qualifications")
+   626→  otherQualificationsRichtext   String?   @map("other_qualifications_richtext")
+   627→  briefDescriptionRichtext      String?   @map("brief_description_richtext")
+   628→  compensationPackageRichtext   String?   @map("compensation_package_richtext")
+   629→  numberOfVacancy               Int?      @map("number_of_vacancy")
+   630→
+   631→  @@index([createdById], map: "jobpostings_created_by_id_fk")
+   632→  @@index([updatedById], map: "jobpostings_updated_by_id_fk")
+   633→  @@index([documentId, locale, publishedAt], map: "jobpostings_documents_idx")
+   634→  @@map("jobpostings")
+   635→}
+   636→
+   637→model JobPostingPositionLink {
+   638→  id           Int   @id @default(autoincrement()) @map("id")
+   639→  jobpostingId Int?   @map("jobposting_id")
+   640→  postionId    Int?   @map("postion_id")
+   641→  postionOrd   Float? @map("postion_ord")
+   642→  jobpostingOrd Float? @map("jobposting_ord")
+   643→
+   644→  @@index([jobpostingId], map: "jobpostings_postions_lnk_jb_fk")
+   645→  @@index([postionId], map: "jobpostings_postions_lnk_pos_fk")
+   646→  @@map("jobpostings_postions_lnk")
+   647→}
+   648→
+   649→model JobPostingApplicantLink {
+   650→  id           Int   @id @default(autoincrement()) @map("id")
+   651→  jobpostingId Int?   @map("jobposting_id")
+   652→  applicantId  Int?   @map("applicant_id")
+   653→  applicantOrd Float? @map("applicant_ord")
+   654→  jobpostingOrd Float? @map("jobposting_ord")
+   655→
+   656→  @@index([jobpostingId], map: "jobpostings_appl_lnk_jb_fk")
+   657→  @@index([applicantId], map: "jobpostings_appl_lnk_appl_fk")
+   658→  @@map("jobpostings_applicants_lnk")
+   659→}
+   660→
+   661→model JobPostingUserLink {
+   662→  id           Int   @id @default(autoincrement()) @map("id")
+   663→  jobpostingId Int?   @map("jobposting_id")
+   664→  userId       Int?   @map("user_id")
+   665→  jobpostingOrd Float? @map("jobposting_ord")
+   666→
+   667→  @@index([jobpostingId], map: "jobpostings_user_lnk_jb_fk")
+   668→  @@index([userId], map: "jobpostings_user_lnk_user_fk")
+   669→  @@map("jobpostings_user_lnk")
+   670→}
+   671→
+   672→/// NOTE: Production table name is `postions` (typo preserved intentionally).
+   673→model Position {
+   674→  id                            Int       @id @default(autoincrement()) @map("id")
+   675→  documentId                    String?   @map("document_id")
+   676→  positionType                  String?   @map("position_type")
+   677→  itemNumber                    String?   @map("item_number")
+   678→  positionTitle                 String?   @map("position_title")
+   679→  positionStatus                String?   @map("position_status")
+   680→  positionSalaryGrade           String?   @map("position_salary_grade")
+   681→  positionSalaryStep            String?   @map("position_salary_step")
+   682→  positionSalaryAmount          String?   @map("position_salary_amount")
+   683→  salaryGrade                   String?   @map("salary_grade")
+   684→  salaryAmount                  Float?    @map("salary_amount")
+   685→  positionLevel                 Int?      @map("position_level")
+   686→  hrmisId                       Int?      @map("hrmis_id")
+   687→  specialSkill                  String?   @map("special_skill")
+   688→  areaCode                      String?   @map("area_code")
+   689→  areaType                      String?   @map("area_type")
+   690→  level                         String?   @map("level")
+   691→  classification                String?   @map("classification")
+   692→  educationCriteria             String?   @map("education_criteria")
+   693→  trainingType                  String?   @map("training_type")
+   694→  otherTraining                 String?   @map("other_training")
+   695→  preferredQualification        String?   @map("preferred_qualification")
+   696→  competencyRequirements        String?   @map("competency_requirements")
+   697→  competencyRequirementsRichtext Unsupported("json")? @map("competency_requirements_richtext")
+   698→  cscEligibility                String?   @map("csc_eligibility")
+   699→  cscEligibilityGroup           String?   @map("csc_eligibility_group")
+   700→  cscEducation                  String?   @map("csc_education")
+   701→  cscWorkExperience             String?   @map("csc_work_experience")
+   702→  cscTrainingRequirements       String?   @map("csc_training_requirements")
+   703→  education                     String?   @map("education")
+   704→  experience                    String?   @map("experience")
+   705→  training                      String?   @map("training")
+   706→  eligibility                   String?   @map("eligibility")
+   707→  division                      String?   @map("division")
+   708→  section                       String?   @map("section")
+   709→  officeId                      Int?      @map("office_id")
+   710→  departmentId                  Int?      @map("department_id")
+   711→  placeOfAssignmentId           Int?      @map("place_of_assignment_id")
+   712→  sectionId                     Int?      @map("section_id")
+   713→  trancheId                     Int?      @map("tranche_id")
+   714→  salaryGradeId                 Int?      @map("salary_grade_id")
+   715→  stepId                        Int?      @map("step_id")
+   716→  divisionId                    BigInt?   @map("division_id")
+   717→  incumbentId                   BigInt?   @map("incumbent_id")
+   718→  dateVacated                   DateTime? @map("date_vacated")
+   719→  yearsRequired                 Int?      @map("years_required")
+   720→  hoursRequired                 Int?      @map("hours_required")
+   721→  createdAt                     DateTime? @map("created_at")
+   722→  updatedAt                     DateTime? @map("updated_at")
+   723→  publishedAt                   DateTime? @map("published_at")
+   724→  createdById                   Int?      @map("created_by_id")
+   725→  updatedById                   Int?      @map("updated_by_id")
+   726→  locale                        String?   @map("locale")
+   727→
+   728→  @@index([createdById], map: "postions_created_by_id_fk")
+   729→  @@index([updatedById], map: "postions_updated_by_id_fk")
+   730→  @@index([documentId, locale, publishedAt], map: "postions_documents_idx")
+   731→  @@index([placeOfAssignmentId], map: "postions_place_of_assignment_id_fk")
+   732→  @@index([divisionId], map: "postions_division_id_fk")
+   733→  @@index([incumbentId], map: "postions_incumbent_id_fk")
+   734→  @@map("postions")
+   735→}
+   736→
+   737→model PositionPlaceOfAssignmentLink {
+   738→  id                  Int   @id @default(autoincrement()) @map("id")
+   739→  postionId           Int?   @map("postion_id")
+   740→  placeOfAssignmentId Int?   @map("place_of_assignment_id")
+   741→  postionOrd          Float? @map("postion_ord")
+   742→
+   743→  @@index([postionId], map: "postions_poa_lnk_pos_fk")
+   744→  @@index([placeOfAssignmentId], map: "postions_poa_lnk_poa_fk")
+   745→  @@map("postions_place_of_assignment_lnk")
+   746→}
+   747→
+   748→model PositionEligibilityLink {
+   749→  id            Int   @id @default(autoincrement()) @map("id")
+   750→  postionId     Int?   @map("postion_id")
+   751→  eligibilityId Int?   @map("eligibility_id")
+   752→  eligibilityOrd Float? @map("eligibility_ord")
+   753→
+   754→  @@index([postionId], map: "postions_elig_lnk_pos_fk")
+   755→  @@index([eligibilityId], map: "postions_elig_lnk_elig_fk")
+   756→  @@map("postions_eligibilities_lnk")
+   757→}
+   758→
+   759→model PositionSpecificEligibilityLink {
+   760→  id                   Int   @id @default(autoincrement()) @map("id")
+   761→  postionId            Int?   @map("postion_id")
+   762→  specificEligibilityId Int?  @map("specific_eligibility_id")
+   763→  specificEligibilityOrd Float? @map("specific_eligibility_ord")
+   764→
+   765→  @@index([postionId], map: "postions_selig_lnk_pos_fk")
+   766→  @@index([specificEligibilityId], map: "postions_selig_lnk_selig_fk")
+   767→  @@map("postions_specific_eligibilities_lnk")
+   768→}
+   769→
+   770→model PositionDeletedByLink {
+   771→  id        Int @id @default(autoincrement()) @map("id")
+   772→  postionId Int? @map("postion_id")
+   773→  userId    Int? @map("user_id")
+   774→
+   775→  @@index([postionId], map: "postions_del_by_lnk_pos_fk")
+   776→  @@index([userId], map: "postions_del_by_lnk_user_fk")
+   777→  @@map("postions_deleted_by_lnk")
+   778→}
+   779→
+   780→model PlaceOfAssignment {
+   781→  id          Int       @id @default(autoincrement()) @map("id")
+   782→  documentId  String?   @map("document_id")
+   783→  name        String?   @map("name")
+   784→  createdAt   DateTime? @map("created_at")
+   785→  updatedAt   DateTime? @map("updated_at")
+   786→  publishedAt DateTime? @map("published_at")
+   787→  createdById Int?      @map("created_by_id")
+   788→  updatedById Int?      @map("updated_by_id")
+   789→  locale      String?   @map("locale")
+   790→
+   791→  @@index([createdById], map: "poa_created_by_id_fk")
+   792→  @@index([updatedById], map: "poa_updated_by_id_fk")
+   793→  @@index([documentId, locale, publishedAt], map: "poa_documents_idx")
+   794→  @@map("place_of_assignments")
+   795→}
+   796→
+   797→// ============================================================================
+   798→// SECTION 4 — APPLICATIONS
+   799→// ============================================================================
+   800→
+   801→model Application {
+   802→  id                  Int       @id @default(autoincrement()) @map("id")
+   803→  documentId          String?   @map("document_id")
+   804→  dateApplied         DateTime? @map("date_applied")
+   805→  applicationStatus   String?   @map("application_status")
+   806→  snapshotProfile     Unsupported("json")? @map("snapshot_profile")
+   807→  snapshotAwards      Unsupported("json")? @map("snapshot_awards")
+   808→  snapshotExperiences Unsupported("json")? @map("snapshot_experiences")
+   809→  snapshotTrainings   Unsupported("json")? @map("snapshot_trainings")
+   810→  snapshotEligibilities Unsupported("json")? @map("snapshot_eligibilities")
+   811→  snapshotEducations  Unsupported("json")? @map("snapshot_educations")
+   812→  snapshotAttachment  Unsupported("json")? @map("snapshot_attachment")
+   813→  createdAt           DateTime? @map("created_at")
+   814→  updatedAt           DateTime? @map("updated_at")
+   815→  publishedAt         DateTime? @map("published_at")
+   816→  createdById         Int?      @map("created_by_id")
+   817→  updatedById         Int?      @map("updated_by_id")
+   818→  locale              String?   @map("locale")
+   819→
+   820→  @@index([createdById], map: "applications_created_by_id_fk")
+   821→  @@index([updatedById], map: "applications_updated_by_id_fk")
+   822→  @@index([documentId, locale, publishedAt], map: "applications_documents_idx")
+   823→  @@map("applications")
+   824→}
+   825→
+   826→model ApplicationApplicantLink {
+   827→  id            Int   @id @default(autoincrement()) @map("id")
+   828→  applicationId Int?   @map("application_id")
+   829→  applicantId   Int?   @map("applicant_id")
+   830→  applicationOrd Float? @map("application_ord")
+   831→
+   832→  @@index([applicationId], map: "applications_appl_lnk_app_fk")
+   833→  @@index([applicantId], map: "applications_appl_lnk_appl_fk")
+   834→  @@map("applications_applicant_lnk")
+   835→}
+   836→
+   837→model ApplicationJobLink {
+   838→  id            Int   @id @default(autoincrement()) @map("id")
+   839→  applicationId Int?   @map("application_id")
+   840→  jobpostingId  Int?   @map("jobposting_id")
+   841→  applicationOrd Float? @map("application_ord")
+   842→
+   843→  @@index([applicationId], map: "applications_job_lnk_app_fk")
+   844→  @@index([jobpostingId], map: "applications_job_lnk_jb_fk")
+   845→  @@map("applications_job_lnk")
+   846→}
+   847→
+   848→// ============================================================================
+   849→// SECTION 5 — INTERVIEWS & ASSESSMENTS
+   850→// ============================================================================
+   851→
+   852→model Interview {
+   853→  id               Int       @id @default(autoincrement()) @map("id")
+   854→  documentId       String?   @map("document_id")
+   855→  createdAt        DateTime? @map("created_at")
+   856→  updatedAt        DateTime? @map("updated_at")
+   857→  publishedAt      DateTime? @map("published_at")
+   858→  createdById      Int?      @map("created_by_id")
+   859→  updatedById      Int?      @map("updated_by_id")
+   860→  locale           String?   @map("locale")
+   861→  dateOfInterview  DateTime? @map("date_of_interview")
+   862→  interviewMode    String?   @map("interview_mode")
+   863→  placeOfInterview String?   @map("place_of_interview")
+   864→  remarks          String?   @map("remarks")
+   865→  notified         Boolean?  @map("notified")
+   866→  zoomLink         String?   @map("zoom_link")
+   867→  year             String?   @map("year")
+   868→  interviewType    String?   @map("interview_type")
+   869→
+   870→  @@index([createdById], map: "appl_int_created_by_id_fk")
+   871→  @@index([updatedById], map: "appl_int_updated_by_id_fk")
+   872→  @@index([documentId, locale, publishedAt], map: "appl_int_documents_idx")
+   873→  @@map("applicant_interviews")
+   874→}
+   875→
+   876→model InterviewApplicantLink {
+   877→  id                  Int   @id @default(autoincrement()) @map("id")
+   878→  applicantInterviewId Int?  @map("applicant_interview_id")
+   879→  applicantId         Int?   @map("applicant_id")
+   880→  applicantOrd        Float? @map("applicant_ord")
+   881→  applicantInterviewOrd Float? @map("applicant_interview_ord")
+   882→
+   883→  @@index([applicantInterviewId], map: "appl_int_appl_lnk_int_fk")
+   884→  @@index([applicantId], map: "appl_int_appl_lnk_appl_fk")
+   885→  @@map("applicant_interviews_applicants_lnk")
+   886→}
+   887→
+   888→model InterviewPositionLink {
+   889→  id                  Int   @id @default(autoincrement()) @map("id")
+   890→  applicantInterviewId Int?  @map("applicant_interview_id")
+   891→  postionId           Int?   @map("postion_id")
+   892→  postionOrd          Float? @map("postion_ord")
+   893→  applicantInterviewOrd Float? @map("applicant_interview_ord")
+   894→
+   895→  @@index([applicantInterviewId], map: "appl_int_pos_lnk_int_fk")
+   896→  @@index([postionId], map: "appl_int_pos_lnk_pos_fk")
+   897→  @@map("applicant_interviews_positions_lnk")
+   898→}
+   899→
+   900→model Assessment {
+   901→  id                                Int       @id @default(autoincrement()) @map("id")
+   902→  documentId                        String?   @map("document_id")
+   903→  createdAt                         DateTime? @map("created_at")
+   904→  updatedAt                         DateTime? @map("updated_at")
+   905→  publishedAt                       DateTime? @map("published_at")
+   906→  createdById                       Int?      @map("created_by_id")
+   907→  updatedById                       Int?      @map("updated_by_id")
+   908→  locale                            String?   @map("locale")
+   909→  educationRating                   Int?      @map("education_rating")
+   910→  workExperienceRating              Int?      @map("work_experience_rating")
+   911→  trainingRating                    Int?      @map("training_rating")
+   912→  eligibilityRating                 Int?      @map("eligibility_rating")
+   913→  technicalSkillsRating             Int?      @map("technical_skills_rating")
+   914→  organizationalAwarenessRating     Int?      @map("organizational_awareness_rating")
+   915→  interpersonalSkillsRating         Int?      @map("interpersonal_skills_rating")
+   916→  adaptabilityRating                Int?      @map("adaptability_rating")
+   917→  extraCurricularRating             Int?      @map("extra_curricular_rating")
+   918→  personalDevelopmentRating         Int?      @map("personal_development_rating")
+   919→  technologyApplicationRating       Int?      @map("technology_application_rating")
+   920→  educationComments                 String?   @map("education_comments")
+   921→  workExperienceComments            String?   @map("work_experience_comments")
+   922→  trainingComments                  String?   @map("training_comments")
+   923→  eligibilityComments               String?   @map("eligibility_comments")
+   924→  technicalSkillsComments           String?   @map("technical_skills_comments")
+   925→  organizationalAwarenessComments   String?   @map("organizational_awareness_comments")
+   926→  interpersonalSkillsComments       String?   @map("interpersonal_skills_comments")
+   927→  adaptabilityComments              String?   @map("adaptability_comments")
+   928→  extraCurricularComments           String?   @map("extra_curricular_comments")
+   929→  personalDevelopmentComments       String?   @map("personal_development_comments")
+   930→  technologyApplicationComments     String?   @map("technology_application_comments")
+   931→  overallAssessmentRating           String?   @map("overall_assessment_rating")
+   932→  commentAndRecommendation          String?   @map("comment_and_recommendation")
+   933→  typeOfApplication                 String?   @map("type_of_application")
+   934→  year                              String?   @map("year")
+   935→
+   936→  @@index([createdById], map: "appl_int_asm_created_by_id_fk")
+   937→  @@index([updatedById], map: "appl_int_asm_updated_by_id_fk")
+   938→  @@index([documentId, locale, publishedAt], map: "appl_int_asm_documents_idx")
+   939→  @@map("applicant_interview_assessments")
+   940→}
+   941→
+   942→model AssessmentApplicantLink {
+   943→  id                            Int   @id @default(autoincrement()) @map("id")
+   944→  applicantInterviewAssessmentId Int?  @map("applicant_interview_assessment_id")
+   945→  applicantId                   Int?   @map("applicant_id")
+   946→  applicantOrd                  Float? @map("applicant_ord")
+   947→  applicantInterviewAssessmentOrd Float? @map("applicant_interview_assessment_ord")
+   948→
+   949→  @@index([applicantInterviewAssessmentId], map: "appl_int_asm_appl_lnk_asm_fk")
+   950→  @@index([applicantId], map: "appl_int_asm_appl_lnk_appl_fk")
+   951→  @@map("applicant_interview_assessments_applicants_lnk")
+   952→}
+   953→
+   954→model AssessmentInterviewerLink {
+   955→  id                            Int   @id @default(autoincrement()) @map("id")
+   956→  applicantInterviewAssessmentId Int?  @map("applicant_interview_assessment_id")
+   957→  interviewerId                 Int?   @map("interviewer_id")
+   958→  interviewerOrd                Float? @map("interviewer_ord")
+   959→  applicantInterviewAssessmentOrd Float? @map("applicant_interview_assessment_ord")
+   960→
+   961→  @@index([applicantInterviewAssessmentId], map: "appl_int_asm_int_lnk_asm_fk")
+   962→  @@index([interviewerId], map: "appl_int_asm_int_lnk_int_fk")
+   963→  @@map("applicant_interview_assessments_interviewers_lnk")
+   964→}
+   965→
+   966→model AssessmentPositionLink {
+   967→  id                            Int   @id @default(autoincrement()) @map("id")
+   968→  applicantInterviewAssessmentId Int?  @map("applicant_interview_assessment_id")
+   969→  postionId                     Int?   @map("postion_id")
+   970→  postionOrd                    Float? @map("postion_ord")
+   971→  applicantInterviewAssessmentOrd Float? @map("applicant_interview_assessment_ord")
+   972→
+   973→  @@index([applicantInterviewAssessmentId], map: "appl_int_asm_pos_lnk_asm_fk")
+   974→  @@index([postionId], map: "appl_int_asm_pos_lnk_pos_fk")
+   975→  @@map("applicant_interview_assessments_positions_lnk")
+   976→}
+   977→
+   978→model Examination {
+   979→  id                 Int       @id @default(autoincrement()) @map("id")
+   980→  documentId         String?   @map("document_id")
+   981→  dateOfExamination  DateTime? @map("date_of_examination")
+   982→  placeOfExamination String?   @map("place_of_examination")
+   983→  remarks            String?   @map("remarks")
+   984→  rating             Float?    @map("rating")
+   985→  createdAt          DateTime? @map("created_at")
+   986→  updatedAt          DateTime? @map("updated_at")
+   987→  publishedAt        DateTime? @map("published_at")
+   988→  createdById        Int?      @map("created_by_id")
+   989→  updatedById        Int?      @map("updated_by_id")
+   990→  locale             String?   @map("locale")
+   991→  notified           Boolean?  @map("notified")
+   992→  psychosocialTest   String?   @map("psychosocial_test")
+   993→  examMode           String?   @map("exam_mode")
+   994→  zoomLink           String?   @map("zoom_link")
+   995→  year               String?   @map("year")
+   996→  examType           String?   @map("exam_type")
+   997→
+   998→  @@index([createdById], map: "appl_exm_created_by_id_fk")
+   999→  @@index([updatedById], map: "appl_exm_updated_by_id_fk")
+  1000→  @@index([documentId, locale, publishedAt], map: "appl_exm_documents_idx")
+  1001→  @@map("applicant_examinations")
+  1002→}
+  1003→
+  1004→model ExaminationApplicantLink {
+  1005→  id                    Int   @id @default(autoincrement()) @map("id")
+  1006→  applicantExaminationId Int?  @map("applicant_examination_id")
+  1007→  applicantId           Int?   @map("applicant_id")
+  1008→  applicantOrd          Float? @map("applicant_ord")
+  1009→  applicantExaminationOrd Float? @map("applicant_examination_ord")
+  1010→
+  1011→  @@index([applicantExaminationId], map: "appl_exm_appl_lnk_exm_fk")
+  1012→  @@index([applicantId], map: "appl_exm_appl_lnk_appl_fk")
+  1013→  @@map("applicant_examinations_applicants_lnk")
+  1014→}
+  1015→
+  1016→model ExaminationPositionLink {
+  1017→  id                    Int   @id @default(autoincrement()) @map("id")
+  1018→  applicantExaminationId Int?  @map("applicant_examination_id")
+  1019→  postionId             Int?   @map("postion_id")
+  1020→  postionOrd            Float? @map("postion_ord")
+  1021→  applicantExaminationOrd Float? @map("applicant_examination_ord")
+  1022→
+  1023→  @@index([applicantExaminationId], map: "appl_exm_pos_lnk_exm_fk")
+  1024→  @@index([postionId], map: "appl_exm_pos_lnk_pos_fk")
+  1025→  @@map("applicant_examinations_positions_lnk")
+  1026→}
+  1027→
+  1028→model Interviewer {
+  1029→  id          Int       @id @default(autoincrement()) @map("id")
+  1030→  documentId  String?   @map("document_id")
+  1031→  name        String?   @map("name")
+  1032→  division    String?   @map("division")
+  1033→  section     String?   @map("section")
+  1034→  position    String?   @map("position")
+  1035→  createdAt   DateTime? @map("created_at")
+  1036→  updatedAt   DateTime? @map("updated_at")
+  1037→  publishedAt DateTime? @map("published_at")
+  1038→  createdById Int?      @map("created_by_id")
+  1039→  updatedById Int?      @map("updated_by_id")
+  1040→  locale      String?   @map("locale")
+  1041→
+  1042→  @@index([createdById], map: "int_created_by_id_fk")
+  1043→  @@index([updatedById], map: "int_updated_by_id_fk")
+  1044→  @@index([documentId, locale, publishedAt], map: "int_documents_idx")
+  1045→  @@map("interviewers")
+  1046→}
+  1047→
+  1048→// ============================================================================
+  1049→// SECTION 6 — REFERENCE DATA
+  1050→// ============================================================================
+  1051→
+  1052→model Eligibility {
+  1053→  id          Int       @id @default(autoincrement()) @map("id")
+  1054→  documentId  String?   @map("document_id")
+  1055→  name        String?   @map("name")
+  1056→  createdAt   DateTime? @map("created_at")
+  1057→  updatedAt   DateTime? @map("updated_at")
+  1058→  publishedAt DateTime? @map("published_at")
+  1059→  createdById Int?      @map("created_by_id")
+  1060→  updatedById Int?      @map("updated_by_id")
+  1061→  locale      String?   @map("locale")
+  1062→  index       Int?      @map("index")
+  1063→
+  1064→  @@index([createdById], map: "elig_created_by_id_fk")
+  1065→  @@index([updatedById], map: "elig_updated_by_id_fk")
+  1066→  @@index([documentId, locale, publishedAt], map: "elig_documents_idx")
+  1067→  @@map("eligibilities")
+  1068→}
+  1069→
+  1070→model EligibilityUserLink {
+  1071→  id             Int   @id @default(autoincrement()) @map("id")
+  1072→  eligibilityId  Int?   @map("eligibility_id")
+  1073→  userId         Int?   @map("user_id")
+  1074→  eligibilityOrd Float? @map("eligibility_ord")
+  1075→
+  1076→  @@index([eligibilityId], map: "elig_user_lnk_elig_fk")
+  1077→  @@index([userId], map: "elig_user_lnk_user_fk")
+  1078→  @@map("eligibilities_user_lnk")
+  1079→}
+  1080→
+  1081→model SpecificEligibility {
+  1082→  id          Int       @id @default(autoincrement()) @map("id")
+  1083→  documentId  String?   @map("document_id")
+  1084→  name        String?   @map("name")
+  1085→  level       Int?      @map("level")
+  1086→  index       Int?      @map("index")
+  1087→  createdAt   DateTime? @map("created_at")
+  1088→  updatedAt   DateTime? @map("updated_at")
+  1089→  publishedAt DateTime? @map("published_at")
+  1090→  createdById Int?      @map("created_by_id")
+  1091→  updatedById Int?      @map("updated_by_id")
+  1092→  locale      String?   @map("locale")
+  1093→
+  1094→  @@index([createdById], map: "selig_created_by_id_fk")
+  1095→  @@index([updatedById], map: "selig_updated_by_id_fk")
+  1096→  @@index([documentId, locale, publishedAt], map: "selig_documents_idx")
+  1097→  @@map("specific_eligibilities")
+  1098→}
+  1099→
+  1100→model SpecificEligibilityAdminLink {
+  1101→  id                    Int   @id @default(autoincrement()) @map("id")
+  1102→  specificEligibilityId Int?   @map("specific_eligibility_id")
+  1103→  userId                Int?   @map("user_id")
+  1104→  specificEligibilityOrd Float? @map("specific_eligibility_ord")
+  1105→
+  1106→  @@index([specificEligibilityId], map: "selig_admin_lnk_selig_fk")
+  1107→  @@index([userId], map: "selig_admin_lnk_user_fk")
+  1108→  @@map("specific_eligibilities_admin_lnk")
+  1109→}
+  1110→
+  1111→model SpecificEligibilityApplicantLink {
+  1112→  id                    Int   @id @default(autoincrement()) @map("id")
+  1113→  specificEligibilityId Int?   @map("specific_eligibility_id")
+  1114→  applicantId           Int?   @map("applicant_id")
+  1115→  specificEligibilityOrd Float? @map("specific_eligibility_ord")
+  1116→
+  1117→  @@index([specificEligibilityId], map: "selig_appl_lnk_selig_fk")
+  1118→  @@index([applicantId], map: "selig_appl_lnk_appl_fk")
+  1119→  @@map("specific_eligibilities_applicant_lnk")
+  1120→}
+  1121→
+  1122→model SpecificEligibilityEligibilityLink {
+  1123→  id                    Int   @id @default(autoincrement()) @map("id")
+  1124→  specificEligibilityId Int?   @map("specific_eligibility_id")
+  1125→  eligibilityId         Int?   @map("eligibility_id")
+  1126→  specificEligibilityOrd Float? @map("specific_eligibility_ord")
+  1127→
+  1128→  @@index([specificEligibilityId], map: "selig_elig_lnk_selig_fk")
+  1129→  @@index([eligibilityId], map: "selig_elig_lnk_elig_fk")
+  1130→  @@map("specific_eligibilities_eligibility_lnk")
+  1131→}
+  1132→
+  1133→model SpecificEligibilityApplicantEligibilityLink {
+  1134→  id                    Int   @id @default(autoincrement()) @map("id")
+  1135→  specificEligibilityId Int?   @map("specific_eligibility_id")
+  1136→  applicantEligibilityId Int?  @map("applicant_eligibility_id")
+  1137→  specificEligibilityOrd Float? @map("specific_eligibility_ord")
+  1138→
+  1139→  @@index([specificEligibilityId], map: "selig_ae_lnk_selig_fk")
+  1140→  @@index([applicantEligibilityId], map: "selig_ae_lnk_ae_fk")
+  1141→  @@map("specific_eligibilities_applicant_eligibility_lnk")
+  1142→}
+  1143→
+  1144→model Course {
+  1145→  id          Int       @id @default(autoincrement()) @map("id")
+  1146→  documentId  String?   @map("document_id")
+  1147→  name        String?   @map("name")
+  1148→  abbri       String?   @map("abbri")
+  1149→  category    String?   @map("category")
+  1150→  level       String?   @map("level")
+  1151→  createdAt   DateTime? @map("created_at")
+  1152→  updatedAt   DateTime? @map("updated_at")
+  1153→  publishedAt DateTime? @map("published_at")
+  1154→  createdById Int?      @map("created_by_id")
+  1155→  updatedById Int?      @map("updated_by_id")
+  1156→  locale      String?   @map("locale")
+  1157→
+  1158→  @@index([createdById], map: "course_created_by_id_fk")
+  1159→  @@index([updatedById], map: "course_updated_by_id_fk")
+  1160→  @@index([documentId, locale, publishedAt], map: "course_documents_idx")
+  1161→  @@map("courses")
+  1162→}
+  1163→
+  1164→model CourseApplicantEducationLink {
+  1165→  id                    Int   @id @default(autoincrement()) @map("id")
+  1166→  courseId              Int?   @map("course_id")
+  1167→  applicantEducationId  Int?   @map("applicant_education_id")
+  1168→  courseOrd             Float? @map("course_ord")
+  1169→
+  1170→  @@index([courseId], map: "course_appl_edu_lnk_course_fk")
+  1171→  @@index([applicantEducationId], map: "course_appl_edu_lnk_edu_fk")
+  1172→  @@map("courses_applicant_education_lnk")
+  1173→}
+  1174→
+  1175→model EvaluationCriteria {
+  1176→  id               Int       @id @default(autoincrement()) @map("id")
+  1177→  documentId       String?   @map("document_id")
+  1178→  effectivityDate  DateTime? @map("effectivity_date")
+  1179→  createdAt        DateTime? @map("created_at")
+  1180→  updatedAt        DateTime? @map("updated_at")
+  1181→  publishedAt      DateTime? @map("published_at")
+  1182→  createdById      Int?      @map("created_by_id")
+  1183→  updatedById      Int?      @map("updated_by_id")
+  1184→  locale           String?   @map("locale")
+  1185→  type             String?   @map("type")
+  1186→  educationCriteria Unsupported("json")? @map("education_criteria")
+  1187→  trainingCriteria Unsupported("json")? @map("training_criteria")
+  1188→  workExpCriteria  Unsupported("json")? @map("work_exp_criteria")
+  1189→
+  1190→  @@index([createdById], map: "eval_crit_created_by_id_fk")
+  1191→  @@index([updatedById], map: "eval_crit_updated_by_id_fk")
+  1192→  @@index([documentId, locale, publishedAt], map: "eval_crit_documents_idx")
+  1193→  @@map("evaluation_criterias")
+  1194→}
+  1195→
+  1196→model EvaluationCriteriaUserLink {
+  1197→  id                   Int   @id @default(autoincrement()) @map("id")
+  1198→  evaluationCriteriaId Int?   @map("evaluation_criteria_id")
+  1199→  userId               Int?   @map("user_id")
+  1200→  evaluationCriteriaOrd Float? @map("evaluation_criteria_ord")
+  1201→
+  1202→  @@index([evaluationCriteriaId], map: "eval_crit_user_lnk_ec_fk")
+  1203→  @@index([userId], map: "eval_crit_user_lnk_user_fk")
+  1204→  @@map("evaluation_criterias_user_lnk")
+  1205→}
+  1206→
+  1207→model Notification {
+  1208→  id                     Int       @id @default(autoincrement()) @map("id")
+  1209→  documentId             String?   @map("document_id")
+  1210→  name                   String?   @map("name")
+  1211→  notificationDescription String?  @map("notification_description")
+  1212→  /// Stored as TEXT. DO NOT change to DateTime.
+  1213→  notificationDate       String?   @map("notification_date")
+  1214→  createdAt              DateTime? @map("created_at")
+  1215→  updatedAt              DateTime? @map("updated_at")
+  1216→  publishedAt            DateTime? @map("published_at")
+  1217→  createdById            Int?      @map("created_by_id")
+  1218→  updatedById            Int?      @map("updated_by_id")
+  1219→  locale                 String?   @map("locale")
+  1220→
+  1221→  @@index([createdById], map: "notif_created_by_id_fk")
+  1222→  @@index([updatedById], map: "notif_updated_by_id_fk")
+  1223→  @@index([documentId, locale, publishedAt], map: "notif_documents_idx")
+  1224→  @@map("notifications")
+  1225→}
+  1226→
+  1227→model NotificationApplicantLink {
+  1228→  id              Int   @id @default(autoincrement()) @map("id")
+  1229→  notificationId  Int?   @map("notification_id")
+  1230→  applicantId     Int?   @map("applicant_id")
+  1231→  notificationOrd Float? @map("notification_ord")
+  1232→
+  1233→  @@index([notificationId], map: "notif_appl_lnk_notif_fk")
+  1234→  @@index([applicantId], map: "notif_appl_lnk_appl_fk")
+  1235→  @@map("notifications_applicant_lnk")
+  1236→}
+  1237→
+  1238→// ============================================================================
+  1239→// SECTION 7 — MERGED AWARDS / ACCOMPLISHMENTS
+  1240→// ============================================================================
+  1241→
+  1242→model MergedAwardsAccomplishment {
+  1243→  id          Int       @id @default(autoincrement()) @map("id")
+  1244→  documentId  String?   @map("document_id")
+  1245→  createdAt   DateTime? @map("created_at")
+  1246→  updatedAt   DateTime? @map("updated_at")
+  1247→  publishedAt DateTime? @map("published_at")
+  1248→  createdById Int?      @map("created_by_id")
+  1249→  updatedById Int?      @map("updated_by_id")
+  1250→  locale      String?   @map("locale")
+  1251→  year        String?   @map("year")
+  1252→
+  1253→  @@index([createdById], map: "maa_created_by_id_fk")
+  1254→  @@index([updatedById], map: "maa_updated_by_id_fk")
+  1255→  @@index([documentId, locale, publishedAt], map: "maa_documents_idx")
+  1256→  @@map("merged_awards_accomplishments")
+  1257→}
+  1258→
+  1259→model MergedAwardsAccomplishmentLink {
+  1260→  id                          Int   @id @default(autoincrement()) @map("id")
+  1261→  mergedAwardsAccomplishmentId Int?  @map("merged_awards_accomplishment_id")
+  1262→  applicantId                 Int?   @map("applicant_id")
+  1263→  mergedAwardsAccomplishmentOrd Float? @map("merged_awards_accomplishment_ord")
+  1264→
+  1265→  @@index([mergedAwardsAccomplishmentId], map: "maa_appl_lnk_maa_fk")
+  1266→  @@index([applicantId], map: "maa_appl_lnk_appl_fk")
+  1267→  @@map("merged_awards_accomplishments_applicant_lnk")
+  1268→}
+  1269→
+  1270→model MergedAwardsAccomplishmentAwardLink {
+  1271→  id                          Int   @id @default(autoincrement()) @map("id")
+  1272→  mergedAwardsAccomplishmentId Int?  @map("merged_awards_accomplishment_id")
+  1273→  applicantAwardId            Int?   @map("applicant_award_id")
+  1274→  applicantAwardOrd           Float? @map("applicant_award_ord")
+  1275→
+  1276→  @@index([mergedAwardsAccomplishmentId], map: "maa_awd_lnk_maa_fk")
+  1277→  @@index([applicantAwardId], map: "maa_awd_lnk_awd_fk")
+  1278→  @@map("merged_awards_accomplishments_applicant_awards_lnk")
+  1279→}
+  1280→
+  1281→model MergedAwardsAccomplishmentAccomplishmentLink {
+  1282→  id                          Int   @id @default(autoincrement()) @map("id")
+  1283→  mergedAwardsAccomplishmentId Int?  @map("merged_awards_accomplishment_id")
+  1284→  applicantAccomplishmentId   Int?   @map("applicant_accomplishment_id")
+  1285→  applicantAccomplishmentOrd  Float? @map("applicant_accomplishment_ord")
+  1286→
+  1287→  @@index([mergedAwardsAccomplishmentId], map: "maa_acc_lnk_maa_fk")
+  1288→  @@index([applicantAccomplishmentId], map: "maa_acc_lnk_acc_fk")
+  1289→  @@map("merged_awards_accomp73efd_applicant_accomplishments_lnk")
+  1290→}
+  1291→
+  1292→model MergedAwardsAccomplishmentPositionLink {
+  1293→  id                          Int @id @default(autoincrement()) @map("id")
+  1294→  mergedAwardsAccomplishmentId Int? @map("merged_awards_accomplishment_id")
+  1295→  postionId                   Int? @map("postion_id")
+  1296→
+  1297→  @@index([mergedAwardsAccomplishmentId], map: "maa_pos_lnk_maa_fk")
+  1298→  @@index([postionId], map: "maa_pos_lnk_pos_fk")
+  1299→  @@map("merged_awards_accomplishments_position_lnk")
+  1300→}
+  1301→
+  1302→// ============================================================================
+  1303→// SECTION 8 — PROJECTS
+  1304→// ============================================================================
+  1305→
+  1306→model Project {
+  1307→  id               Int       @id @default(autoincrement()) @map("id")
+  1308→  documentId       String?   @map("document_id")
+  1309→  code             String?   @map("code")
+  1310→  name             String?   @map("name")
+  1311→  description      String?   @map("description")
+  1312→  positionType     String?   @map("position_type")
+  1313→  contractDateFrom DateTime? @map("contract_date_from")
+  1314→  contractDateTo   DateTime? @map("contract_date_to")
+  1315→  createdAt        DateTime? @map("created_at")
+  1316→  updatedAt        DateTime? @map("updated_at")
+  1317→  publishedAt      DateTime? @map("published_at")
+  1318→  createdById      Int?      @map("created_by_id")
+  1319→  updatedById      Int?      @map("updated_by_id")
+  1320→  locale           String?   @map("locale")
+  1321→
+  1322→  @@index([createdById], map: "proj_created_by_id_fk")
+  1323→  @@index([updatedById], map: "proj_updated_by_id_fk")
+  1324→  @@index([documentId, locale, publishedAt], map: "proj_documents_idx")
+  1325→  @@map("projects")
+  1326→}
+  1327→
+  1328→model ProjectPlaceOfAssignmentLink {
+  1329→  id                  Int @id @default(autoincrement()) @map("id")
+  1330→  projectId           Int? @map("project_id")
+  1331→  placeOfAssignmentId Int? @map("place_of_assignment_id")
+  1332→
+  1333→  @@index([projectId], map: "proj_poa_lnk_proj_fk")
+  1334→  @@index([placeOfAssignmentId], map: "proj_poa_lnk_poa_fk")
+  1335→  @@map("projects_place_of_assignment_lnk")
+  1336→}
+  1337→
+  1338→model ProjectUserLink {
+  1339→  id        Int   @id @default(autoincrement()) @map("id")
+  1340→  projectId Int?   @map("project_id")
+  1341→  userId    Int?   @map("user_id")
+  1342→  projectOrd Float? @map("project_ord")
+  1343→
+  1344→  @@index([projectId], map: "proj_user_lnk_proj_fk")
+  1345→  @@index([userId], map: "proj_user_lnk_user_fk")
+  1346→  @@map("projects_user_lnk")
+  1347→}
+  1348→
+  1349→// ============================================================================
+  1350→// SECTION 9 — FILES (file-upload storage)
+  1351→// ============================================================================
+  1352→
+  1353→model File {
+  1354→  id               Int       @id @default(autoincrement()) @map("id")
+  1355→  documentId       String?   @map("document_id")
+  1356→  name             String?   @map("name")
+  1357→  alternativeText  String?   @map("alternative_text")
+  1358→  caption          String?   @map("caption")
+  1359→  width            Int?      @map("width")
+  1360→  height           Int?      @map("height")
+  1361→  formats          Unsupported("json")? @map("formats")
+  1362→  hash             String?   @map("hash")
+  1363→  ext              String?   @map("ext")
+  1364→  mime             String?   @map("mime")
+  1365→  size             Float?    @map("size")
+  1366→  url              String?   @map("url")
+  1367→  previewUrl       String?   @map("preview_url")
+  1368→  provider         String?   @map("provider")
+  1369→  providerMetadata Unsupported("json")? @map("provider_metadata")
+  1370→  folderPath       String?   @map("folder_path")
+  1371→  createdAt        DateTime? @map("created_at")
+  1372→  updatedAt        DateTime? @map("updated_at")
+  1373→  publishedAt      DateTime? @map("published_at")
+  1374→  createdById      Int?      @map("created_by_id")
+  1375→  updatedById      Int?      @map("updated_by_id")
+  1376→  locale           String?   @map("locale")
+  1377→
+  1378→  @@index([createdById], map: "files_created_by_id_fk")
+  1379→  @@index([updatedById], map: "files_updated_by_id_fk")
+  1380→  @@index([documentId, locale, publishedAt], map: "files_documents_idx")
+  1381→  @@map("files")
+  1382→}
+  1383→
+  1384→model FileFolderLink {
+  1385→  id       Int   @id @default(autoincrement()) @map("id")
+  1386→  fileId   Int?   @map("file_id")
+  1387→  folderId Int?   @map("folder_id")
+  1388→  fileOrd  Float? @map("file_ord")
+  1389→
+  1390→  @@index([fileId], map: "files_folder_lnk_file_fk")
+  1391→  @@index([folderId], map: "files_folder_lnk_folder_fk")
+  1392→  @@map("files_folder_lnk")
+  1393→}
+  1394→
+  1395→/// Polymorphic relation table — maps files to ANY linked content row.
+  1396→/// Column names use `related_*` (not `morph_*`) per the production DB.
+  1397→/// `order` is a SQL reserved word — Prisma field is `order` with @map("order").
+  1398→model FileRelatedLink {
+  1399→  id         Int    @id @default(autoincrement()) @map("id")
+  1400→  fileId     Int?    @map("file_id")
+  1401→  relatedId  Int?    @map("related_id")
+  1402→  relatedType String? @map("related_type")
+  1403→  field      String? @map("field")
+  1404→  order      Float?  @map("order")
+  1405→
+  1406→  @@index([fileId], map: "files_related_mph_file_fk")
+  1407→  @@index([relatedId, relatedType], map: "files_related_mph_morph_fk")
+  1408→  @@map("files_related_mph")
+  1409→}
+  1410→
+  1411→model UploadFolder {
+  1412→  id          Int       @id @default(autoincrement()) @map("id")
+  1413→  documentId  String?   @map("document_id")
+  1414→  name        String?   @map("name")
+  1415→  pathId      Int?      @map("path_id")
+  1416→  path        String?   @map("path")
+  1417→  createdAt   DateTime? @map("created_at")
+  1418→  updatedAt   DateTime? @map("updated_at")
+  1419→  publishedAt DateTime? @map("published_at")
+  1420→  createdById Int?      @map("created_by_id")
+  1421→  updatedById Int?      @map("updated_by_id")
+  1422→  locale      String?   @map("locale")
+  1423→
+  1424→  @@index([createdById], map: "up_folders_created_by_id_fk")
+  1425→  @@index([updatedById], map: "up_folders_updated_by_id_fk")
+  1426→  @@index([documentId, locale, publishedAt], map: "up_folders_documents_idx")
+  1427→  @@map("upload_folders")
+  1428→}
+  1429→
+  1430→model UploadFolderParentLink {
+  1431→  id          Int   @id @default(autoincrement()) @map("id")
+  1432→  folderId    Int?   @map("folder_id")
+  1433→  invFolderId Int?   @map("inv_folder_id")
+  1434→  folderOrd   Float? @map("folder_ord")
+  1435→
+  1436→  @@index([folderId], map: "up_folders_parent_lnk_folder_fk")
+  1437→  @@index([invFolderId], map: "up_folders_parent_lnk_inv_fk")
+  1438→  @@map("upload_folders_parent_lnk")
+  1439→}
+  1440→
+  1441→// ============================================================================
+  1442→// SECTION 10 — CUSTOM (unused scaffolding, preserved for fidelity)
+  1443→// ============================================================================
+  1444→
+  1445→model Custom {
+  1446→  id            Int       @id @default(autoincrement()) @map("id")
+  1447→  documentId    String?   @map("document_id")
+  1448→  name          String?   @map("name")
+  1449→  createdAt     DateTime? @map("created_at")
+  1450→  updatedAt     DateTime? @map("updated_at")
+  1451→  publishedAt   DateTime? @map("published_at")
+  1452→  createdById   Int?      @map("created_by_id")
+  1453→  updatedById   Int?      @map("updated_by_id")
+  1454→  locale        String?   @map("locale")
+  1455→  margin        String?   @map("margin")
+  1456→  sectionNumber String?   @map("section_number")
+  1457→
+  1458→  @@index([createdById], map: "customs_created_by_id_fk")
+  1459→  @@index([updatedById], map: "customs_updated_by_id_fk")
+  1460→  @@index([documentId, locale, publishedAt], map: "customs_documents_idx")
+  1461→  @@map("customs")
+  1462→}
+  1463→
+  1464→// ============================================================================
+  1465→// SMS gateway log — every outbound SMS attempt (all providers, including the
+  1466→// dev "mock" driver) is persisted here for auditing + the admin SMS panel.
+  1467→// ============================================================================
+  1468→model SmsLog {
+  1469→  id          Int      @id @default(autoincrement())
+  1470→  to          String
+  1471→  message     String
+  1472→  provider    String
+  1473→  /// "sent" | "failed" | "mock"
+  1474→  status      String
+  1475→  providerRef String?  @map("provider_ref")
+  1476→  error       String?
+  1477→  relatedType String?  @map("related_type")
+  1478→  relatedId   Int?     @map("related_id")
+  1479→  createdAt   DateTime @default(now()) @map("created_at")
+  1480→
+  1481→  @@index([createdAt])
+  1482→  @@map("sms_logs")
+  1483→}
+  1484→
+  1485→// Outbound email audit trail — mirrors SmsLog. Every send (real or mock)
+  1486→// lands here so admins can audit exactly what was sent to whom, and the
+  1487→// shortlist email is provable even in the mock dev driver.
+  1488→model EmailLog {
+  1489→  id          Int      @id @default(autoincrement())
+  1490→  to          String
+  1491→  subject     String
+  1492→  bodyText    String   @map("body_text")
+  1493→  bodyHtml    String?  @map("body_html")
+  1494→  provider    String
+  1495→  /// "sent" | "failed" | "mock" | "skipped"
+  1496→  status      String
+  1497→  providerRef String?  @map("provider_ref")
+  1498→  error       String?
+  1499→  relatedType String?  @map("related_type")
+  1500→  relatedId   Int?     @map("related_id")
+  1501→  /// JSON metadata of sent attachments: [{ name, bytes }] — content is NEVER
+  1502→  /// persisted here (only the provider receives the actual file bytes).
+  1503→  attachments String?
+  1504→  createdAt   DateTime @default(now()) @map("created_at")
+  1505→
+  1506→  @@index([createdAt])
+  1507→  @@map("email_logs")
+  1508→}
+  1509→

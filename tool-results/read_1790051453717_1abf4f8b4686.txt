@@ -1,0 +1,622 @@
+     1→// Document Intelligence Service
+     2→// Uses an OpenAI-compatible AI API (NVIDIA by default) to extract structured
+     3→// information from uploaded documents
+     4→// (PDS, Resume/CV, certificates, awards, training certs, etc.) and map to applicant form fields.
+     5→//
+     6→// CRITICAL RULE: Never fabricate information. If a field cannot be confidently extracted,
+     7→// leave it null and mark it for user review.
+     8→//
+     9→// Supported file types:
+    10→// - Images (PNG, JPEG, GIF, WebP, BMP) → sent to VLM as image_url
+    11→// - PDF, Word (.doc/.docx) → sent to VLM as file_url
+    12→// - Excel (.xlsx, .xls) → parsed to text via exceljs, then sent to LLM as text
+    13→//   (The PDS / CSC Form 212 is distributed as an Excel file in the Philippines.)
+    14→
+    15→import { ZAI } from "@/lib/ai-client";
+    16→import { promises as fs } from "fs";
+    17→import path from "path";
+    18→import ExcelJS from "exceljs";
+    19→import { extractText as unpdfExtractText } from "unpdf";
+    20→import mammoth from "mammoth";
+    21→import type { ValidDocumentCategory } from "@/lib/file-types";
+    22→import { detectFileKind } from "@/lib/file-types";
+    23→import { parsePdsExcel } from "@/lib/pds-parser";
+    24→
+    25→// Production schema has no Document model — the category enum is defined
+    26→// locally in @/lib/file-types. Alias to keep the rest of this module readable.
+    27→export type DocumentCategory = ValidDocumentCategory;
+    28→
+    29→export type ExtractedField<T = string> = {
+    30→  value: T | null;
+    31→  confidence: "high" | "medium" | "low" | "none";
+    32→  source: string; // which part of the document
+    33→};
+    34→
+    35→export type ExtractedPersonalInfo = {
+    36→  firstName: ExtractedField;
+    37→  middleName: ExtractedField;
+    38→  lastName: ExtractedField;
+    39→  extensionName: ExtractedField;
+    40→  emailAddress: ExtractedField;
+    41→  mobileNumber: ExtractedField;
+    42→  contactNumber: ExtractedField;
+    43→  birthDate: ExtractedField;
+    44→  birthPlace: ExtractedField;
+    45→  gender: ExtractedField;
+    46→  civilStatus: ExtractedField;
+    47→  citizenship: ExtractedField;
+    48→  religion: ExtractedField;
+    49→  presentAddress: ExtractedField;
+    50→  city: ExtractedField;
+    51→  province: ExtractedField;
+    52→  country: ExtractedField;
+    53→  zipCode: ExtractedField;
+    54→};
+    55→
+    56→export type ExtractedEducation = {
+    57→  educationLevel: ExtractedField;
+    58→  degree: ExtractedField;
+    59→  course: ExtractedField;
+    60→  schoolName: ExtractedField;
+    61→  yearGraduated: ExtractedField;
+    62→  unitsEarned: ExtractedField;
+    63→  awards: ExtractedField;
+    64→  highestLevel: ExtractedField;
+    65→};
+    66→
+    67→export type ExtractedWorkExperience = {
+    68→  positionTitle: ExtractedField;
+    69→  employerName: ExtractedField;
+    70→  employerAddress: ExtractedField;
+    71→  inclusiveDateFrom: ExtractedField;
+    72→  inclusiveDateTo: ExtractedField;
+    73→  statusOfEmployment: ExtractedField;
+    74→  monthlySalary: ExtractedField<number | null>;
+    75→  isGovtService: ExtractedField<boolean | null>;
+    76→  reasonForLeaving: ExtractedField;
+    77→  accomplishment: ExtractedField;
+    78→  actualDuties: ExtractedField;
+    79→};
+    80→
+    81→export type ExtractedTraining = {
+    82→  titleOfTraining: ExtractedField;
+    83→  typeOfTraining: ExtractedField;
+    84→  inclusiveDateFrom: ExtractedField;
+    85→  inclusiveDateTo: ExtractedField;
+    86→  numberHours: ExtractedField<number | null>;
+    87→  isGovtService: ExtractedField<boolean | null>;
+    88→};
+    89→
+    90→export type ExtractedEligibility = {
+    91→  eligibilityTitle: ExtractedField;
+    92→  rating: ExtractedField;
+    93→  examDate: ExtractedField;
+    94→  examPlace: ExtractedField;
+    95→  licenseNumber: ExtractedField;
+    96→  licenseValidity: ExtractedField;
+    97→};
+    98→
+    99→export type ExtractedAward = {
+   100→  recognitionType: ExtractedField;
+   101→  recognitionDetails: ExtractedField;
+   102→  recognitionScope: ExtractedField;
+   103→  recognitionCategory: ExtractedField;
+   104→  recognitionProvider: ExtractedField;
+   105→  dateGranted: ExtractedField;
+   106→};
+   107→
+   108→export type ExtractionResult = {
+   109→  personalInfo?: Partial<ExtractedPersonalInfo>;
+   110→  educations?: ExtractedEducation[];
+   111→  workExperiences?: ExtractedWorkExperience[];
+   112→  trainings?: ExtractedTraining[];
+   113→  eligibilities?: ExtractedEligibility[];
+   114→  awards?: ExtractedAward[];
+   115→  rawTextPreview?: string;
+   116→  documentType?: string;
+   117→  warnings?: string[];
+   118→};
+   119→
+   120→// ---- Excel parsing ----
+   121→
+   122→// Heuristic: does this cell value look like a field label?
+   123→// Labels are short, contain letters, don't contain digits, and often end with ":".
+   124→function looksLikeLabel(s: string): boolean {
+   125→  if (!s) return false;
+   126→  const trimmed = s.replace(/:$/, "").trim();
+   127→  if (trimmed.length === 0 || trimmed.length > 40) return false;
+   128→  if (!/[a-zA-Z]/.test(trimmed)) return false; // must contain at least one letter
+   129→  if (/\d/.test(trimmed)) return false; // labels don't contain digits
+   130→  return true;
+   131→}
+   132→
+   133→// Set of country names used to filter out dropdown-list pollution.
+   134→// The PDS / CSC Form 212 embeds a country dropdown source list in far-right
+   135→// columns (one country per row, ~200 rows: Afghanistan, Albania, ... Vietnam).
+   136→// This list has nothing to do with the applicant's data but pollutes the
+   137→// extracted text — sometimes pushing real education/work/training data past
+   138→// the truncation limit and confusing the LLM into returning empty arrays.
+   139→//
+   140→// IMPORTANT: Only actual COUNTRY names belong here. Do NOT add Yes/No,
+   141→// Married/Single/Widowed/Separated, Male/Female, etc. — those are legitimate
+   142→// data values that appear inline with labels (e.g. "CIVIL STATUS: Married")
+   143→// and filtering them would corrupt real applicant data.
+   144→const COUNTRY_NAMES = new Set([
+   145→  "Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda",
+   146→  "Argentina","Armenia","Aruba","Australia","Austria","Azerbaijan",
+   147→  "Bahamas, The","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize",
+   148→  "Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil",
+   149→  "Brunei","Bulgaria","Burkina Faso","Burma","Burundi","Cabo Verde","Cambodia",
+   150→  "Cameroon","Canada","Cape Verde","Central African Republic","Chad","Chile",
+   151→  "China","Colombia","Comoros","Congo, Republic of the","Congo, Democratic Republic of the",
+   152→  "Costa Rica","Cote d'Ivoire","Croatia","Cuba","Curacao","Cyprus","Czech Republic",
+   153→  "Denmark","Djibouti","Dominica","Dominican Republic","East Timor","Ecuador",
+   154→  "Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini",
+   155→  "Ethiopia","Fiji","Finland","France","Gabon","Gambia, The","Georgia","Germany",
+   156→  "Ghana","Greece","Grenada","Guatemala","Guinea","Guinea-Bissau","Guyana","Haiti",
+   157→  "Holy See","Honduras","Hong Kong","Hungary","Iceland","India","Indonesia","Iran",
+   158→  "Iraq","Ireland","Israel","Italy","Jamaica","Japan","Jordan","Kazakhstan","Kenya",
+   159→  "Kiribati","Korea, North","Korea, South","Kosovo","Kuwait","Kyrgyzstan","Laos",
+   160→  "Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania",
+   161→  "Luxembourg","Macau","Macedonia","Madagascar","Malawi","Malaysia","Maldives",
+   162→  "Mali","Malta","Marshall Islands","Mauritania","Mauritius","Mexico","Micronesia",
+   163→  "Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Namibia",
+   164→  "Nauru","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria",
+   165→  "Niue","North Korea","North Macedonia","Norway","Oman","Pakistan","Palau","Panama",
+   166→  "Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar",
+   167→  "Romania","Russia","Rwanda","Saint Kitts and Nevis","Saint Lucia",
+   168→  "Saint Vincent and the Grenadines","Samoa","San Marino","Sao Tome and Principe",
+   169→  "Saudi Arabia","Senegal","Serbia","Seychelles","Sierra Leone","Singapore",
+   170→  "Slovakia","Slovenia","Solomon Islands","Somalia","South Africa","South Korea",
+   171→  "South Sudan","Spain","Sri Lanka","Sudan","Suriname","Swaziland","Sweden",
+   172→  "Switzerland","Syria","Taiwan","Tajikistan","Tanzania","Thailand","Timor-Leste",
+   173→  "Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu",
+   174→  "Uganda","Ukraine","United Arab Emirates","United Kingdom","United States",
+   175→  "Uruguay","Uzbekistan","Vanuatu","Venezuela","Vietnam","Yemen","Zambia","Zimbabwe",
+   176→  "Netherlands Antilles","Palestinian Territories","Sint Maarten",
+   177→]);
+   178→
+   179→function isDropdownNoise(s: string): boolean {
+   180→  return COUNTRY_NAMES.has(s.trim());
+   181→}
+   182→
+   183→// Parse an Excel file (.xlsx/.xls) into a readable text representation.
+   184→// The PDS (CSC Form 212) is a structured Excel form — we read all sheets,
+   185→// extract cell values with their row/column context, and format as readable text
+   186→// so the LLM can understand the form structure and extract structured data.
+   187→//
+   188→// Key transformations (each fixes a real extraction bug observed on the
+   189→// CSC Form 212 PDS Excel template):
+   190→//   1. Skip "Lookup" sheets — these are dropdown value sources (Yes/No,
+   191→//      Civil Status, Gender, Country list) that pollute the text.
+   192→//   2. Filter out cells whose value is a pure dropdown-list entry (country
+   193→//      names, Yes/No, civil-status values). These appear as vertical lists in
+   194→//      far-right columns and were pushing real education/work/training rows
+   195→//      past the truncation limit, causing the LLM to return empty arrays.
+   196→//   3. Deduplicate adjacent identical cells within a row — merged-cell ranges
+   197→//      cause exceljs to return the same value in every cell of the merge, so
+   198→//      a single "PERSONAL DATA SHEET" label would appear 14 times per row.
+   199→//   4. Keep the "Label: Value" pairing only for genuine label cells (short,
+   200→//      alphabetic, no digits) so tabular data (education/work tables) is
+   201→//      preserved as pipe-separated values the LLM can parse column-by-column.
+   202→//
+   203→// Uses exceljs (maintained, no known advisories) instead of the vulnerable xlsx package.
+   204→async function parseExcelToText(filePath: string): Promise<string> {
+   205→  const abs = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
+   206→  const buffer = await fs.readFile(abs);
+   207→
+   208→  const workbook = new ExcelJS.Workbook();
+   209→  // Cast to the exact declared parameter type: Buffer typings differ between
+   210→  // runtimes (@types/node vs bun) but the runtime value is the same object.
+   211→  await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+   212→
+   213→  const sections: string[] = [];
+   214→
+   215→  for (const sheet of workbook.worksheets) {
+   216→    // Skip Lookup sheets — they only contain dropdown source values
+   217→    // (Yes/No, Civil Status, Gender, Country list) that pollute extraction.
+   218→    if (/^lookup$/i.test(sheet.name)) continue;
+   219→    if (sheet.rowCount === 0) continue;
+   220→
+   221→    sections.push(`\n=== Sheet: ${sheet.name} ===`);
+   222→
+   223→    // Get the actual used range dimensions
+   224→    const rowCount = sheet.actualRowCount;
+   225→
+   226→    for (let r = 1; r <= rowCount; r++) {
+   227→      const row = sheet.getRow(r);
+   228→      const rawCells: string[] = [];
+   229→      let hasContent = false;
+   230→
+   231→      // Collect non-empty cell values across the row.
+   232→      // NOTE: ExcelJS's `cell.text` getter throws "Cannot read properties of
+   233→      // null (reading 'toString')" when cell.value is explicitly null (common
+   234→      // in merged-cell regions of PDS / CSC Form 212 spreadsheets). We wrap
+   235→      // it in try/catch and fall back to checking cell.value directly.
+   236→      for (let c = 1; c <= row.cellCount; c++) {
+   237→        const cell = row.getCell(c);
+   238→        let value = "";
+   239→        try {
+   240→          value = cell.text || (typeof cell.value === "string" ? cell.value : "");
+   241→        } catch {
+   242→          // cell.text getter threw (null value in merged cell, etc.)
+   243→          value = typeof cell.value === "string" ? cell.value : "";
+   244→        }
+   245→        const trimmed = String(value || "").trim();
+   246→        rawCells.push(trimmed);
+   247→        if (trimmed) hasContent = true;
+   248→      }
+   249→
+   250→      if (!hasContent) continue;
+   251→
+   252→      // Filter out dropdown-noise cells (country names, Yes/No, civil-status
+   253→      // values). These are embedded vertical lists in far-right columns that
+   254→      // have nothing to do with the applicant's actual data.
+   255→      let cells = rawCells.filter((c) => c && !isDropdownNoise(c));
+   256→
+   257→      // Skip rows that are now empty (pure dropdown-list rows like
+   258→      // "Afghanistan", "Albania", ...).
+   259→      if (cells.length === 0) continue;
+   260→
+   261→      // Deduplicate adjacent identical cells — merged-cell ranges cause
+   262→      // exceljs to return the same value in every cell of the merge (e.g.
+   263→      // "PERSONAL DATA SHEET" repeated 14 times across one row).
+   264→      const deduped: string[] = [];
+   265→      for (const c of cells) {
+   266→        if (deduped[deduped.length - 1] !== c) deduped.push(c);
+   267→      }
+   268→      cells = deduped;
+   269→
+   270→      // Format the row.
+   271→      // Only pair cells as "Label: Value" when the first cell genuinely looks
+   272→      // like a label (short, alphabetic, no digits) and the next cell looks like a value.
+   273→      // This prevents mangling tabular data (e.g. education tables) where every cell is a value.
+   274→      const parts: string[] = [];
+   275→      for (let c = 0; c < cells.length; c++) {
+   276→        const cell = cells[c];
+   277→        if (!cell) continue;
+   278→        const next = cells[c + 1];
+   279→
+   280→        if (next && looksLikeLabel(cell) && !looksLikeLabel(next)) {
+   281→          // Label: Value pair
+   282→          parts.push(`${cell.replace(/:$/, "")}: ${next}`);
+   283→          c++; // skip the value cell
+   284→        } else {
+   285→          // Standalone cell — add as-is
+   286→          parts.push(cell);
+   287→        }
+   288→      }
+   289→      if (parts.length > 0) {
+   290→        sections.push(parts.join(" | "));
+   291→      }
+   292→    }
+   293→  }
+   294→
+   295→  const text = sections.join("\n");
+   296→  // Truncate to avoid exceeding LLM context limits (keep first ~16000 chars).
+   297→  // Increased from 12000 → 16000 because the dedup + dropdown-noise filtering
+   298→  // above significantly reduces text size, leaving room for the full PDS
+   299→  // (4 sheets) without cutting off the education/work/training sections.
+   300→  const MAX_CHARS = 16000;
+   301→  if (text.length > MAX_CHARS) {
+   302→    return text.slice(0, MAX_CHARS) + "\n\n[... document truncated ...]";
+   303→  }
+   304→  return text;
+   305→}
+   306→
+   307→// Parse a PDF file into per-page text for the text-based LLM extraction path.
+   308→// The VLM API rejects PDF file_url data URLs ("URL格式无效"), so we extract text
+   309→// via unpdf and send it to the chat completions endpoint — same as Excel.
+   310→//
+   311→// Returns one string PER PAGE (mergePages: false) so the PDS extractor can
+   312→// chunk multi-page documents instead of truncating them — applicants with
+   313→// 100+ trainings/awards routinely submit 6-10 page PDS PDFs, and the old
+   314→// single-string 12K truncation silently dropped every overflow page.
+   315→async function parsePdfPages(filePath: string): Promise<string[]> {
+   316→  const abs = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
+   317→  const buffer = await fs.readFile(abs);
+   318→  // unpdf is a worker-free PDF text extractor built for bundled/server
+   319→  // environments (pdfjs-dist's dynamic worker import fails under Turbopack).
+   320→  const { text } = await unpdfExtractText(new Uint8Array(buffer), { mergePages: false });
+   321→  const pages = Array.isArray(text) ? text : [String(text ?? "")];
+   322→  return pages.map((p) => (p || "").trim());
+   323→}
+   324→
+   325→// Legacy single-string variant — still used by non-PDS categories where the
+   326→// document is small and a truncation guard is safe.
+   327→async function parsePdfToText(filePath: string): Promise<string> {
+   328→  const pages = await parsePdfPages(filePath);
+   329→  const out = pages.join("\n\n").trim();
+   330→  const MAX_CHARS = 12000;
+   331→  if (out.length > MAX_CHARS) {
+   332→    return out.slice(0, MAX_CHARS) + "\n\n[... document truncated ...]";
+   333→  }
+   334→  return out;
+   335→}
+   336→
+   337→// Parse a Word (.doc/.docx) file into readable text for the text-based LLM.
+   338→async function parseWordToText(filePath: string): Promise<string> {
+   339→  const abs = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
+   340→  const buffer = await fs.readFile(abs);
+   341→  const result = await mammoth.extractRawText({ buffer });
+   342→  const text = (result?.value || "").trim();
+   343→  const MAX_CHARS = 12000;
+   344→  if (text.length > MAX_CHARS) {
+   345→    return text.slice(0, MAX_CHARS) + "\n\n[... document truncated ...]";
+   346→  }
+   347→  return text;
+   348→}
+   349→
+   350→// ---- File reading for VLM (images) ----
+   351→
+   352→async function readAsDataUrl(filePath: string): Promise<{ url: string; kind: ReturnType<typeof detectFileKind> }> {
+   353→  const abs = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
+   354→  const buffer = await fs.readFile(abs);
+   355→  const ext = path.extname(abs).toLowerCase();
+   356→  const kind = detectFileKind(filePath);
+   357→
+   358→  let mime: string;
+   359→  switch (kind) {
+   360→    case "image":
+   361→      mime = `image/${ext.replace(".", "") === "jpg" ? "jpeg" : ext.replace(".", "")}`;
+   362→      break;
+   363→    case "pdf":
+   364→      mime = "application/pdf";
+   365→      break;
+   366→    case "word":
+   367→      mime = ext === ".doc"
+   368→        ? "application/msword"
+   369→        : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+   370→      break;
+   371→    default:
+   372→      mime = "application/octet-stream";
+   373→  }
+   374→  return { url: `data:${mime};base64,${buffer.toString("base64")}`, kind };
+   375→}
+   376→
+   377→// ---- Prompt building ----
+   378→
+   379→function buildPrompt(category: DocumentCategory): string {
+   380→  const base = `You are a document intelligence assistant for the DOST-MIRDC Recruitment Management Information System (RMIS).
+   381→Analyze the provided document and extract structured information that maps to applicant profile fields.
+   382→
+   383→CRITICAL RULES:
+   384→1. Extract ONLY information that is clearly present in the document.
+   385→2. NEVER fabricate, guess, or infer information that is not explicitly stated.
+   386→3. If a field cannot be found, set its value to null and confidence to "none".
+   387→4. Use confidence "high" only when the value is explicitly and unambiguously stated.
+   388→5. Use "medium" when the value is present but requires minor interpretation.
+   389→6. Use "low" when the value is implied or partially stated.
+   390→7. Return ONLY valid JSON (no markdown fences, no commentary).
+   391→
+   392→Return a JSON object with this exact structure:`;
+   393→
+   394→  const schemas: Record<DocumentCategory, string> = {
+   395→    PDS: `${base}
+   396→
+   397→This is a Philippine Civil Service Commission (CSC) Personal Data Sheet (CS Form 212 Revised 2017).
+   398→The document is spread across 4 sheets (C1–C4), each corresponding to a page:
+   399→
+   400→  • Sheet C1 (Page 1): I. PERSONAL INFORMATION, II. FAMILY BACKGROUND, III. EDUCATIONAL BACKGROUND
+   401→  • Sheet C2 (Page 2): IV. CIVIL SERVICE ELIGIBILITY, V. WORK EXPERIENCE
+   402→  • Sheet C3 (Page 3): VI. VOLUNTARY WORK, VII. LEARNING AND DEVELOPMENT (L&D) / TRAINING PROGRAMS, VIII. OTHER INFORMATION (skills, non-academic distinctions/recognition)
+   403→  • Sheet C4 (Page 4): IX. character references + government disclosure questions
+   404→
+   405→IMPORTANT EXTRACTION RULES:
+   406→  • Scan EVERY sheet — education is on C1, work experience + eligibility are on C2, training is on C3.
+   407→  • "N/A" in a section means the applicant has no data for that section — return an EMPTY array, do NOT create entries with "N/A" values.
+   408→  • For EDUCATION (section III on C1): the data is in a TABLE with one row per education level. Each row has these columns (left to right):
+   409→      LEVEL | NAME OF SCHOOL | BASIC EDUCATION/DEGREE/COURSE | PERIOD OF ATTENDANCE (From, To) | HIGHEST LEVEL/UNITS EARNED | YEAR GRADUATED | SCHOLARSHIP/ACADEMIC HONORS
+   410→    There are up to 5 levels: ELEMENTARY, SECONDARY, VOCATIONAL/TRADE COURSE, COLLEGE, GRADUATE STUDIES.
+   411→    Create a SEPARATE education entry for EACH level that has a school name (skip levels where the school is "N/A" or blank).
+   412→    Map: LEVEL → educationLevel, NAME OF SCHOOL → schoolName, BASIC EDUCATION/DEGREE/COURSE → degree (and course), YEAR GRADUATED → yearGraduated, HIGHEST LEVEL/UNITS EARNED → unitsEarned, SCHOLARSHIP/ACADEMIC HONORS → awards.
+   413→  • For WORK EXPERIENCE (section V on C2): the table columns are:
+   414→      From | To | POSITION TITLE | DEPARTMENT/AGENCY/OFFICE/COMPANY | NAME OF OFFICE/UNIT | IMMEDIATE SUPERVISOR | MONTHLY SALARY | SALARY GRADE | STATUS OF EMPLOYMENT | GOVT SERVICE (Y/N)
+   415→    Create one entry per work row. Map position title, employer name (department/company), employer address, inclusive dates, monthly salary, status of employment, and isGovtService (Yes→true, No→false).
+   416→  • For ELIGIBILITY (section IV on C2): the table columns are:
+   417→      CAREER SERVICE/RA 1080 (BOARD/BAR) | RATING | DATE OF EXAM | PLACE OF EXAM | LICENSE NUMBER | DATE OF VALIDITY
+   418→    Create one entry per eligibility row. Map to eligibilityTitle, rating, examDate, examPlace, licenseNumber, licenseValidity.
+   419→  • For TRAINING (section VII on C3): the table columns are:
+   420→      TITLE OF L&D/TRAINING | From | To | NUMBER OF HOURS | Type of LD (Managerial/Supervisory/Technical/etc)
+   421→    Create one entry per training row. Map to titleOfTraining, typeOfTraining, inclusiveDateFrom, inclusiveDateTo, numberHours.
+   422→  • For AWARDS (section VIII "NON-ACADEMIC DISTINCTIONS / RECOGNITION" on C3): list each recognition. Map to recognitionDetails, recognitionType ("Award" or "Recognition"), recognitionProvider if stated.
+   423→
+   424→Return a JSON object with this exact structure:
+   425→{
+   426→  "personalInfo": {
+   427→    "firstName": {"value": null, "confidence": "none", "source": "name section"},
+   428→    "middleName": {"value": null, "confidence": "none", "source": ""},
+   429→    "lastName": {"value": null, "confidence": "none", "source": ""},
+   430→    "extensionName": {"value": null, "confidence": "none", "source": ""},
+   431→    "emailAddress": {"value": null, "confidence": "none", "source": ""},
+   432→    "mobileNumber": {"value": null, "confidence": "none", "source": ""},
+   433→    "contactNumber": {"value": null, "confidence": "none", "source": ""},
+   434→    "birthDate": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"},
+   435→    "birthPlace": {"value": null, "confidence": "none", "source": ""},
+   436→    "gender": {"value": null, "confidence": "none", "source": "Male or Female"},
+   437→    "civilStatus": {"value": null, "confidence": "none", "source": ""},
+   438→    "citizenship": {"value": null, "confidence": "none", "source": ""},
+   439→    "presentAddress": {"value": null, "confidence": "none", "source": ""},
+   440→    "city": {"value": null, "confidence": "none", "source": ""},
+   441→    "province": {"value": null, "confidence": "none", "source": ""},
+   442→    "country": {"value": null, "confidence": "none", "source": ""}
+   443→  },
+   444→  "educations": [{"educationLevel": {"value": null, "confidence": "none", "source": ""}, "degree": {"value": null, "confidence": "none", "source": ""}, "course": {"value": null, "confidence": "none", "source": ""}, "schoolName": {"value": null, "confidence": "none", "source": ""}, "yearGraduated": {"value": null, "confidence": "none", "source": ""}, "unitsEarned": {"value": null, "confidence": "none", "source": ""}, "awards": {"value": null, "confidence": "none", "source": ""}}],
+   445→  "workExperiences": [{"positionTitle": {"value": null, "confidence": "none", "source": ""}, "employerName": {"value": null, "confidence": "none", "source": ""}, "employerAddress": {"value": null, "confidence": "none", "source": ""}, "inclusiveDateFrom": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "inclusiveDateTo": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "statusOfEmployment": {"value": null, "confidence": "none", "source": ""}, "monthlySalary": {"value": null, "confidence": "none", "source": 0}, "isGovtService": {"value": null, "confidence": "none", "source": false}, "actualDuties": {"value": null, "confidence": "none", "source": ""}}],
+   446→  "trainings": [{"titleOfTraining": {"value": null, "confidence": "none", "source": ""}, "typeOfTraining": {"value": null, "confidence": "none", "source": "Technical|Managerial/Supervisory|Orientation|Other"}, "inclusiveDateFrom": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "inclusiveDateTo": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "numberHours": {"value": null, "confidence": "none", "source": 0}}],
+   447→  "eligibilities": [{"eligibilityTitle": {"value": null, "confidence": "none", "source": ""}, "rating": {"value": null, "confidence": "none", "source": ""}, "examDate": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "examPlace": {"value": null, "confidence": "none", "source": ""}, "licenseNumber": {"value": null, "confidence": "none", "source": ""}}],
+   448→  "awards": []
+   449→}`,
+   450→    RESUME: `${base}
+   451→{
+   452→  "personalInfo": { "firstName": {"value": null, "confidence": "none", "source": ""}, "lastName": {"value": null, "confidence": "none", "source": ""}, "middleName": {"value": null, "confidence": "none", "source": ""}, "emailAddress": {"value": null, "confidence": "none", "source": ""}, "mobileNumber": {"value": null, "confidence": "none", "source": ""}, "contactNumber": {"value": null, "confidence": "none", "source": ""}, "presentAddress": {"value": null, "confidence": "none", "source": ""}, "city": {"value": null, "confidence": "none", "source": ""}, "province": {"value": null, "confidence": "none", "source": ""}, "country": {"value": null, "confidence": "none", "source": ""} },
+   453→  "educations": [{"educationLevel": {"value": null, "confidence": "none", "source": ""}, "degree": {"value": null, "confidence": "none", "source": ""}, "course": {"value": null, "confidence": "none", "source": ""}, "schoolName": {"value": null, "confidence": "none", "source": ""}, "yearGraduated": {"value": null, "confidence": "none", "source": ""}}],
+   454→  "workExperiences": [{"positionTitle": {"value": null, "confidence": "none", "source": ""}, "employerName": {"value": null, "confidence": "none", "source": ""}, "inclusiveDateFrom": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "inclusiveDateTo": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "actualDuties": {"value": null, "confidence": "none", "source": ""}}],
+   455→  "trainings": [{"titleOfTraining": {"value": null, "confidence": "none", "source": ""}, "inclusiveDateFrom": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "inclusiveDateTo": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "numberHours": {"value": null, "confidence": "none", "source": 0}}],
+   456→  "eligibilities": []
+   457→}`,
+   458→    EDUCATION: `${base}
+   459→{ "educations": [{"educationLevel": {"value": null, "confidence": "none", "source": ""}, "degree": {"value": null, "confidence": "none", "source": ""}, "course": {"value": null, "confidence": "none", "source": ""}, "schoolName": {"value": null, "confidence": "none", "source": ""}, "yearGraduated": {"value": null, "confidence": "none", "source": ""}, "unitsEarned": {"value": null, "confidence": "none", "source": ""}, "awards": {"value": null, "confidence": "none", "source": ""}}] }`,
+   460→    WORK_EXPERIENCE: `${base}
+   461→{ "workExperiences": [{"positionTitle": {"value": null, "confidence": "none", "source": ""}, "employerName": {"value": null, "confidence": "none", "source": ""}, "employerAddress": {"value": null, "confidence": "none", "source": ""}, "inclusiveDateFrom": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "inclusiveDateTo": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "statusOfEmployment": {"value": null, "confidence": "none", "source": ""}, "monthlySalary": {"value": null, "confidence": "none", "source": 0}, "isGovtService": {"value": null, "confidence": "none", "source": false}, "actualDuties": {"value": null, "confidence": "none", "source": ""}}] }`,
+   462→    TRAINING: `${base}
+   463→{ "trainings": [{"titleOfTraining": {"value": null, "confidence": "none", "source": ""}, "typeOfTraining": {"value": null, "confidence": "none", "source": "Technical|Managerial/Supervisory|Orientation|Other"}, "inclusiveDateFrom": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "inclusiveDateTo": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "numberHours": {"value": null, "confidence": "none", "source": 0}}] }`,
+   464→    ELIGIBILITY: `${base}
+   465→{ "eligibilities": [{"eligibilityTitle": {"value": null, "confidence": "none", "source": ""}, "rating": {"value": null, "confidence": "none", "source": ""}, "examDate": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "examPlace": {"value": null, "confidence": "none", "source": ""}, "licenseNumber": {"value": null, "confidence": "none", "source": ""}, "licenseValidity": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}}] }`,
+   466→    AWARD: `${base}
+   467→{ "awards": [{"recognitionType": {"value": null, "confidence": "none", "source": "Award"}, "recognitionDetails": {"value": null, "confidence": "none", "source": ""}, "recognitionScope": {"value": null, "confidence": "none", "source": ""}, "recognitionCategory": {"value": null, "confidence": "none", "source": ""}, "recognitionProvider": {"value": null, "confidence": "none", "source": ""}, "dateGranted": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}}] }`,
+   468→    ACCOMPLISHMENT: `${base}
+   469→{ "awards": [{"recognitionType": {"value": null, "confidence": "none", "source": "Accomplishment"}, "recognitionDetails": {"value": null, "confidence": "none", "source": ""}, "recognitionScope": {"value": null, "confidence": "none", "source": ""}, "recognitionCategory": {"value": null, "confidence": "none", "source": ""}, "recognitionProvider": {"value": null, "confidence": "none", "source": ""}, "dateGranted": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}}] }`,
+   470→    COE: `${base}
+   471→{ "workExperiences": [{"positionTitle": {"value": null, "confidence": "none", "source": ""}, "employerName": {"value": null, "confidence": "none", "source": ""}, "employerAddress": {"value": null, "confidence": "none", "source": ""}, "inclusiveDateFrom": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "inclusiveDateTo": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "statusOfEmployment": {"value": null, "confidence": "none", "source": ""}, "monthlySalary": {"value": null, "confidence": "none", "source": 0}, "isGovtService": {"value": null, "confidence": "none", "source": false}}] }`,
+   472→    PERFORMANCE_EVALUATION: `${base}
+   473→{ "personalInfo": { "firstName": {"value": null, "confidence": "none", "source": ""}, "lastName": {"value": null, "confidence": "none", "source": ""} } }`,
+   474→    SUPPORTING: `${base}
+   475→{ "personalInfo": { "firstName": {"value": null, "confidence": "none", "source": ""}, "lastName": {"value": null, "confidence": "none", "source": ""}, "emailAddress": {"value": null, "confidence": "none", "source": ""} } }`,
+   476→    PROFILE_PICTURE: `${base}
+   477→{ "personalInfo": {} }`,
+   478→  };
+   479→
+   480→  return schemas[category] || schemas.SUPPORTING;
+   481→}
+   482→
+   483→function parseJsonResponse(content: string): unknown {
+   484→  if (!content) throw new Error("Empty response from LLM/VLM");
+   485→  // strip markdown fences if present
+   486→  let cleaned = content.trim();
+   487→  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+   488→  if (fenceMatch) {
+   489→    cleaned = fenceMatch[1].trim();
+   490→  }
+   491→  // find first { and last }
+   492→  const first = cleaned.indexOf("{");
+   493→  const last = cleaned.lastIndexOf("}");
+   494→  if (first !== -1 && last !== -1 && last > first) {
+   495→    cleaned = cleaned.slice(first, last + 1);
+   496→  }
+   497→  return JSON.parse(cleaned);
+   498→}
+   499→
+   500→// ---- Parallel per-section PDS extraction ----
+   501→//
+   502→// The PDS (CSC Form 212) is a large 4-sheet Excel document. A single LLM call
+   503→// to extract ALL sections (personal info + education + work + training +
+   504→// eligibility + awards) takes 60+ seconds because the model must generate a
+   505→// very large JSON output. This exceeds gateway/browser HTTP timeouts (typically
+   506→// 30–60s), causing the client to receive a 504/timeout error even though the
+   507→// server eventually completes successfully.
+   508→//
+   509→// FIX: Split the extraction into 4 focused parallel LLM calls, each asking for
+   510→// only a subset of the data. Each call generates a much smaller JSON output, so
+   511→// each completes in ~10–15s. Running them in parallel means the total wall-clock
+   512→// time is the slowest call (~15s) instead of the sum (~60s) — comfortably under
+   513→// any gateway timeout.
+   514→//
+   515→// The 4 groups are chosen to balance output size and keep related sections
+   516→// together (e.g. work experience and eligibility are both on Sheet C2):
+   517→//   1. Personal info  (Sheet C1)
+   518→//   2. Educations     (Sheet C1)
+   519→//   3. Work + Eligibility (Sheet C2)
+   520→//   4. Training + Awards  (Sheet C3)
+   521→
+   522→/** Shared preamble for all per-section prompts. */
+   523→const PDS_PREAMBLE = `You are a document intelligence assistant for the DOST-MIRDC Recruitment Management Information System (RMIS).
+   524→Analyze the provided PDS (Philippine Civil Service Commission CSC Form 212 Revised 2017) spreadsheet content and extract structured information.
+   525→
+   526→CRITICAL RULES:
+   527→1. Extract ONLY information that is clearly present in the document.
+   528→2. NEVER fabricate, guess, or infer information that is not explicitly stated.
+   529→3. If a field cannot be found, set its value to null and confidence to "none".
+   530→4. Use confidence "high" only when the value is explicitly and unambiguously stated.
+   531→5. Use "medium" when the value is present but requires minor interpretation.
+   532→6. Use "low" when the value is implied or partially stated.
+   533→7. Return ONLY valid JSON (no markdown fences, no commentary).
+   534→8. "N/A" in a section means the applicant has no data — return an EMPTY array.
+   535→9. Dates may appear as full timestamps (e.g. "Mon Dec 01 2003 00:00:00 GMT+0000") — convert to "YYYY-MM-DD".`;
+   536→
+   537→/** Extract personal info + educations + work + eligibility from C1+C2 sheets. */
+   538→async function extractPdsCore(
+   539→  zai: Awaited<ReturnType<typeof ZAI.create>>,
+   540→  text: string
+   541→): Promise<Partial<ExtractionResult>> {
+   542→  const prompt = `${PDS_PREAMBLE}
+   543→
+   544→Extract these sections from the PDS:
+   545→
+   546→1. PERSONAL INFORMATION (Section I, Sheet C1): firstName, middleName, lastName, extensionName,
+   547→   emailAddress, mobileNumber, contactNumber, birthDate (YYYY-MM-DD), birthPlace, gender
+   548→   (Male/Female), civilStatus (Single/Married/Widowed/Separated), citizenship, presentAddress,
+   549→   city, province, country, zipCode.
+   550→
+   551→2. EDUCATIONAL BACKGROUND (Section III, Sheet C1): TABLE with one row per level
+   552→   (ELEMENTARY, SECONDARY, VOCATIONAL/TRADE COURSE, COLLEGE, GRADUATE STUDIES).
+   553→   Columns: LEVEL | NAME OF SCHOOL | DEGREE/COURSE | PERIOD (From, To) | UNITS EARNED |
+   554→   YEAR GRADUATED | HONORS. Create one entry per level with a real school name.
+   555→   Map: LEVEL→educationLevel, SCHOOL→schoolName, DEGREE/COURSE→degree, YEAR→yearGraduated,
+   556→   UNITS→unitsEarned, HONORS→awards.
+   557→
+   558→3. CIVIL SERVICE ELIGIBILITY (Section IV, Sheet C2): TABLE columns:
+   559→   CAREER SERVICE/RA 1080 | RATING | DATE OF EXAM | PLACE OF EXAM | LICENSE NUMBER | DATE OF VALIDITY
+   560→   Map to eligibilityTitle, rating, examDate, examPlace, licenseNumber, licenseValidity.
+   561→
+   562→4. WORK EXPERIENCE (Section V, Sheet C2): TABLE columns:
+   563→   From | To | POSITION TITLE | DEPARTMENT/COMPANY | OFFICE/UNIT | SUPERVISOR | SALARY | GRADE |
+   564→   STATUS | GOVT SERVICE (Y/N). Map positionTitle, employerName, employerAddress, inclusiveDateFrom,
+   565→   inclusiveDateTo, monthlySalary (number), statusOfEmployment, isGovtService (Yes→true), actualDuties.
+   566→
+   567→"N/A" means no data — return EMPTY array. Dates as "YYYY-MM-DD".
+   568→
+   569→Return ONLY this JSON:
+   570→{
+   571→  "personalInfo": {"firstName": {"value": null, "confidence": "none", "source": ""}, "middleName": {"value": null, "confidence": "none", "source": ""}, "lastName": {"value": null, "confidence": "none", "source": ""}, "extensionName": {"value": null, "confidence": "none", "source": ""}, "emailAddress": {"value": null, "confidence": "none", "source": ""}, "mobileNumber": {"value": null, "confidence": "none", "source": ""}, "contactNumber": {"value": null, "confidence": "none", "source": ""}, "birthDate": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "birthPlace": {"value": null, "confidence": "none", "source": ""}, "gender": {"value": null, "confidence": "none", "source": "Male or Female"}, "civilStatus": {"value": null, "confidence": "none", "source": ""}, "citizenship": {"value": null, "confidence": "none", "source": ""}, "presentAddress": {"value": null, "confidence": "none", "source": ""}, "city": {"value": null, "confidence": "none", "source": ""}, "province": {"value": null, "confidence": "none", "source": ""}, "country": {"value": null, "confidence": "none", "source": ""}, "zipCode": {"value": null, "confidence": "none", "source": ""}},
+   572→  "educations": [{"educationLevel": {"value": null, "confidence": "none", "source": ""}, "degree": {"value": null, "confidence": "none", "source": ""}, "course": {"value": null, "confidence": "none", "source": ""}, "schoolName": {"value": null, "confidence": "none", "source": ""}, "yearGraduated": {"value": null, "confidence": "none", "source": ""}, "unitsEarned": {"value": null, "confidence": "none", "source": ""}, "awards": {"value": null, "confidence": "none", "source": ""}}],
+   573→  "workExperiences": [{"positionTitle": {"value": null, "confidence": "none", "source": ""}, "employerName": {"value": null, "confidence": "none", "source": ""}, "employerAddress": {"value": null, "confidence": "none", "source": ""}, "inclusiveDateFrom": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "inclusiveDateTo": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "statusOfEmployment": {"value": null, "confidence": "none", "source": ""}, "monthlySalary": {"value": null, "confidence": "none", "source": 0}, "isGovtService": {"value": null, "confidence": "none", "source": false}, "actualDuties": {"value": null, "confidence": "none", "source": ""}}],
+   574→  "eligibilities": [{"eligibilityTitle": {"value": null, "confidence": "none", "source": ""}, "rating": {"value": null, "confidence": "none", "source": ""}, "examDate": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "examPlace": {"value": null, "confidence": "none", "source": ""}, "licenseNumber": {"value": null, "confidence": "none", "source": ""}, "licenseValidity": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}}]
+   575→}
+   576→
+   577→Parsed spreadsheet content:
+   578→---
+   579→${text}
+   580→---`;
+   581→
+   582→  const response = await zai.chat.completions.create({
+   583→    messages: [{ role: "user", content: prompt }],
+   584→  });
+   585→  const parsed = parseJsonResponse(response.choices[0]?.message?.content || "") as Partial<ExtractionResult>;
+   586→  return {
+   587→    personalInfo: parsed.personalInfo,
+   588→    educations: parsed.educations || [],
+   589→    workExperiences: parsed.workExperiences || [],
+   590→    eligibilities: parsed.eligibilities || [],
+   591→  };
+   592→}
+   593→
+   594→/** Extract trainings + awards from C3 sheet (the largest section — 18+ entries). */
+   595→async function extractPdsTrainingAwards(
+   596→  zai: Awaited<ReturnType<typeof ZAI.create>>,
+   597→  text: string
+   598→): Promise<Partial<ExtractionResult>> {
+   599→  const prompt = `${PDS_PREAMBLE}
+   600→
+   601→Extract these sections from the PDS. The content may include Sheet C3 (Page 3) AND
+   602→any CONTINUATION sheets/pages the applicant added for overflow entries.
+   603→
+   604→1. LEARNING AND DEVELOPMENT / TRAINING PROGRAMS (Section VII): TABLE columns:
+   605→   TITLE OF L&D/TRAINING | From | To | NUMBER OF HOURS | Type of LD (Managerial/Supervisory/Technical/etc)
+   606→   Create one entry per row. Map to titleOfTraining, typeOfTraining, inclusiveDateFrom,
+   607→   inclusiveDateTo, numberHours (number).
+   608→   IMPORTANT: continuation pages often repeat only the table (no section header) —
+   609→   treat every row shaped "title | date | date | hours" as a training entry.
+   610→
+   611→2. OTHER INFORMATION - NON-ACADEMIC DISTINCTIONS / RECOGNITION (Section VIII):
+   612→   List each recognition. Map to recognitionDetails, recognitionType ("Award" or "Recognition"),
+   613→   recognitionProvider, recognitionScope, recognitionCategory, dateGranted.
+   614→
+   615→"N/A" means no data — return EMPTY array. Dates as "YYYY-MM-DD".
+   616→
+   617→Return ONLY this JSON:
+   618→{
+   619→  "trainings": [{"titleOfTraining": {"value": null, "confidence": "none", "source": ""}, "typeOfTraining": {"value": null, "confidence": "none", "source": "Technical|Managerial/Supervisory|Orientation|Other"}, "inclusiveDateFrom": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "inclusiveDateTo": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}, "numberHours": {"value": null, "confidence": "none", "source": 0}}],
+   620→  "awards": [{"recognitionType": {"value": null, "confidence": "none", "source": "Award"}, "recognitionDetails": {"value": null, "confidence": "none", "source": ""}, "recognitionScope": {"value": null, "confidence": "none", "source": ""}, "recognitionCategory": {"value": null, "confidence": "none", "source": ""}, "recognitionProvider": {"value": null, "confidence": "none", "source": ""}, "dateGranted": {"value": null, "confidence": "none", "source": "YYYY-MM-DD"}}]
+
+[showing lines 1-620 of 1220; use offset=621 with limit to continue reading]

@@ -1,0 +1,713 @@
+     1→"use client";
+     2→
+     3→// ============================================================================
+     4→// RMIS — Applicant Home (premium scope)
+     5→// The dashboard speaks the SAME premium language as the profile: soft rounded
+     6→// cards (pui-card), layered elevation, ambient canvas wash, pill badges and
+     7→// rounded controls via the .premium data-slot hooks. Two-pane workspace: Open
+     8→// Positions (left, the scrollable browsing pane in the board job-card register)
+     9→// beside Your Applications (right, a sticky rail with its own overflow scroll).
+    10→// Clicking a rail card opens the Application Detail Modal — the complete
+    11→// posting with the Cancel Application action.
+    12→// ============================================================================
+    13→
+    14→import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
+    15→import { motion, AnimatePresence } from "motion/react";
+    16→import { useNav } from "@/components/nav-provider";
+    17→import { useSession } from "@/components/session-provider";
+    18→import { Reveal } from "@/components/ui/motion/reveal";
+    19→import { MagneticButton } from "@/components/ui/motion/magnetic-button";
+    20→import { useReducedMotion } from "@/hooks/use-reduced-motion";
+    21→import { apiFetch, formatDate, formatCurrency } from "@/lib/client";
+    22→import {
+    23→  stageForStatus,
+    24→  isRejectedStatus,
+    25→  isInReviewStatus,
+    26→  currentStageLabel,
+    27→} from "@/lib/status";
+    28→import { useRefetchOnFocus } from "@/hooks/use-refetch-on-focus";
+    29→import {
+    30→  TrackingTimeline,
+    31→  journeyTrackingSteps,
+    32→} from "@/components/primitives/tracking-timeline";
+    33→import {
+    34→  type Application as WireApplication,
+    35→  type Job as WireJob,
+    36→  type JobPosition as WireJobPosition,
+    37→} from "@/lib/wire";
+    38→import { humanizeTitle } from "@/lib/humanize";
+    39→import {
+    40→  FileText,
+    41→  MapPin,
+    42→  Clock,
+    43→  Info,
+    44→  ArrowRight,
+    45→  Briefcase,
+    46→  Plus,
+    47→  Minus,
+    48→  AlertCircle,
+    49→  ChevronRight,
+    50→} from "lucide-react";
+    51→import {
+    52→  Eyebrow,
+    53→  WorkspaceTitle,
+    54→  StatusIndicator,
+    55→  ErrorState,
+    56→  Skeleton,
+    57→} from "@/components/primitives/workspace";
+    58→import { Button } from "@/components/ui/button";
+    59→import { Badge } from "@/components/ui/badge";
+    60→import { ApplicationDetailModal } from "./application-detail-modal";
+    61→
+    62→// ---------- House motion ---------------------------------------------------
+    63→// Shared easing (matches /components/ui/motion primitives). Durations 0.4–0.9s,
+    64→// transform/opacity only. Motion + material per RMIS DESIGN.md.
+    65→const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+    66→
+    67→// FadeIn — gentle opacity entrance for loading/empty/error states.
+    68→function FadeIn({ children, className }: { children: ReactNode; className?: string }) {
+    69→  const reduced = useReducedMotion();
+    70→  if (reduced) return <div className={className}>{children}</div>;
+    71→  return (
+    72→    <motion.div
+    73→      className={className}
+    74→      initial={{ opacity: 0 }}
+    75→      animate={{ opacity: 1 }}
+    76→      transition={{ duration: 0.5, ease: EASE }}
+    77→    >
+    78→      {children}
+    79→    </motion.div>
+    80→  );
+    81→}
+    82→
+    83→// ---------- Types ----------
+    84→// Wire application — GET /api/applications (see @/lib/wire).
+    85→type ApplicantApplication = WireApplication;
+    86→
+    87→// Wire job (GET /api/jobs) — the exact slice the 02 board card register
+    88→// renders. Job-level `placeOfAssignment` is the canonical place;
+    89→// `position.placeOfAssignment` / `position.salaryStep` stay legacy optional
+    90→// reads (the jobs route keeps the place at JOB level and omits salaryStep
+    91→// from the wire), so the fallback paths behave exactly as on the board.
+    92→type JobListItem = Pick<
+    93→  WireJob,
+    94→  | "id"
+    95→  | "title"
+    96→  | "positionType"
+    97→  | "briefDescription"
+    98→  | "numberOfVacancy"
+    99→  | "publishDate"
+   100→  | "deadlineDate"
+   101→  | "placeOfAssignment"
+   102→> & {
+   103→  position: (WireJobPosition & {
+   104→    placeOfAssignment?: { name: string | null } | null;
+   105→    salaryStep?: string | null;
+   106→  }) | null;
+   107→};
+   108→
+   109→const PLACE_FALLBACK = "DOST Compound, Taguig";
+   110→
+   111→/** Display place — job-level record first, legacy nested read, then the
+   112→ *  agency address. ONE string, exactly like the 02 board card register. */
+   113→function jobPlace(job: JobListItem): string {
+   114→  return job.placeOfAssignment?.name ?? job.position?.placeOfAssignment?.name ?? PLACE_FALLBACK;
+   115→}
+   116→
+   117→// ---------- Journey timeline ----------------------------------------------
+   118→// REVISED WORKFLOW: the in-system journey ENDS at the shortlist email —
+   119→// everything after (document verification, interview) is coordinated offline
+   120→// by HR and is deliberately NOT a step in the portal timeline. The card
+   121→// renders the canonical delivery-tracking checkpoints via journeyTrackingSteps.
+   122→// The applicant-facing stage label ("Submitted" / "In Review" / "Shortlisted" /
+   123→// "Not Selected") comes from the shared currentStageLabel in @/lib/status.
+   124→
+   125→// Formal, production-grade status guidance — full sentences, addressed to the
+   126→// applicant, mirroring the tone of the automated email notices. Never dev
+   127→// shorthand ("HR will contact you" fragments, etc.): everything an applicant
+   128→// reads must stand on its own as official correspondence.
+   129→function nextStageHint(status: string | null): string {
+   130→  if (isRejectedStatus(status ?? "")) {
+   131→    return "Your application was not shortlisted for this position. You may still apply for other open positions.";
+   132→  }
+   133→  const stage = stageForStatus(status ?? "");
+   134→  if (stage === "Shortlisted") {
+   135→    return "A notice has been sent to your registered email address. The Human Resource Office will contact you regarding the next steps of the recruitment process.";
+   136→  }
+   137→  return isInReviewStatus(status ?? "")
+   138→    ? "The Human Resource Office is currently evaluating your application. You will be notified of the outcome."
+   139→    : "Your application has been received and is awaiting evaluation by the Human Resource Office.";
+   140→}
+   141→
+   142→// QuickFact — one definition-list cell of the card quick view: micro-kicker
+   143→// label over a semibold tabular value. `tone="danger"` flags a passed deadline.
+   144→// Ported verbatim from the 02 board (jobs-view).
+   145→function QuickFact({ label, value, tone }: { label: string; value: string; tone?: "danger" }) {
+   146→  return (
+   147→    <div>
+   148→      <dt className="kicker text-muted-foreground">{label}</dt>
+   149→      <dd
+   150→        className={`mt-1.5 break-words text-base font-semibold tabular-nums tracking-[-0.01em] ${
+   151→          tone === "danger" ? "text-danger-ink" : "text-foreground"
+   152→        }`}
+   153→      >
+   154→        {value}
+   155→      </dd>
+   156→    </div>
+   157→  );
+   158→}
+   159→
+   160→// ============================================================================
+   161→// ApplicantHome
+   162→// ============================================================================
+   163→export function ApplicantHome() {
+   164→  const { navigate } = useNav();
+   165→  const { user } = useSession();
+   166→
+   167→  const [apps, setApps] = useState<ApplicantApplication[]>([]);
+   168→  const [jobs, setJobs] = useState<JobListItem[]>([]);
+   169→  const [loading, setLoading] = useState(true);
+   170→  const [error, setError] = useState<string | null>(null);
+   171→  // Quick view — single-expand, exactly like the 02 board: opening one card
+   172→  // closes the previous one.
+   173→  const [expandedId, setExpandedId] = useState<number | null>(null);
+   174→  // Application detail modal — the rail card the applicant clicked; renders
+   175→  // the complete posting (board detail register) with the Cancel action.
+   176→  const [detailApp, setDetailApp] = useState<ApplicantApplication | null>(null);
+   177→
+   178→  const loadApps = useCallback(async (silent = false) => {
+   179→    if (!silent) {
+   180→      setLoading(true);
+   181→      setError(null);
+   182→    }
+   183→    try {
+   184→      const [a, j] = await Promise.all([
+   185→        apiFetch<ApplicantApplication[]>("/api/applications"),
+   186→        apiFetch<JobListItem[]>("/api/jobs"),
+   187→      ]);
+   188→      setApps(Array.isArray(a) ? a : []);
+   189→      setJobs(Array.isArray(j) ? j : []);
+   190→    } catch (e) {
+   191→      if (!silent) setError(e instanceof Error ? e.message : "Failed to load your portal.");
+   192→    } finally {
+   193→      if (!silent) setLoading(false);
+   194→    }
+   195→  }, []);
+   196→
+   197→  useEffect(() => { loadApps(); }, [loadApps]);
+   198→  // Realtime-lite: silent refetch on tab focus PLUS a gentle 15s poll while
+   199→  // the tab stays open — evaluator decisions (shortlist / return-to-review /
+   200→  // rejection) surface in the journey cards without any manual reload.
+   201→  useRefetchOnFocus(() => loadApps(true), { pollMs: 15_000 });
+   202→
+   203→  const firstName = user?.firstName || "there";
+   204→
+   205→  // Right rail — every application on record, newest first. The rail has its
+   206→  // own overflow scroll, so no cap is needed.
+   207→  const myApplications = [...apps]
+   208→    .sort((a, b) => {
+   209→      const ad = a.dateApplied ? new Date(a.dateApplied).getTime() : 0;
+   210→      const bd = b.dateApplied ? new Date(b.dateApplied).getTime() : 0;
+   211→      return bd - ad;
+   212→    });
+   213→
+   214→  // Left pane — every open posting (deadline not passed), newest published
+   215→  // first. This pane is the browsing surface: the full list scrolls in place.
+   216→  const now = Date.now();
+   217→  const openJobs = jobs
+   218→    .filter((job) => {
+   219→      if (!job.deadlineDate) return true;
+   220→      const d = new Date(job.deadlineDate).getTime();
+   221→      return !isNaN(d) && d >= now;
+   222→    })
+   223→    .sort((a, b) => {
+   224→      const ad = a.publishDate ? new Date(a.publishDate).getTime() : 0;
+   225→      const bd = b.publishDate ? new Date(b.publishDate).getTime() : 0;
+   226→      return bd - ad;
+   227→    });
+   228→
+   229→  const showProfileBanner = !!user && String(user.role) === "APPLICANT" && !user.applicant?.isProfileComplete;
+   230→
+   231→  if (loading) return <ApplicantHomeSkeleton />;
+   232→
+   233→  if (error) {
+   234→    return (
+   235→      <FadeIn className="mx-auto max-w-[1400px] 2xl:max-w-[1680px] px-4 py-12 sm:px-6 lg:px-8">
+   236→        <Eyebrow>Applicant Portal</Eyebrow>
+   237→        <div className="mt-3">
+   238→          <WorkspaceTitle title="Applicant Portal" />
+   239→        </div>
+   240→        <div className="pui-card mt-8">
+   241→          <ErrorState message={error} onRetry={() => window.location.reload()} />
+   242→        </div>
+   243→      </FadeIn>
+   244→    );
+   245→  }
+   246→
+   247→  return (
+   248→    <div className="premium relative min-h-screen bg-background text-foreground">
+   249→      {/* Ambient brand wash — the same primary glow the profile page carries,
+   250→          so every applicant surface shares one canvas language. */}
+   251→      <div
+   252→        aria-hidden
+   253→        className="pointer-events-none absolute inset-x-0 top-0 h-[420px]"
+   254→        style={{ backgroundImage: "var(--pui-canvas)" }}
+   255→      />
+   256→      <div className="relative z-10 mx-auto max-w-[1400px] 2xl:max-w-[1680px] px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
+   257→        {/* ===== Header — greeting ===== */}
+   258→        <header className="border-b border-border pb-8">
+   259→          <Eyebrow>Applicant Portal</Eyebrow>
+   260→          <div className="mt-3">
+   261→            <WorkspaceTitle
+   262→              title={`Welcome Back, ${firstName}`}
+   263→              description="Track your applications and discover new opportunities at DOST-MIRDC."
+   264→            />
+   265→          </div>
+   266→          {/* The one editorial moment — serif italic welcome line */}
+   267→          <p className="display-serif mt-4 text-lg italic text-muted-foreground">
+   268→            Your recruitment journey, structured and transparent.
+   269→          </p>
+   270→        </header>
+   271→
+   272→        {/* ===== Profile completion banner ===== */}
+   273→        {showProfileBanner && (
+   274→          <Reveal className="mt-8">
+   275→            <div className="flex flex-col items-start gap-4 rounded-[10px] border border-primary/15 bg-primary/[0.06] p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+   276→              <div className="flex items-start gap-4">
+   277→                <div className="grid size-11 shrink-0 place-items-center rounded-[0.875rem] bg-primary/10 text-primary">
+   278→                  <Info className="size-5" strokeWidth={1.5} />
+   279→                </div>
+   280→                <div>
+   281→                  <p className="text-sm font-semibold tracking-[-0.01em] text-foreground">Complete Your Profile</p>
+   282→                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+   283→                    Finish your applicant profile to apply for positions and speed up processing.
+   284→                  </p>
+   285→                </div>
+   286→              </div>
+   287→              <MagneticButton strength={0.25}>
+   288→                <Button onClick={() => navigate("profile")}>
+   289→                  Complete Profile
+   290→                  <ArrowRight className="size-4" />
+   291→                </Button>
+   292→              </MagneticButton>
+   293→            </div>
+   294→          </Reveal>
+   295→        )}
+   296→
+   297→        {/* ===== Two-pane workspace =======================================
+   298→             Left  · 03. Open Positions  — the scrollable browsing pane,
+   299→             rendered in the EXACT 02-board job-list card register (momentum
+   300→             rule · humanized title · pipe-separated vitals · square +/−
+   301→             quick-view toggle · in-place quick view with six QuickFacts).
+   302→             Right · 02. Your Applications — sticky rail with its own overflow
+   303→             scroll, so statuses stay in view while the applicant browses.
+   304→             Mobile: stacks Your Applications first, then Open Positions.
+   305→             ====================================================================== */}
+   306→        <div className="mt-12 grid grid-cols-1 gap-12 lg:grid-cols-12 lg:gap-8 2xl:gap-12">
+   307→          {/* ---- Right rail · 02. Your Applications (first on mobile) ---- */}
+   308→          <aside className="order-1 lg:order-2 lg:col-span-5 2xl:col-span-4">
+   309→            <div className="flex flex-col lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)]">
+   310→              {/* Rail header — pinned above the scrolling cards */}
+   311→              <Reveal className="flex shrink-0 items-end justify-between gap-2 border-b border-border pb-4">
+   312→                <div>
+   313→                  <Eyebrow>Your Applications</Eyebrow>
+   314→                  <h2 className="mt-2 text-2xl font-medium tracking-[-0.02em] text-foreground sm:text-3xl">
+   315→                    In Progress
+   316→                  </h2>
+   317→                </div>
+   318→              </Reveal>
+   319→
+   320→              {/* Independently scrollable application cards */}
+   321→              <div className="mt-6 min-h-0 flex-1 lg:overflow-y-auto lg:pr-1 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border">
+   322→                {myApplications.length === 0 ? (
+   323→                  <FadeIn className="pui-card p-10 text-center">
+   324→                    <div
+   325→                      data-slot="empty-result-icon"
+   326→                      className="mx-auto grid size-14 place-items-center"
+   327→                    >
+   328→                      <FileText className="size-7" strokeWidth={1.5} />
+   329→                    </div>
+   330→                    <h3 className="mt-5 text-xl font-medium tracking-[-0.01em] text-foreground">No applications yet</h3>
+   331→                    <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
+   332→                      Browse open positions to start your application journey.
+   333→                    </p>
+   334→                    <Button onClick={() => navigate("jobs")} className="group mx-auto mt-5">
+   335→                      <Briefcase className="size-4" /> Browse Positions
+   336→                      <ArrowRight className="size-4 transition-transform duration-200 group-hover:translate-x-1" />
+   337→                    </Button>
+   338→                  </FadeIn>
+   339→                ) : (
+   340→                  <div className="space-y-4 pb-1">
+   341→                    {myApplications.map((app, i) => (
+   342→                      <Reveal key={app.id} delay={Math.min(i, 4) * 0.06} y={20}>
+   343→                        <ApplicationJourneyCard app={app} index={i} onOpen={() => setDetailApp(app)} />
+   344→                      </Reveal>
+   345→                    ))}
+   346→                  </div>
+   347→                )}
+   348→              </div>
+   349→            </div>
+   350→          </aside>
+   351→
+   352→          {/* ---- Left pane · 03. Open Positions (browsing surface) ---- */}
+   353→          <section className="order-2 lg:order-1 lg:col-span-7 2xl:col-span-8">
+   354→            <Reveal className="flex items-end justify-between border-b border-border pb-4">
+   355→              <div>
+   356→                <Eyebrow>Open Positions</Eyebrow>
+   357→                <h2 className="mt-2 text-2xl font-medium tracking-[-0.02em] text-foreground sm:text-3xl">
+   358→                  Apply Now
+   359→                </h2>
+   360→              </div>
+   361→              {openJobs.length > 0 && (
+   362→                <Button
+   363→                  onClick={() => navigate("jobs")}
+   364→                  variant="outline"
+   365→                  size="sm"
+   366→                  className="group hidden sm:inline-flex"
+   367→                >
+   368→                  View All
+   369→                  <ArrowRight className="size-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+   370→                </Button>
+   371→              )}
+   372→            </Reveal>
+   373→
+   374→            <div className="mt-6">
+   375→              {openJobs.length === 0 ? (
+   376→                <FadeIn className="pui-card p-12 text-center">
+   377→                  <div
+   378→                    data-slot="empty-result-icon"
+   379→                    className="mx-auto grid size-14 place-items-center"
+   380→                  >
+   381→                    <Briefcase className="size-6" strokeWidth={1.5} />
+   382→                  </div>
+   383→                  <h3 className="mt-4 text-xl font-medium tracking-[-0.01em] text-foreground">No open positions</h3>
+   384→                  <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">New postings appear here as soon as they are published.</p>
+   385→                </FadeIn>
+   386→              ) : (
+   387→                <div className="space-y-4 sm:space-y-5">
+   388→                  {openJobs.map((job, i) => (
+   389→                    <Reveal key={job.id} delay={Math.min(i, 6) * 0.04} y={14}>
+   390→                      <JobListCard
+   391→                        job={job}
+   392→                        applied={apps.some((a) => a.job?.id === job.id)}
+   393→                        expanded={expandedId === job.id}
+   394→                        onToggle={() => setExpandedId(expandedId === job.id ? null : job.id)}
+   395→                        onOpen={() => navigate("jobs", { job: String(job.id) })}
+   396→                      />
+   397→                    </Reveal>
+   398→                  ))}
+   399→                </div>
+   400→              )}
+   401→            </div>
+   402→          </section>
+   403→        </div>
+   404→      </div>
+   405→
+   406→      {/* ===== Application Detail Modal — the complete posting the applicant
+   407→             applied to (board detail register: hero · summary grid · dates ·
+   408→             document sections) with the Cancel Application action. Cancelling
+   409→             removes the application; a silent refetch updates both panes. ===== */}
+   410→      <ApplicationDetailModal
+   411→        app={detailApp}
+   412→        open={!!detailApp}
+   413→        onOpenChange={(open) => { if (!open) setDetailApp(null); }}
+   414→        onCancelled={() => { setDetailApp(null); void loadApps(true); }}
+   415→      />
+   416→    </div>
+   417→  );
+   418→}
+   419→
+   420→// ============================================================================
+   421→// Application Journey Card — flat card with square journey rail. CLICKABLE:
+   422→// the whole card opens the Application Detail Modal (the complete posting in
+   423→// the board detail register + Cancel Application). The journey timeline +
+   424→// next-step guidance stay on the card (the standalone My Applications page
+   425→// was removed — the home rail is the single tracking surface).
+   426→// ============================================================================
+   427→function ApplicationJourneyCard({
+   428→  app,
+   429→  index,
+   430→  onOpen,
+   431→}: {
+   432→  app: ApplicantApplication;
+   433→  index: number;
+   434→  onOpen: () => void;
+   435→}) {
+   436→  const stageLabel = currentStageLabel(app.status);
+   437→  const nextHint = nextStageHint(app.status);
+   438→  const isRejected = isRejectedStatus(app.status);
+   439→  // Canonical delivery-tracking checkpoints.
+   440→  const journeySteps = journeyTrackingSteps(
+   441→    stageForStatus(app.status ?? ""),
+   442→    isRejected,
+   443→    isInReviewStatus(app.status ?? "")
+   444→  );
+   445→
+   446→  const positionTitle = app.job?.position?.positionTitle || app.job?.title || "Position Title Unavailable";
+   447→  const place = app.job?.position?.placeOfAssignment?.name || null;
+   448→
+   449→  return (
+   450→    <button
+   451→      type="button"
+   452→      onClick={onOpen}
+   453→      aria-haspopup="dialog"
+   454→      aria-label={`View complete posting and application details — ${humanizeTitle(positionTitle)}`}
+   455→      className="pui-card pui-card-interactive group flex h-full w-full cursor-pointer flex-col p-4 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:p-5"
+   456→    >
+   457→      {/* Header — the chevron is the whole-card affordance: the card opens
+   458→          the full posting in a modal (the board detail register, in-dialog). */}
+   459→      <div className="flex items-start justify-between gap-2">
+   460→        <span className="kicker text-muted-foreground">
+   461→          No. {String(index + 1).padStart(2, "0")}
+   462→        </span>
+   463→        <span className="flex shrink-0 items-center gap-1.5">
+   464→          {/* Rejected applications keep their danger tone even though the card
+   465→              shows the journey stage label ("Not Selected"). */}
+   466→          <StatusIndicator status={isRejected ? "Rejected" : stageLabel} size="sm" />
+   467→          <ChevronRight
+   468→            aria-hidden
+   469→            className="size-4 text-muted-foreground/60 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-primary"
+   470→            strokeWidth={2}
+   471→          />
+   472→        </span>
+   473→      </div>
+   474→      <h3 className="mt-3.5 text-lg font-medium leading-snug tracking-[-0.01em] text-foreground">
+   475→        {humanizeTitle(positionTitle)}
+   476→      </h3>
+   477→      {place && (
+   478→        <p className="mt-2 flex items-center gap-1.5 text-sm text-muted-foreground">
+   479→          <MapPin className="size-4" strokeWidth={1.5} /> {place}
+   480→        </p>
+   481→      )}
+   482→      <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+   483→        <Clock className="size-3.5" strokeWidth={1.5} /> Applied {formatDate(app.dateApplied)}
+   484→      </p>
+   485→
+   486→      {/* Journey timeline — delivery-tracking rail (✓ done · ● current · dashed ahead) */}
+   487→      <TrackingTimeline
+   488→        steps={journeySteps}
+   489→        ariaLabel="Application journey"
+   490→        className="mt-6"
+   491→      />
+   492→
+   493→      {/* Next hint — the card's closing block (the full posting lives one
+   494→          click away, in the application detail modal). */}
+   495→      {nextHint && (
+   496→        <div className="mt-6 border-t border-border pt-4">
+   497→          <p className="kicker text-muted-foreground">
+   498→            Next Step
+   499→          </p>
+   500→          <p className="mt-1 text-sm leading-relaxed text-foreground">{nextHint}</p>
+   501→        </div>
+   502→      )}
+   503→    </button>
+   504→  );
+   505→}
+   506→
+   507→// ============================================================================
+   508→// Job List Card — the 02 board card register, verbatim: momentum rule, humanized
+   509→// title + gold Applied badge, pipe-separated vitals, square blue "+/−" toggle
+   510→// and the in-place quick view (clamped description · six QuickFacts · actions).
+   511→// "Apply now" and "Read full description" both deep-link into the job's full
+   512→// posting on the 02 board, where the complete application flow (MQR check,
+   513→// confirmation, PDS fast-track) already lives — no duplicated apply logic.
+   514→// ============================================================================
+   515→function JobListCard({
+   516→  job,
+   517→  applied,
+   518→  expanded,
+   519→  onToggle,
+   520→  onOpen,
+   521→}: {
+   522→  job: JobListItem;
+   523→  applied: boolean;
+   524→  expanded: boolean;
+   525→  onToggle: () => void;
+   526→  onOpen: () => void;
+   527→}) {
+   528→  const reduced = useReducedMotion();
+   529→  const pos = job.position;
+   530→  const title = pos?.positionTitle || job.title || "Position Title Unavailable";
+   531→  const place = jobPlace(job);
+   532→  const salary = pos?.salaryAmount;
+   533→  const deadline = job.deadlineDate;
+   534→  const overdue = deadline ? new Date(deadline).getTime() < Date.now() : false;
+   535→
+   536→  // Meta — pipe-separated vitals, the Accenture card register
+   537→  // (place | type | pay | closes); overdue flips the closer to red.
+   538→  const meta: { label: string; className?: string }[] = [
+   539→    { label: place },
+   540→  ];
+   541→  if (job.positionType) meta.push({ label: job.positionType });
+   542→  if (salary != null) meta.push({ label: `${formatCurrency(salary)} monthly`, className: "tabular-nums" });
+   543→  meta.push({
+   544→    label: overdue ? "Closed" : deadline ? `Closes ${formatDate(deadline)}` : "Open until filled",
+   545→    className: overdue ? "font-semibold text-danger-ink" : "tabular-nums",
+   546→  });
+   547→
+   548→  return (
+   549→    <div className="pui-card pui-card-interactive group relative overflow-hidden">
+   550→      {/* Momentum rule — brand bar wipes in across the card on hover */}
+   551→      <span
+   552→        aria-hidden
+   553→        className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 origin-left scale-x-0 bg-primary transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:scale-x-100"
+   554→      />
+   555→      <div className="flex items-stretch">
+   556→        <button
+   557→          onClick={onToggle}
+   558→          aria-expanded={expanded}
+   559→          aria-label={expanded ? `Collapse — ${title}` : `Expand — ${title}`}
+   560→          className="min-w-0 flex-1 px-6 py-7 text-left sm:px-10 sm:py-8"
+   561→        >
+   562→          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+   563→            <h3 className="min-w-0 text-xl font-medium leading-snug tracking-[-0.01em] text-foreground sm:text-2xl">
+   564→              {humanizeTitle(title)}
+   565→            </h3>
+   566→            {applied && <Badge variant="success" className="shrink-0">Applied</Badge>}
+   567→          </div>
+   568→          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-base text-muted-foreground">
+   569→            {meta.map((m, idx) => (
+   570→              <Fragment key={idx}>
+   571→                {idx > 0 && <span aria-hidden className="select-none text-muted-foreground/50">|</span>}
+   572→                <span className={m.className}>{m.label}</span>
+   573→              </Fragment>
+   574→            ))}
+   575→          </div>
+   576→        </button>
+   577→        <div className="flex shrink-0 items-center pr-4 sm:pr-6">
+   578→          <button
+   579→            onClick={onToggle}
+   580→            aria-expanded={expanded}
+   581→            aria-label={expanded ? `Hide quick view — ${title}` : `Quick view — ${title}`}
+   582→            className="grid size-11 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-all duration-200 hover:bg-primary-hover active:scale-[0.97]"
+   583→          >
+   584→            {/* Pill "+ / −" toggle — the quick-view affordance in the
+   585→                spec's pill control register (matches the 02 board). */}
+   586→            {expanded ? (
+   587→              <Minus className="size-5" strokeWidth={2.5} />
+   588→            ) : (
+   589→              <Plus className="size-5" strokeWidth={2.5} />
+   590→            )}
+   591→          </button>
+   592→        </div>
+   593→      </div>
+   594→
+   595→      {/* Quick view — inline expansion, identical to the 02 board register:
+   596→          the clicked card opens IN PLACE with a clamped job description and
+   597→          the position's vital facts. SMOOTH HEIGHT GLIDE: AnimatePresence
+   598→          animates height 0 → auto (and back) over 0.34s with the Accenture
+   599→          house ease. Reduced-motion users get a plain opacity crossfade. */}
+   600→      <AnimatePresence initial={false}>
+   601→        {expanded && (
+   602→          <motion.div
+   603→            key="quickview"
+   604→            initial={reduced ? { opacity: 0 } : { height: 0, opacity: 0 }}
+   605→            animate={reduced ? { opacity: 1 } : { height: "auto", opacity: 1 }}
+   606→            exit={reduced ? { opacity: 0 } : { height: 0, opacity: 0 }}
+   607→            transition={
+   608→              reduced
+   609→                ? { duration: 0.15, ease: "linear" }
+   610→                : { duration: 0.34, ease: [0.22, 1, 0.36, 1] }
+   611→            }
+   612→            className="overflow-hidden"
+   613→          >
+   614→            <div className="border-t border-border px-6 pb-8 pt-6 sm:px-10">
+   615→              {job.briefDescription && (
+   616→                <div>
+   617→                  <h4 className="text-lg font-medium tracking-[-0.01em] text-foreground">
+   618→                    Job description
+   619→                  </h4>
+   620→                  <p className="mt-2 line-clamp-5 text-base leading-relaxed text-muted-foreground">
+   621→                    {job.briefDescription}
+   622→                  </p>
+   623→                </div>
+   624→              )}
+   625→              <dl className="mt-6 grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3 xl:grid-cols-6">
+   626→                <QuickFact label="Item No." value={pos?.itemNumber || "—"} />
+   627→                <QuickFact label="Vacancies" value={job.numberOfVacancy != null ? String(job.numberOfVacancy) : "—"} />
+   628→                <QuickFact
+   629→                  label="Salary Grade"
+   630→                  value={pos?.salaryGrade ? `SG ${pos.salaryGrade}${pos.salaryStep ? `/${pos.salaryStep}` : ""}` : "—"}
+   631→                />
+   632→                <QuickFact label="Monthly Salary" value={salary != null ? formatCurrency(salary) : "—"} />
+   633→                <QuickFact label="Published" value={formatDate(job.publishDate)} />
+   634→                <QuickFact label="Deadline" value={formatDate(job.deadlineDate)} tone={overdue ? "danger" : undefined} />
+   635→              </dl>
+   636→              <div className="mt-7 flex flex-wrap items-center gap-3">
+   637→                {applied ? (
+   638→                  <Badge variant="success">Applied — track it on your Home</Badge>
+   639→                ) : (
+   640→                  <Button onClick={onOpen} disabled={overdue}>
+   641→                    Apply now
+   642→                    <ArrowRight className="size-4" />
+   643→                  </Button>
+   644→                )}
+   645→                {/* Read full description — deep-links into the complete
+   646→                    posting on the 02 board (label + square chevron block). */}
+   647→                <button
+   648→                  onClick={onOpen}
+   649→                  className="group/link inline-flex min-h-12 items-center gap-3 text-sm font-medium text-foreground transition-colors hover:text-primary"
+   650→                >
+   651→                  Read full description
+   652→                  <span className="grid size-8 place-items-center rounded-full bg-primary text-primary-foreground transition-colors duration-200 group-hover/link:bg-primary-hover">
+   653→                    <ArrowRight
+   654→                      className="size-4 transition-transform duration-200 group-hover/link:translate-x-0.5"
+   655→                      strokeWidth={2.5}
+   656→                    />
+   657→                  </span>
+   658→                </button>
+   659→                {overdue && !applied && (
+   660→                  <span className="flex items-center gap-1.5 text-xs font-semibold text-danger-ink">
+   661→                    <AlertCircle className="size-3.5" strokeWidth={1.5} />
+   662→                    Deadline passed
+   663→                  </span>
+   664→                )}
+   665→              </div>
+   666→            </div>
+   667→          </motion.div>
+   668→        )}
+   669→      </AnimatePresence>
+   670→    </div>
+   671→  );
+   672→}
+   673→
+   674→// ============================================================================
+   675→// Skeleton
+   676→// ============================================================================
+   677→function ApplicantHomeSkeleton() {
+   678→  return (
+   679→    <FadeIn className="mx-auto max-w-[1400px] 2xl:max-w-[1680px] px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
+   680→      <div className="border-b border-border pb-8">
+   681→        <Skeleton className="h-3 w-32" />
+   682→        <Skeleton className="mt-3 h-16 w-3/4" />
+   683→        <Skeleton className="mt-4 h-4 w-1/2" />
+   684→      </div>
+   685→      {/* Two-pane skeleton — positions (left, board-register rows) · applications (right) */}
+   686→      <div className="mt-12 grid grid-cols-1 gap-12 lg:grid-cols-12 lg:gap-8 2xl:gap-12">
+   687→        <div className="order-2 space-y-4 lg:order-1 lg:col-span-7 2xl:col-span-8">
+   688→          <Skeleton className="h-3 w-48" />
+   689→          <Skeleton className="h-10 w-40" />
+   690→          <div className="space-y-4 sm:space-y-5">
+   691→            {[0, 1, 2, 3, 4].map((i) => (
+   692→              <div key={i} className="flex items-center gap-5 rounded-2xl border border-border bg-card px-6 py-7 sm:px-10">
+   693→                <div className="min-w-0 flex-1 space-y-3.5">
+   694→                  <div className="h-7 w-3/4 animate-pulse rounded-md bg-muted" />
+   695→                  <div className="h-5 w-1/2 animate-pulse rounded-md bg-muted" />
+   696→                </div>
+   697→                <div className="size-11 shrink-0 animate-pulse rounded-xl bg-primary/20" />
+   698→              </div>
+   699→            ))}
+   700→          </div>
+   701→        </div>
+   702→        <div className="order-1 space-y-4 lg:order-2 lg:col-span-5 2xl:col-span-4">
+   703→          <Skeleton className="h-3 w-40" />
+   704→          <Skeleton className="h-10 w-36" />
+   705→          {[0, 1, 2].map((i) => (
+   706→            <Skeleton key={i} className="h-64" />
+   707→          ))}
+   708→        </div>
+   709→      </div>
+   710→    </FadeIn>
+   711→  );
+   712→}
+   713→

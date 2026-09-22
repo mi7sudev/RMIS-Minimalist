@@ -1,0 +1,282 @@
+     1→# AUDIT REPORT — Applicant Profile Forms vs Production DB Schema
+     2→
+     3→**Task ID:** AUDIT-APPLICANT-FORMS-1
+     4→**System:** RMIS — Recruitment Management & Information System (DOST-MIRDC)
+     5→**Stack:** Next.js 16 + Prisma 6.11.1 + SQLite (Strapi v5 production DB)
+     6→**Scope:** Personal Info, Education, Work Experience, Training, Eligibility, Awards, Extraction review
+     7→**DB verified:** `/home/z/my-project/db/production-data.db` (read-only)
+     8→**Source of truth for schema:** `/tmp/db-schema.txt` (95 tables, real production columns)
+     9→
+    10→---
+    11→
+    12→## 1. Executive Summary
+    13→
+    14→**Overall status: ❌ NOT COMPATIBLE — must be fixed before swapping in the real production DB.**
+    15→
+    16→The Prisma schema faithfully maps every production column (verified field-by-field for all in-scope tables). However, the **form ↔ API ↔ DB round-trip is broken in 5 critical ways** that will cause HTTP 500 errors, silent data loss, or HTTP 400 validation failures in normal applicant usage.
+    17→
+    18→| Severity | Count | Examples |
+    19→|---|---|---|
+    20→| ❌ Critical (production-breaking) | **5** | `mobileNumber` BigInt JSON-serialization crash, `isPWD`↔`isPwd` key mismatch, Zod `.datetime()` rejecting HTML `<input type="date">` values across 4 forms |
+    21→| ⚠️ Warning (fragile / data-quality) | **9** | BigInt phone loses leading `0`/`+`, eligibility title invisible for existing prod data, missing link-table writes, enum-set drift |
+    22→| 🕳️ Missing form fields (DB column has no UI) | **30+** | nickname, height, weight, blood_type, all govt-ID fields, all permanent-address fields, supervisor_name/office/reason_for_leaving, specify_training, award_type, recognition_subcategory, etc. |
+    23→| ✅ Prisma schema vs DB schema | **100% match** | Every column in `applicants`, `applicant_educations`, `applicant_work_experiences`, `applicant_trainings`, `applicant_eligibilities`, `applicant_awards` is mapped 1:1 via `@map`/`@@map`. |
+    24→
+    25→### Top 5 critical issues (must-fix before swap)
+    26→
+    27→1. **`mobileNumber` BigInt crashes JSON response** — Any applicant whose `mobile_number` column is non-null (today: applicants #369 and #555 — Aldwin Jara) causes `GET /api/applicant/profile` to throw `TypeError: Do not know how to serialize a BigInt` because `NextResponse.json` calls `JSON.stringify`. The `handleApi` wrapper converts this to an HTTP 500 and the user is permanently locked out of the Profile page. Saving a mobile number from the form also crashes the PUT response for the same reason.
+    28→2. **`isPWD` (frontend) vs `isPwd` (Prisma/DB)** — The form state key, the Profile type, and the API request body all use `isPWD` (capital D). The Prisma field and the API whitelist use `isPwd` (lowercase d, matching DB column `is_pwd`). The whitelist guard `if (k in data)` fails for `isPwd` because the data has `isPWD`. PWD status is **never saved** and **never loaded** (the GET response uses Prisma's `isPwd` key, but the form reads `profileData.isPWD` which is `undefined`, so it always defaults to `false`).
+    29→3. **Zod `.datetime()` rejects HTML `<input type="date">` values** — `z.string().datetime()` (used in `educationSchema.yearFrom/yearTo`, `workExperienceSchema.inclusiveDateFrom/To`, `trainingSchema.inclusiveDateFrom/To`, `eligibilitySchema.examDate/licenseValidity`, `awardSchema.dateGranted`, and the inline `eligibilityInputSchema` in the eligibilities route) only accepts strings matching `YYYY-MM-DDTHH:mm:ss[.sss]Z` (UTC mandatory, no offsets). HTML date inputs produce `"2025-12-31"`, which fails validation with `"Invalid ISO datetime"`. Verified empirically. Every date the applicant enters in Work, Training, Eligibility, or Awards forms returns HTTP 400 `"Invalid input"`.
+    30→4. **`mobile_number` (bigint) silently corrupts phone numbers** — The form accepts free-text `"09XXXXXXXXX"` or `"+63…"`. Prisma coerces these to BigInt (`9XXXXXXXXX` or `63…`), dropping leading `0` and `+`. Verified by writing `"09123456789"` to the DB and reading back `9123456789n`. Non-numeric strings throw a Prisma error → HTTP 500.
+    31→5. **Existing production eligibility titles are invisible** — Production stores the eligibility-title link in `specific_eligibilities_applicant_eligibility_lnk` (12 rows). The loader (`loadApplicantEligibilities`) and the form/API only read/write `applicant_eligibilities_eligibility_category_lnk` (0 rows in production). Existing eligibility entries loaded from the production DB show `eligibilityTitle: null` in the UI — every existing eligibility appears with a blank title.
+    32→
+    33→---
+    34→
+    35→## 2. Per-Section Findings
+    36→
+    37→Legend: ✅ compatible · ⚠️ fragile · ❌ broken
+    38→
+    39→### A) Personal Info — `applicants` table
+    40→
+    41→Form: `src/components/views/profile/personal-info-section.tsx`
+    42→Hook: `src/components/views/profile/use-profile-data.ts` (savePersonal, lines 148-196)
+    43→API: `src/app/api/applicant/profile/route.ts` (GET, PUT)
+    44→Auto-apply: `src/app/api/applicant/profile/auto-apply/route.ts`
+    45→
+    46→| Form field (form key) | DB column | DB type | Prisma field | Status |
+    47→|---|---|---|---|---|
+    48→| firstName | first_name | varchar(255) | firstName | ✅ |
+    49→| middleName | middle_name | varchar(255) | middleName | ✅ |
+    50→| lastName | last_name | varchar(255) | lastName | ✅ |
+    51→| extensionName | extension_name | varchar(255) | extensionName | ✅ |
+    52→| emailAddress | email_address | varchar(255) | emailAddress | ✅ |
+    53→| mobileNumber | mobile_number | **bigint** | mobileNumber: BigInt? | ❌ see #1, #4 below |
+    54→| contactNumber | contact_number | varchar(255) | contactNumber | ✅ |
+    55→| birthDate | birth_date | date (TEXT) | birthDate: String? | ✅ form sends "YYYY-MM-DD", API keeps as string |
+    56→| birthPlace | birth_place | TEXT | birthPlace | ✅ |
+    57→| gender | gender | varchar(255) | gender | ✅ "Male"/"Female" match production distinct values |
+    58→| civilStatus | civil_status | varchar(255) | civilStatus | ✅ Single/Married/Widowed/Separated/Divorced all acceptable (production has only Single/Married today) |
+    59→| citizenship | citizenship | varchar(255) | citizenship | ✅ |
+    60→| religion | religion | varchar(255) | religion | ✅ |
+    61→| **isPWD** (uppercase D) | is_pwd | boolean | **isPwd** (lowercase d) | ❌ see #2 below — key mismatch breaks both load and save |
+    62→| ethnicity | ethnicity | varchar(255) | ethnicity | ✅ |
+    63→| presentAddress | present_address | varchar(255) | presentAddress | ✅ |
+    64→| city | city | varchar(255) | city | ✅ |
+    65→| province | province | varchar(255) | province | ✅ |
+    66→| country | country | varchar(255) | country | ✅ |
+    67→| zipCode | zip_code | TEXT | zipCode | ✅ |
+    68→| adminCase | admin_case | boolean | adminCase | ✅ |
+    69→| adminCaseDetails | admin_case_details | varchar(255) | adminCaseDetails | ✅ |
+    70→| crimeCharge | crime_charge | boolean | crimeCharge | ✅ |
+    71→| crimeDate | crime_date | date (TEXT) | crimeDate: String? | ✅ form sends "YYYY-MM-DD", API keeps as string |
+    72→| crimeCaseStatus | crime_case_status | varchar(255) | crimeCaseStatus | ✅ |
+    73→| characterReferences (JSON string) | character_reference | json | characterReference: Unsupported("json")? | ⚠️ see #6 below — written via raw SQL, no schema validation on inner shape |
+    74→
+    75→#### Critical issues for Personal Info
+    76→
+    77→1. **❌ `mobileNumber` BigInt JSON-serialization crash.**
+    78→   - File: `src/app/api/applicant/profile/route.ts` line 49 (GET) and line 124 (PUT).
+    79→   - Cause: `NextResponse.json({...applicant, ...})` calls `JSON.stringify`. BigInt values throw `TypeError: Do not know how to serialize a BigInt`. Verified by direct test.
+    80→   - Impact today: applicants #369 and #555 (Aldwin Jara) cannot load their profile page. After any user saves a mobile number, they cannot reload their profile (permanent lockout, HTTP 500).
+    81→   - Fix: Convert `mobileNumber` to a string before responding. Either:
+    82→     - Add `BigInt.prototype.toJSON = function() { return this.toString() }` polyfill in `src/lib/db.ts` (global, simplest), OR
+    83→     - In the GET/PUT handlers, return `mobileNumber: applicant.mobileNumber?.toString() ?? null` explicitly, OR
+    84→     - Change the Prisma field type from `BigInt?` to `String?` (NOT RECOMMENDED — would alter schema, breaks the `bigint` SQLite affinity).
+    85→
+    86→2. **❌ `isPWD` ↔ `isPwd` key mismatch.**
+    87→   - Files: `src/components/views/profile/types.ts` line 80 (`isPWD: boolean`); `src/components/views/profile/use-profile-data.ts` line 88 (`isPWD: profileData.isPWD ?? false`) and line 165 (`isPWD: !!personalForm.isPWD`); `src/components/views/profile/personal-info-section.tsx` lines 217, 219 (`form.isPWD`, `onChange("isPWD", ...)`); `src/app/api/applicant/profile/route.ts` line 79 (whitelist contains `"isPwd"` lowercase).
+    88→   - Cause: The DB column is `is_pwd` (snake_case); Prisma generates `isPwd` (camelCase). The form author used `isPWD` (treating PWD as an acronym). The API whitelist iterates `isPwd` and checks `if (k in data)` — but `data` contains `isPWD`, so the check fails and the field is silently dropped from the update. On load, the API response uses Prisma's `isPwd` key, but the Profile type expects `isPWD`, so `profileData.isPWD` is `undefined` and the form initializes to `false`.
+    89→   - Impact: PWD status is **never persisted** and **never loaded**. For a government system, this is a regulatory/data-integrity failure (PWD applicants get no PWD benefits tracking).
+    90→   - Fix: Standardize on `isPwd` (matching Prisma/DB). Change `src/components/views/profile/types.ts` line 80, `src/components/views/profile/use-profile-data.ts` lines 88 & 165, `src/components/views/profile/personal-info-section.tsx` lines 217 & 219 to use `isPwd` everywhere.
+    91→
+    92→3. **❌ `mobile_number` BigInt loses leading `0` and `+`.**
+    93→   - File: `src/components/views/profile/use-profile-data.ts` line 157 (`mobileNumber: personalForm.mobileNumber || null` — sends string); `src/app/api/applicant/profile/route.ts` lines 95-101 (passes string through to Prisma); auto-apply route line 178 (passes VLM-extracted string through).
+    94→   - Cause: DB column type is `bigint` (SQLite INTEGER affinity). Prisma converts strings via `BigInt(...)` which silently drops leading zeros and the `+` prefix. Verified: `"09123456789"` → `9123456789n`; `"+639171234567"` → `639171234567n`; `"not-a-number"` → Prisma error `invalid digit found in string` (HTTP 500).
+    95→   - Impact: PDS mobile numbers in the Philippines universally start with `0` (e.g., `0917XXX`). Storing as BigInt loses the `0`. This also makes the stored value inconsistent with `contact_number` (varchar) which preserves the `0`.
+    96→   - Fix (lowest-risk): In the PUT route, coerce `mobileNumber` to `BigInt` server-side after stripping non-digits: `if (typeof v === "string" && k === "mobileNumber") v = v.replace(/[^0-9]/g, "") || null;` — but this STILL loses leading zero. **Better:** propose treating the column as TEXT in Prisma (`mobileNumber String? @map("mobile_number")`) — Prisma will still read/write the SQLite INTEGER column as a string. (This requires no DB migration; SQLite type affinity allows it.) **Or:** store the full E.164 string in `contact_number` (already TEXT) and stop writing `mobile_number` from the form.
+    97→   - Recommended immediate fix: Document the limitation, store the digit-only value in `mobile_number` (BigInt) AND store the human-readable `"0917XXX"` in `contact_number` (TEXT) — which is what production already does (see applicant 369: `mobile_number=9977583493`, `contact_number="09977583493"`).
+    98→
+    99→#### Warnings for Personal Info
+   100→
+   101→4. **⚠️ Form lacks PDS fields the production DB stores.** The DB has 30+ optional personal columns the form does not collect (nickname, telephone_number, contact_number_secondary, height, weight, blood_type, naturalized, publication, pagibig, gsis, philhealth, tin, sss, govt_issued_id, govt_id_issued_number, govt_id_issued_place, govt_id_date_issued, govt_id_valid_until, house_number, street, subdivision, barangay, permanent_house_number, permanent_street, permanent_subdivision, permanent_barangay, permanent_city, permanent_province, permanent_country, permanent_telephone_number, permanent_zip_code, place_of_birth, respondent_to, specify_referral, pending_cases). The API whitelist (route.ts lines 74-91) correctly allows these, so the form could send them — but no UI exists. None are NOT NULL, so no DB errors. Recommend: add a "Complete PDS" expandable section for full PDS data.
+   102→
+   103→5. **⚠️ `birth_place` vs `place_of_birth` — production has both, form uses only `birth_place`.**
+   104→   - DB has `birth_place TEXT` AND `place_of_birth TEXT`. Production data: 12 rows have `birth_place`, 2 rows have `place_of_birth` (1 row has both). The form populates only `birth_place`. Strapi likely renamed the column at some point and kept both. Prisma models both.
+   105→   - Recommendation: Acceptable as-is (form uses the more-populated column). Document the duplicate.
+   106→
+   107→6. **⚠️ `character_reference` JSON written via raw SQL with no inner-shape validation.**
+   108→   - File: `src/app/api/applicant/profile/route.ts` lines 106-110.
+   109→   - The form serializes the `CharacterReference[]` array via `JSON.stringify` and sends it as a string. The API re-stringifies and writes via `db.$executeRaw`. The DB column is `json` (SQLite). Prisma cannot read it back as a typed field, so the GET route uses `getApplicantCharacterReference` (raw-json helper) and `JSON.parse`.
+   110→   - Risk: any malformed JSON sent by a buggy client will be stored as-is and crash the GET route's `JSON.parse` (which is wrapped in try/catch — line 42-46 — so it degrades gracefully to `null`).
+   111→   - Production data verified: the format matches (array of `{name, title, company, companyAddress, email, contact}` objects). ✅ compatible.
+   112→
+   113→---
+   114→
+   115→### B) Education — `applicant_educations` + `courses` + `courses_applicant_education_lnk`
+   116→
+   117→Form: `src/components/views/profile/education-section.tsx`
+   118→API: `src/app/api/applicant/educations/route.ts`, `[id]/route.ts`
+   119→API validation: `src/lib/validation.ts` → `educationSchema`
+   120→
+   121→| Form field | DB column | DB type | Prisma field | Status |
+   122→|---|---|---|---|---|
+   123→| educationLevel | education_level | TEXT | educationLevel | ⚠️ form option "Vocational/Trade Course" not in production distinct values (Elementary/College/Post-Graduate/High School) — would introduce a new value, breaking filters |
+   124→| course (label "Course / Degree") | course | TEXT | course | ✅ free-text; production has values like "Bachelor of Science in Information Technology" |
+   125→| (none — `degree` not in form) | degree | TEXT | degree | 🕳️ Missing form field. DB column exists; form's `course` field is labeled "Course / Degree" but only writes `course`. The API does write `degree: d.degree || null` (line 35), but the form never sends `degree`. |
+   126→| schoolName | school_name | TEXT | schoolName | ✅ |
+   127→| yearGraduated | year_graduated | TEXT | yearGraduated | ✅ form sends free-text year like "2023"; production has "2006", "2014", "2020" — match |
+   128→| unitsEarned | units_earned | TEXT | unitsEarned | ✅ |
+   129→| awards | awards | TEXT | awards | ✅ |
+   130→| (none) | specify_others | TEXT | specifyOthers | 🕳️ Missing form field. API writes it (line 37) but form doesn't send. |
+   131→| (none) | ongoing | boolean | ongoing | 🕳️ Missing form field. API defaults to `false` (line 39). |
+   132→| (none) | is_highest_education | boolean | isHighestEducation | 🕳️ Missing form field. API defaults to `false` (line 40). |
+   133→| (none) | highest_level | TEXT | highestLevel | 🕳️ Missing form field. |
+   134→| (none) | year_from | date | yearFrom | 🕳️ Missing form field. Production has 0 non-null rows (unused). Zod schema declares `z.string().datetime()` for it — would fail validation if anyone tried to send an HTML date. |
+   135→| (none) | year_to | date | yearTo | 🕳️ Missing form field. Same as yearFrom. |
+   136→| (none) | hrRemarks | TEXT | hrRemarks | 🕳️ Missing form field (admin/HR only). API writes it. |
+   137→
+   138→#### Critical issues for Education
+   139→
+   140→None — the education form round-trips correctly for the fields it covers.
+   141→
+   142→#### Warnings for Education
+   143→
+   144→7. **⚠️ Link table `courses_applicant_education_lnk` is NOT written by the API.**
+   145→   - File: `src/app/api/applicant/educations/route.ts` lines 32-54.
+   146→   - Production data: 12 rows in `courses_applicant_education_lnk` linking educations to the `courses` reference table (488 rows). Production uses this link to power course-category analytics.
+   147→   - Form: free-text `course` field (no dropdown), so no `courseId` to link.
+   148→   - API: only writes `applicant_educations_applicant_id_lnk` (the applicant→education link), never the course link.
+   149→   - Impact: form-created education records cannot be filtered/grouped by reference course. Existing production records DO have the link (so they'll show alongside new records but the new ones won't be in the same join).
+   150→   - Recommendation: Add an optional course dropdown (populated from `/api/reference` → `courses`) to the form. When `courseId` is provided, write to `courses_applicant_education_lnk` after creating the education.
+   151→
+   152→8. **⚠️ `education_level` enum drift — form adds "Vocational/Trade Course" not seen in production.**
+   153→   - File: `src/components/views/profile/education-section.tsx` line 188.
+   154→   - Production distinct values: Elementary, College, Post-Graduate, High School. Form adds "Vocational/Trade Course". This will create a new value not in existing reports/dashboards.
+   155→   - Recommendation: Either drop the option, or confirm with HR that Vocational is a valid new level.
+   156→
+   157→---
+   158→
+   159→### C) Work Experience — `applicant_work_experiences`
+   160→
+   161→Form: `src/components/views/profile/work-experience-section.tsx`
+   162→API: `src/app/api/applicant/work-experiences/route.ts`, `[id]/route.ts`
+   163→API validation: `src/lib/validation.ts` → `workExperienceSchema`
+   164→
+   165→| Form field | DB column | DB type | Prisma field | Status |
+   166→|---|---|---|---|---|
+   167→| positionTitle | position_title | TEXT | positionTitle | ✅ |
+   168→| employerName | employer_name | TEXT | employerName | ✅ |
+   169→| employerAddress | employer_address | TEXT | employerAddress | ✅ |
+   170→| inclusiveDateFrom | inclusive_date_from | datetime (epoch ms) | inclusiveDateFrom: DateTime? | ❌ Zod `.datetime()` rejects HTML date "2025-12-31" → HTTP 400 |
+   171→| inclusiveDateTo | inclusive_date_to | datetime (epoch ms) | inclusiveDateTo: DateTime? | ❌ same as above |
+   172→| isPresentWork | is_present_work | boolean | isPresentWork | ✅ form sends "Yes"/"No" → API converts to boolean |
+   173→| statusOfEmployment | status_of_employment | TEXT | statusOfEmployment | ⚠️ form has 6 options, production has 2 (Contract of Service, Regular). New values will be created. |
+   174→| monthlySalary | monthly_salary | float | monthlySalary: Float? | ✅ form sends Number(...) → API accepts number |
+   175→| isGovtService | is_govt_service | boolean | isGovtService | ✅ |
+   176→| actualDuties | actual_duties | TEXT | actualDuties | ✅ |
+   177→| (none) | supervisor_name | varchar(255) | supervisorName | 🕳️ Missing form field. API writes it (line 62) but form doesn't send. PDS requires this field. |
+   178→| (none) | supervisor_position | TEXT | supervisorPosition | 🕳️ Missing form field. |
+   179→| (none) | office | TEXT | office | 🕳️ Missing form field. |
+   180→| (none) | reason_for_leaving | TEXT | reasonForLeaving | 🕳️ Missing form field. |
+   181→| (none) | accomplishment | TEXT | accomplishment | 🕳️ Missing form field. |
+   182→| (none) | hrRemarks | TEXT | hrRemarks | 🕳️ Missing form field (admin/HR only). |
+   183→| (computed by API) | year_decimal | float | yearDecimal | ✅ API computes from inclusiveDateFrom/To (line 51) |
+   184→
+   185→#### Critical issues for Work Experience
+   186→
+   187→9. **❌ Zod `.datetime()` rejects HTML date inputs for `inclusiveDateFrom`/`inclusiveDateTo`.**
+   188→   - File: `src/lib/validation.ts` lines 53-54 (`inclusiveDateFrom: z.string().datetime().optional().nullable()`).
+   189→   - Cause: HTML `<input type="date">` produces `"2025-12-31"` (date-only). `z.string().datetime()` requires `YYYY-MM-DDTHH:mm:ss[.sss]Z` (UTC mandatory, no offsets accepted in Zod 4). Verified: `z.string().datetime().safeParse("2025-12-31")` returns `{success: false, ...}`.
+   190→   - Impact: every Work Experience submission with a date entered returns HTTP 400 `"Invalid input"` with the Zod error details. The applicant cannot save any work experience entry with a date.
+   191→   - Fix: Change the Zod schema to accept HTML date strings:
+   192→     ```ts
+   193→     inclusiveDateFrom: z.union([z.string().datetime(), z.string().date()]).optional().nullable(),
+   194→     inclusiveDateTo:   z.union([z.string().datetime(), z.string().date()]).optional().nullable(),
+   195→     ```
+   196→     Or use `z.coerce.date().optional().nullable()` and let Prisma accept Date objects. Or convert the form's date strings to ISO datetime on the client before sending.
+   197→
+   198→#### Warnings for Work Experience
+   199→
+   200→10. **⚠️ `status_of_employment` enum drift.** Form has 6 options (Regular, Temporary, Contract of Service, Contractual, Job Order, Government Internship Program); production has 2 (Regular, Contract of Service). New values will be created. Recommendation: align with CSC-recognized employment types or confirm with HR.
+   201→
+   202→11. **⚠️ Missing PDS work-experience fields.** `supervisor_name`, `supervisor_position`, `office`, `reason_for_leaving`, `accomplishment` are all part of CSC Form 212's work-experience section. The DB columns exist and the API accepts them, but the form has no UI. Recommend adding these fields to the work-experience dialog.
+   203→
+   204→---
+   205→
+   206→### D) Training — `applicant_trainings`
+   207→
+   208→Form: `src/components/views/profile/training-section.tsx`
+   209→API: `src/app/api/applicant/trainings/route.ts`, `[id]/route.ts`
+   210→API validation: `src/lib/validation.ts` → `trainingSchema`
+   211→
+   212→| Form field | DB column | DB type | Prisma field | Status |
+   213→|---|---|---|---|---|
+   214→| titleOfTraining | title_of_training | TEXT | titleOfTraining | ✅ |
+   215→| typeOfTraining | type_of_training | TEXT | typeOfTraining | ⚠️ form has 4 options (Technical, Managerial/Supervisory, Orientation, Other); production has 2 (Technical, Managerial/Supervisory). New values will be created. |
+   216→| inclusiveDateFrom | inclusive_date_from | datetime (epoch ms) | inclusiveDateFrom: DateTime? | ❌ Zod `.datetime()` rejects HTML date — HTTP 400 |
+   217→| inclusiveDateTo | inclusive_date_to | datetime (epoch ms) | inclusiveDateTo: DateTime? | ❌ same |
+   218→| numberHours | number_hours | INTEGER | numberHours: Int? | ✅ form sends Number(...) → API accepts |
+   219→| (none) | is_present_work | boolean | isPresentWork | 🕳️ Missing form field. API defaults to `false` (line 38). |
+   220→| (none) | is_govt_service | boolean | isGovtService | 🕳️ Missing form field. API defaults to `false` (line 39). |
+   221→| (none) | specify_training | TEXT | specifyTraining | 🕳️ Missing form field. API writes it (line 41) but form doesn't send. |
+   222→| (none) | hrRemarks | TEXT | hrRemarks | 🕳️ Missing form field (admin/HR only). |
+   223→| (computed by API) | hour_decimal | float | hourDecimal | ✅ API defaults to `numberHours` value (line 43) |
+   224→
+   225→#### Critical issues for Training
+   226→
+   227→12. **❌ Zod `.datetime()` rejects HTML date inputs for `inclusiveDateFrom`/`inclusiveDateTo`.**
+   228→    - File: `src/lib/validation.ts` lines 66-67.
+   229→    - Same root cause and impact as Work Experience issue #9.
+   230→    - Fix: Same as #9.
+   231→
+   232→#### Warnings for Training
+   233→
+   234→13. **⚠️ `type_of_training` enum drift.** Form has 4 options; production has 2. Recommendation: align.
+   235→
+   236→14. **⚠️ Missing `is_present_work` and `is_govt_service` form fields.** These are PDS-required boolean flags. The DB has the columns; the API accepts them with `false` defaults. The work-experience form HAS these fields, but the training form does not. Inconsistent UX.
+   237→
+   238→---
+   239→
+   240→### E) Eligibility — `applicant_eligibilities` + `eligibilities` + `specific_eligibilities` + 3 link tables
+   241→
+   242→Form: `src/components/views/profile/eligibility-section.tsx`
+   243→API: `src/app/api/applicant/eligibilities/route.ts` (custom inline `eligibilityInputSchema`), `[id]/route.ts`
+   244→
+   245→| Form field | DB column | DB type | Prisma field | Status |
+   246→|---|---|---|---|---|
+   247→| eligibilityTitle | (no column) — derived from linked `eligibilities.name` | — | (computed) | ❌ see #15 below — broken for existing production data |
+   248→| (none) | (linked via `applicant_eligibilities_eligibility_category_lnk`) | link table | (no DB column) | ❌ production uses `specific_eligibilities_applicant_eligibility_lnk` instead — see #15 |
+   249→| rating | rating | TEXT | rating | ✅ |
+   250→| examDate | exam_date | datetime (epoch ms) | examDate: DateTime? | ❌ Zod `.datetime()` rejects HTML date — HTTP 400 |
+   251→| examPlace | exam_place | TEXT | examPlace | ✅ |
+   252→| licenseNumber | license_number | TEXT | licenseNumber | ✅ |
+   253→| licenseValidity | license_validity | datetime (epoch ms) | licenseValidity: DateTime? | ❌ Zod `.datetime()` rejects HTML date — HTTP 400 |
+   254→| (none) | hrRemarks | TEXT | hrRemarks | 🕳️ Missing form field (admin/HR only). |
+   255→
+   256→#### Critical issues for Eligibility
+   257→
+   258→15. **❌ Existing production eligibility entries show blank titles.**
+   259→    - Files: `src/lib/applicant-data.ts` lines 62-101 (`loadApplicantEligibilities`); `src/app/api/applicant/eligibilities/route.ts` lines 68-78 (linking logic).
+   260→    - Cause: Production stores the eligibility-title link in `specific_eligibilities_applicant_eligibility_lnk` (verified: 12+ rows). The loader queries only `applicant_eligibilities_eligibility_category_lnk` (verified: 0 rows). The loader sets `eligibilityTitle = catById.get(catId) ?? null` — but `catId` is `null` for all production rows because their links are in the other table. So every existing eligibility returns `eligibilityTitle: null`.
+   261→    - Impact: applicants who already have eligibility records (from the old Strapi system) see blank titles for all of them in the Profile UI.
+   262→    - Fix: Update `loadApplicantEligibilities` to ALSO query `specific_eligibilities_applicant_eligibility_lnk` + `specific_eligibilities` (the production link path) and merge the title. Specifically, after the existing category-link lookup, query `db.specificEligibilityApplicantEligibilityLink.findMany({ where: { applicantEligibilityId: { in: ids } } })` + `db.specificEligibility.findMany(...)` and fall back to that title when the category-link title is null.
+   263→
+   264→16. **❌ Zod `.datetime()` rejects HTML date inputs for `examDate`/`licenseValidity`.**
+   265→    - File: `src/app/api/applicant/eligibilities/route.ts` lines 23-24 (inline `eligibilityInputSchema`).
+   266→    - Same root cause and impact as #9.
+   267→    - Fix: Same as #9. Also: the inline schema duplicates `eligibilitySchema` from `validation.ts` — consolidate.
+   268→
+   269→17. **❌ Form never sends `eligibilityId` — title-link is fragile name-based lookup.**
+   270→    - File: `src/components/views/profile/eligibility-section.tsx` lines 90-97 (submit payload — only `eligibilityTitle`); API `src/app/api/applicant/eligibilities/route.ts` lines 71-78.
+   271→    - Cause: The form's dropdown sends the eligibility NAME as `eligibilityTitle`, not the eligibility ID. The API tries `db.eligibility.findFirst({ where: { name: d.eligibilityTitle } })` to find the matching row — but `eligibilities.name` has duplicates (verified: "Career Service Professional" exists as id=7 AND id=8; "None Required" exists as id=1 AND id=9). `findFirst` returns whichever row Prisma picks first, which may not match the user's intent.
+   272→    - Impact: Form submissions create category links to arbitrary duplicate `eligibilities` rows. Also, if the user types a custom title that doesn't match any row, NO link is created and the title is silently lost (the response returns `d.eligibilityTitle ?? null`, but nothing is persisted).
+   273→    - Fix: Add `eligibilityId` to the form payload (send the selected dropdown's `id`). Use `eligibilityId` directly for the category link; only fall back to name lookup if `eligibilityId` is missing.
+   274→
+   275→#### Warnings for Eligibility
+   276→
+   277→18. **⚠️ Form doesn't write to `specific_eligibilities_applicant_eligibility_lnk`.**
+   278→    - Same root cause as #15 but in the write direction. New eligibility records created by the form link via the wrong (empty) link table. New records will show their title correctly (because the loader reads `eligibilities.name` from `applicant_eligibilities_eligibility_category_lnk`), but they will be inconsistent with existing production data which uses `specific_eligibilities`.
+   279→    - Recommendation: Either (a) write to BOTH link tables (compatibility with both old and new data), or (b) decide on one canonical link table and migrate production data to it (NOT RECOMMENDED — DB is read-only).
+   280→
+
+[showing lines 1-280 of 596; use offset=281 with limit to continue reading]

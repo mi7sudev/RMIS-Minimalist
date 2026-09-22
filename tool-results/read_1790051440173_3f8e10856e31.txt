@@ -1,0 +1,631 @@
+     1→     1→// Applicant aggregate helpers — load child records (educations, work
+     2→     2→// experiences, trainings, eligibilities, awards) for an applicant via the
+     3→     3→// explicit junction tables. The production schema does NOT use Prisma relations
+     4→     4→// for these — every m2m is stored in an explicit `*_lnk` table.
+     5→     5→//
+     6→     6→// Each loader returns the child rows already joined with the link row's
+     7→     7→// `*_ord` so callers can preserve the schema's manual ordering.
+     8→     8→
+     9→     9→import { db } from "@/lib/db";
+    10→    10→import { getApplicantCharacterReference } from "@/lib/raw-json";
+    11→    11→
+    12→    12→// ---- Educations ----
+    13→    13→export async function loadApplicantEducations(applicantId: number) {
+    14→    14→  const links = await db.applicantEducationLink.findMany({
+    15→    15→    where: { applicantId },
+    16→    16→    orderBy: { applicantEducationOrd: "asc" },
+    17→    17→  });
+    18→    18→  if (!links.length) return [];
+    19→    19→  const ids = links.map((l) => l.applicantEducationId).filter((x): x is number => x != null);
+    20→    20→  const rows = await db.applicantEducation.findMany({ where: { id: { in: ids } } });
+    21→    21→  const byId = new Map(rows.map((r) => [r.id, r]));
+    22→    22→  return links
+    23→    23→    .map((l) => (l.applicantEducationId ? byId.get(l.applicantEducationId) : undefined))
+    24→    24→    .filter((x): x is NonNullable<typeof x> => x != null);
+    25→    25→}
+    26→    26→
+    27→    27→// ---- Work Experiences ----
+    28→    28→export async function loadApplicantWorkExperiences(applicantId: number) {
+    29→    29→  const links = await db.applicantWorkExperienceLink.findMany({
+    30→    30→    where: { applicantId },
+    31→    31→    orderBy: { applicantWorkExperienceOrd: "asc" },
+    32→    32→  });
+    33→    33→  if (!links.length) return [];
+    34→    34→  const ids = links.map((l) => l.applicantWorkExperienceId).filter((x): x is number => x != null);
+    35→    35→  const rows = await db.applicantWorkExperience.findMany({ where: { id: { in: ids } } });
+    36→    36→  const byId = new Map(rows.map((r) => [r.id, r]));
+    37→    37→  return links
+    38→    38→    .map((l) => (l.applicantWorkExperienceId ? byId.get(l.applicantWorkExperienceId) : undefined))
+    39→    39→    .filter((x): x is NonNullable<typeof x> => x != null);
+    40→    40→}
+    41→    41→
+    42→    42→// ---- Trainings ----
+    43→    43→export async function loadApplicantTrainings(applicantId: number) {
+    44→    44→  const links = await db.applicantTrainingLink.findMany({
+    45→    45→    where: { applicantId },
+    46→    46→    orderBy: { applicantTrainingOrd: "asc" },
+    47→    47→  });
+    48→    48→  if (!links.length) return [];
+    49→    49→  const ids = links.map((l) => l.applicantTrainingId).filter((x): x is number => x != null);
+    50→    50→  const rows = await db.applicantTraining.findMany({ where: { id: { in: ids } } });
+    51→    51→  const byId = new Map(rows.map((r) => [r.id, r]));
+    52→    52→  return links
+    53→    53→    .map((l) => (l.applicantTrainingId ? byId.get(l.applicantTrainingId) : undefined))
+    54→    54→    .filter((x): x is NonNullable<typeof x> => x != null);
+    55→    55→}
+    56→    56→
+    57→    57→// ---- Eligibilities (with linked category name from `eligibilities` table) ----
+    58→    58→export type ApplicantEligibilityWithCategory = Awaited<
+    59→    59→  ReturnType<typeof loadApplicantEligibilities>
+    60→    60→>[number];
+    61→    61→
+    62→    62→export async function loadApplicantEligibilities(applicantId: number) {
+    63→    63→  const links = await db.applicantEligibilityLink.findMany({
+    64→    64→    where: { applicantId },
+    65→    65→    orderBy: { applicantEligibilityOrd: "asc" },
+    66→    66→  });
+    67→    67→  if (!links.length) return [];
+    68→    68→  const ids = links.map((l) => l.applicantEligibilityId).filter((x): x is number => x != null);
+    69→    69→  const [rows, categoryLinks] = await Promise.all([
+    70→    70→    db.applicantEligibility.findMany({ where: { id: { in: ids } } }),
+    71→    71→    db.applicantEligibilityCategoryLink.findMany({
+    72→    72→      where: { applicantEligibilityId: { in: ids } },
+    73→    73→    }),
+    74→    74→  ]);
+    75→    75→  // Map each applicant_eligibility → its first linked eligibility category name
+    76→    76→  const eligibilityIds = Array.from(
+    77→    77→    new Set(categoryLinks.map((c) => c.eligibilityId).filter((x): x is number => x != null))
+    78→    78→  );
+    79→    79→  const categories = eligibilityIds.length
+    80→    80→    ? await db.eligibility.findMany({ where: { id: { in: eligibilityIds } } })
+    81→    81→    : [];
+    82→    82→  const catById = new Map(categories.map((c) => [c.id, c.name]));
+    83→    83→  const catLinkByApplElig = new Map<number, number | null>();
+    84→    84→  for (const cl of categoryLinks) {
+    85→    85→    if (cl.applicantEligibilityId == null) continue;
+    86→    86→    if (!catLinkByApplElig.has(cl.applicantEligibilityId)) {
+    87→    87→      catLinkByApplElig.set(cl.applicantEligibilityId, cl.eligibilityId);
+    88→    88→    }
+    89→    89→  }
+    90→    90→  const byId = new Map(rows.map((r) => [r.id, r]));
+    91→    91→  return links
+    92→    92→    .map((l) => {
+    93→    93→      if (!l.applicantEligibilityId) return undefined;
+    94→    94→      const row = byId.get(l.applicantEligibilityId);
+    95→    95→      if (!row) return undefined;
+    96→    96→      const catId = catLinkByApplElig.get(row.id) ?? null;
+    97→    97→      const eligibilityTitle = catId != null ? catById.get(catId) ?? null : null;
+    98→    98→      return { ...row, eligibilityTitle };
+    99→    99→    })
+   100→   100→    .filter((x): x is NonNullable<typeof x> => x != null);
+   101→   101→}
+   102→   102→
+   103→   103→/**
+   104→   104→ * Backfill `eligibilityTitle` for eligibility items whose title is still null.
+   105→   105→ *
+   106→   106→ * Production stores the title link in `specific_eligibilities_applicant_eligibility_lnk`
+   107→   107→ * (not in `applicant_eligibilities_eligibility_category_lnk`, which has 0 rows in
+   108→   108→ * production). This resolves the title via the path:
+   109→   109→ *
+   110→   110→ *   specific_eligibilities_applicant_eligibility_lnk
+   111→   111→ *     → specific_eligibilities (name)             ← prefer this
+   112→   112→ *     → specific_eligibilities_eligibility_lnk
+   113→   113→ *         → eligibilities (name)                  ← fallback
+   114→   114→ *
+   115→   115→ * Only items whose title is still null are touched, so newly-created entries
+   116→   116→ * (which write to the category link) keep working. Patches items in place.
+   117→   117→ */
+   118→   118→export async function fillEligibilityTitleFromSpecificLinks<
+   119→   119→  T extends { id: number; eligibilityTitle: string | null }
+   120→   120→>(items: T[]): Promise<void> {
+   121→   121→  const aeIds = items.filter((it) => it.eligibilityTitle == null).map((it) => it.id);
+   122→   122→  if (!aeIds.length) return;
+   123→   123→
+   124→   124→  const specificLinks = await db.specificEligibilityApplicantEligibilityLink.findMany({
+   125→   125→    where: { applicantEligibilityId: { in: aeIds } },
+   126→   126→    orderBy: { specificEligibilityOrd: "asc" },
+   127→   127→  });
+   128→   128→  if (!specificLinks.length) return;
+   129→   129→
+   130→   130→  const specificIds = Array.from(
+   131→   131→    new Set(
+   132→   132→      specificLinks
+   133→   133→        .map((l) => l.specificEligibilityId)
+   134→   134→        .filter((x): x is number => x != null)
+   135→   135→    )
+   136→   136→  );
+   137→   137→  const [specifics, specificEligLinks] = await Promise.all([
+   138→   138→    specificIds.length
+   139→   139→      ? db.specificEligibility.findMany({ where: { id: { in: specificIds } } })
+   140→   140→      : [],
+   141→   141→    specificIds.length
+   142→   142→      ? db.specificEligibilityEligibilityLink.findMany({
+   143→   143→          where: { specificEligibilityId: { in: specificIds } },
+   144→   144→          orderBy: { specificEligibilityOrd: "asc" },
+   145→   145→        })
+   146→   146→      : [],
+   147→   147→  ]);
+   148→   148→
+   149→   149→  const specNameById = new Map<number, string | null>(
+   150→   150→    specifics.map((s) => [s.id, s.name] as [number, string | null])
+   151→   151→  );
+   152→   152→  // First specificEligibilityId per applicantEligibilityId (lowest ord).
+   153→   153→  const firstSpecByAe = new Map<number, number | null>();
+   154→   154→  for (const sl of specificLinks) {
+   155→   155→    if (sl.applicantEligibilityId == null) continue;
+   156→   156→    if (!firstSpecByAe.has(sl.applicantEligibilityId)) {
+   157→   157→      firstSpecByAe.set(sl.applicantEligibilityId, sl.specificEligibilityId);
+   158→   158→    }
+   159→   159→  }
+   160→   160→  // First eligibilityId per specificEligibilityId (lowest ord).
+   161→   161→  const firstEligBySpec = new Map<number, number | null>();
+   162→   162→  for (const sel of specificEligLinks) {
+   163→   163→    if (sel.specificEligibilityId == null) continue;
+   164→   164→    if (!firstEligBySpec.has(sel.specificEligibilityId)) {
+   165→   165→      firstEligBySpec.set(sel.specificEligibilityId, sel.eligibilityId);
+   166→   166→    }
+   167→   167→  }
+   168→   168→  const eligIds = Array.from(
+   169→   169→    new Set(
+   170→   170→      Array.from(firstEligBySpec.values()).filter(
+   171→   171→        (x): x is number => x != null
+   172→   172→      )
+   173→   173→    )
+   174→   174→  );
+   175→   175→  const eligibilities = eligIds.length
+   176→   176→    ? await db.eligibility.findMany({ where: { id: { in: eligIds } } })
+   177→   177→    : [];
+   178→   178→  const eligNameById = new Map(eligibilities.map((e) => [e.id, e.name]));
+   179→   179→
+   180→   180→  for (const it of items) {
+   181→   181→    if (it.eligibilityTitle != null) continue;
+   182→   182→    const specId = firstSpecByAe.get(it.id) ?? null;
+   183→   183→    if (specId == null) continue;
+   184→   184→    // Prefer specific_eligibilities.name (e.g. "RA7883 Barangay Health Worker").
+   185→   185→    const specName = specNameById.get(specId) ?? null;
+   186→   186→    if (specName) {
+   187→   187→      it.eligibilityTitle = specName;
+   188→   188→      continue;
+   189→   189→    }
+   190→   190→    // Fallback: chain through specific_eligibilities_eligibility_lnk → eligibilities.name.
+   191→   191→    const eligId = firstEligBySpec.get(specId) ?? null;
+   192→   192→    if (eligId != null) {
+   193→   193→      it.eligibilityTitle = eligNameById.get(eligId) ?? null;
+   194→   194→    }
+   195→   195→  }
+   196→   196→}
+   197→   197→
+   198→   198→// ---- Awards ----
+   199→   199→export async function loadApplicantAwards(applicantId: number) {
+   200→   200→  const links = await db.applicantAwardLink.findMany({
+   201→   201→    where: { applicantId },
+   202→   202→    orderBy: { applicantAwardOrd: "asc" },
+   203→   203→  });
+   204→   204→  if (!links.length) return [];
+   205→   205→  const ids = links.map((l) => l.applicantAwardId).filter((x): x is number => x != null);
+   206→   206→  const rows = await db.applicantAward.findMany({ where: { id: { in: ids } } });
+   207→   207→  const byId = new Map(rows.map((r) => [r.id, r]));
+   208→   208→  return links
+   209→   209→    .map((l) => (l.applicantAwardId ? byId.get(l.applicantAwardId) : undefined))
+   210→   210→    .filter((x): x is NonNullable<typeof x> => x != null);
+   211→   211→}
+   212→   212→
+   213→   213→// ---- Documents (filesystem-based; see /api/applicant/documents) ----
+   214→   214→// The production DB does NOT have a dedicated `documents` table — uploaded
+   215→   215→// files live in `files` with a polymorphic relation in `files_related_mph`.
+   216→   216→// For now we list documents from the `upload/` directory filtered by applicant.
+   217→   217→// This is a known limitation; document metadata is not persisted in the DB.
+   218→   218→
+   219→   219→// ---- Full profile aggregate (for MQR verification + application snapshots) ----
+   220→   220→export type ApplicantFullProfile = {
+   221→   221→  id: number;
+   222→   222→  firstName: string | null;
+   223→   223→  middleName: string | null;
+   224→   224→  lastName: string | null;
+   225→   225→  extensionName: string | null;
+   226→   226→  emailAddress: string | null;
+   227→   227→  contactNumber: string | null;
+   228→   228→  mobileNumber: bigint | null;
+   229→   229→  gender: string | null;
+   230→   230→  civilStatus: string | null;
+   231→   231→  citizenship: string | null;
+   232→   232→  birthDate: string | null;
+   233→   233→  birthPlace: string | null;
+   234→   234→  presentAddress: string | null;
+   235→   235→  city: string | null;
+   236→   236→  province: string | null;
+   237→   237→  country: string | null;
+   238→   238→  zipCode: string | null;
+   239→   239→  isFillouted: boolean | null;
+   240→   240→  characterReferenceRaw: string | null;
+   241→   241→  educations: Awaited<ReturnType<typeof loadApplicantEducations>>;
+   242→   242→  workExperiences: Awaited<ReturnType<typeof loadApplicantWorkExperiences>>;
+   243→   243→  trainings: Awaited<ReturnType<typeof loadApplicantTrainings>>;
+   244→   244→  eligibilities: Awaited<ReturnType<typeof loadApplicantEligibilities>>;
+   245→   245→  awards: Awaited<ReturnType<typeof loadApplicantAwards>>;
+   246→   246→};
+   247→   247→
+   248→   248→export async function loadApplicantFullProfile(applicantId: number): Promise<ApplicantFullProfile | null> {
+   249→   249→  const applicant = await db.applicant.findUnique({ where: { id: applicantId } });
+   250→   250→  if (!applicant) return null;
+   251→   251→  // Use allSettled for the same resilience as the profile route — a single
+   252→   252→  // corrupted section should not prevent the full-profile snapshot from loading.
+   253→   253→  const settled = await Promise.allSettled([
+   254→   254→    loadApplicantEducations(applicantId),
+   255→   255→    loadApplicantWorkExperiences(applicantId),
+   256→   256→    loadApplicantTrainings(applicantId),
+   257→   257→    loadApplicantEligibilities(applicantId),
+   258→   258→    loadApplicantAwards(applicantId),
+   259→   259→  ]);
+   260→   260→  const educations = settled[0].status === "fulfilled" ? settled[0].value : [];
+   261→   261→  const workExperiences = settled[1].status === "fulfilled" ? settled[1].value : [];
+   262→   262→  const trainings = settled[2].status === "fulfilled" ? settled[2].value : [];
+   263→   263→  const eligibilities = settled[3].status === "fulfilled" ? settled[3].value : [];
+   264→   264→  const awards = settled[4].status === "fulfilled" ? settled[4].value : [];
+   265→   265→  // raw-json functions are synchronous (better-sqlite3 is sync)
+   266→   266→  const characterReferenceRaw = getApplicantCharacterReference(applicantId);
+   267→   267→  return {
+   268→   268→    id: applicant.id,
+   269→   269→    firstName: applicant.firstName,
+   270→   270→    middleName: applicant.middleName,
+   271→   271→    lastName: applicant.lastName,
+   272→   272→    extensionName: applicant.extensionName,
+   273→   273→    emailAddress: applicant.emailAddress,
+   274→   274→    contactNumber: applicant.contactNumber,
+   275→   275→    mobileNumber: applicant.mobileNumber,
+   276→   276→    gender: applicant.gender,
+   277→   277→    civilStatus: applicant.civilStatus,
+   278→   278→    citizenship: applicant.citizenship,
+   279→   279→    birthDate: applicant.birthDate,
+   280→   280→    birthPlace: applicant.birthPlace,
+   281→   281→    presentAddress: applicant.presentAddress,
+   282→   282→    city: applicant.city,
+   283→   283→    province: applicant.province,
+   284→   284→    country: applicant.country,
+   285→   285→    zipCode: applicant.zipCode,
+   286→   286→    isFillouted: applicant.isFillouted,
+   287→   287→    characterReferenceRaw,
+   288→   288→    educations,
+   289→   289→    workExperiences,
+   290→   290→    trainings,
+   291→   291→    eligibilities,
+   292→   292→    awards,
+   293→   293→  };
+   294→   294→}
+   295→   295→
+   296→   296→// ---- Junction-table link creators (call after creating a child row) ----
+   297→   297→export async function linkEducationToApplicant(applicantEducationId: number, applicantId: number) {
+   298→   298→  return db.applicantEducationLink.create({
+   299→   299→    data: { applicantEducationId, applicantId, applicantEducationOrd: Date.now() },
+   300→   300→  });
+   301→   301→}
+   302→   302→
+   303→   303→export async function linkWorkExperienceToApplicant(applicantWorkExperienceId: number, applicantId: number) {
+   304→   304→  return db.applicantWorkExperienceLink.create({
+   305→   305→    data: { applicantWorkExperienceId, applicantId, applicantWorkExperienceOrd: Date.now() },
+   306→   306→  });
+   307→   307→}
+   308→   308→
+   309→   309→export async function linkTrainingToApplicant(applicantTrainingId: number, applicantId: number) {
+   310→   310→  return db.applicantTrainingLink.create({
+   311→   311→    data: { applicantTrainingId, applicantId, applicantTrainingOrd: Date.now() },
+   312→   312→  });
+   313→   313→}
+   314→   314→
+   315→   315→export async function linkEligibilityToApplicant(applicantEligibilityId: number, applicantId: number) {
+   316→   316→  return db.applicantEligibilityLink.create({
+   317→   317→    data: { applicantEligibilityId, applicantId, applicantEligibilityOrd: Date.now() },
+   318→   318→  });
+   319→   319→}
+   320→   320→
+   321→   321→export async function linkAwardToApplicant(applicantAwardId: number, applicantId: number) {
+   322→   322→  return db.applicantAwardLink.create({
+   323→   323→    data: { applicantAwardId, applicantId, applicantAwardOrd: Date.now() },
+   324→   324→  });
+   325→   325→}
+   326→   326→
+   327→   327→// Optionally link an ApplicantEligibility to a category (Eligibility row).
+   328→   328→// Production stores this in `applicant_eligibilities_eligibility_category_lnk`.
+   329→   329→export async function linkEligibilityToCategory(applicantEligibilityId: number, eligibilityId: number) {
+   330→   330→  return db.applicantEligibilityCategoryLink.create({
+   331→   331→    data: { applicantEligibilityId, eligibilityId },
+   332→   332→  });
+   333→   333→}
+   334→   334→
+   335→   335→/**
+   336→   336→ * Find-or-create the `eligibilities` reference row that carries an applicant
+   337→   337→ * eligibility's TITLE (the ApplicantEligibility table has no title column —
+   338→   338→ * the title lives on the linked Eligibility row via the category link).
+   339→   339→ *
+   340→   340→ * Previously the lookup-only version silently DROPPED any title that wasn't
+   341→   341→ * already in the reference vocabulary, so titles typed through the profile
+   342→   342→ * form (or extracted from a PDS) vanished from the list after a reload.
+   343→   343→ * This now creates the missing reference row, so every title persists.
+   344→   344→ *
+   345→   345→ * Created rows are DRAFTS (publishedAt left null): they resolve for the
+   346→   346→ * owner's own list (loadApplicantEligibilities does not filter published)
+   347→   347→ * but do NOT leak into the public /api/reference dropdown other applicants
+   348→   348→ * see. Published vocabulary rows are only ever matched, never duplicated.
+   349→   349→ */
+   350→   350→export async function findOrCreateEligibilityReference(
+   351→   351→  name: string
+   352→   352→): Promise<number> {
+   353→   353→  const trimmed = name.trim();
+   354→   354→  const existing = await db.eligibility.findFirst({ where: { name: trimmed } });
+   355→   355→  if (existing) return existing.id;
+   356→   356→  const now = new Date();
+   357→   357→  const created = await db.eligibility.create({
+   358→   358→    data: { name: trimmed, createdAt: now, updatedAt: now },
+   359→   359→  });
+   360→   360→  return created.id;
+   361→   361→}
+   362→   362→
+   363→   363→// ---- Bulk section clearers (used by auto-apply OVERRIDE behavior) ----
+   364→   364→//
+   365→   365→// When an applicant uploads a new PDS / document, the extracted data is the
+   366→   366→// LATEST source of truth for matching form fields. Before writing the new
+   367→   367→// entries we must CLEAR the existing child rows + their junction links for
+   368→   368→// that section so the new document fully REPLACES the old data (instead of
+   369→   369→// appending duplicates).
+   370→   370→//
+   371→   371→// Each clearer:
+   372→   372→//   1. Loads all junction links for the applicant (to get the child row ids).
+   373→   373→//   2. Deletes the junction links.
+   374→   374→//   3. Deletes the child rows themselves.
+   375→   375→// Returns the number of entries removed.
+   376→   376→
+   377→   377→/** Clear all education entries + links for an applicant. */
+   378→   378→export async function clearApplicantEducations(applicantId: number): Promise<number> {
+   379→   379→  const links = await db.applicantEducationLink.findMany({ where: { applicantId } });
+   380→   380→  const ids = links.map((l) => l.applicantEducationId).filter((x): x is number => x != null);
+   381→   381→  if (!ids.length) return 0;
+   382→   382→  await db.applicantEducationLink.deleteMany({ where: { applicantId } });
+   383→   383→  await db.applicantEducation.deleteMany({ where: { id: { in: ids } } });
+   384→   384→  return ids.length;
+   385→   385→}
+   386→   386→
+   387→   387→/** Clear all work-experience entries + links for an applicant. */
+   388→   388→export async function clearApplicantWorkExperiences(applicantId: number): Promise<number> {
+   389→   389→  const links = await db.applicantWorkExperienceLink.findMany({ where: { applicantId } });
+   390→   390→  const ids = links.map((l) => l.applicantWorkExperienceId).filter((x): x is number => x != null);
+   391→   391→  if (!ids.length) return 0;
+   392→   392→  await db.applicantWorkExperienceLink.deleteMany({ where: { applicantId } });
+   393→   393→  await db.applicantWorkExperience.deleteMany({ where: { id: { in: ids } } });
+   394→   394→  return ids.length;
+   395→   395→}
+   396→   396→
+   397→   397→/** Clear all training entries + links for an applicant. */
+   398→   398→export async function clearApplicantTrainings(applicantId: number): Promise<number> {
+   399→   399→  const links = await db.applicantTrainingLink.findMany({ where: { applicantId } });
+   400→   400→  const ids = links.map((l) => l.applicantTrainingId).filter((x): x is number => x != null);
+   401→   401→  if (!ids.length) return 0;
+   402→   402→  await db.applicantTrainingLink.deleteMany({ where: { applicantId } });
+   403→   403→  await db.applicantTraining.deleteMany({ where: { id: { in: ids } } });
+   404→   404→  return ids.length;
+   405→   405→}
+   406→   406→
+   407→   407→/**
+   408→   408→ * Clear all eligibility entries + links for an applicant.
+   409→   409→ * Also clears the eligibility-category junction rows that point at the
+   410→   410→ * applicant_eligibilities being removed (so no orphan category links remain).
+   411→   411→ */
+   412→   412→export async function clearApplicantEligibilities(applicantId: number): Promise<number> {
+   413→   413→  const links = await db.applicantEligibilityLink.findMany({ where: { applicantId } });
+   414→   414→  const ids = links.map((l) => l.applicantEligibilityId).filter((x): x is number => x != null);
+   415→   415→  if (!ids.length) return 0;
+   416→   416→  await db.applicantEligibilityLink.deleteMany({ where: { applicantId } });
+   417→   417→  // Clean up the category junction rows that referenced these eligibilities.
+   418→   418→  await db.applicantEligibilityCategoryLink.deleteMany({
+   419→   419→    where: { applicantEligibilityId: { in: ids } },
+   420→   420→  });
+   421→   421→  await db.applicantEligibility.deleteMany({ where: { id: { in: ids } } });
+   422→   422→  return ids.length;
+   423→   423→}
+   424→   424→
+   425→   425→/** Clear all award entries + links for an applicant. */
+   426→   426→export async function clearApplicantAwards(applicantId: number): Promise<number> {
+   427→   427→  const links = await db.applicantAwardLink.findMany({ where: { applicantId } });
+   428→   428→  const ids = links.map((l) => l.applicantAwardId).filter((x): x is number => x != null);
+   429→   429→  if (!ids.length) return 0;
+   430→   430→  await db.applicantAwardLink.deleteMany({ where: { applicantId } });
+   431→   431→  await db.applicantAward.deleteMany({ where: { id: { in: ids } } });
+   432→   432→  return ids.length;
+   433→   433→}
+   434→   434→
+   435→   435→// ---- Removal helpers (delete child + its junction row) ----
+   436→   436→export async function findApplicantEducationId(id: number, applicantId: number): Promise<number | null> {
+   437→   437→  const link = await db.applicantEducationLink.findFirst({
+   438→   438→    where: { applicantEducationId: id, applicantId },
+   439→   439→  });
+   440→   440→  return link?.applicantEducationId ?? null;
+   441→   441→}
+   442→   442→
+   443→   443→export async function findApplicantWorkExperienceId(id: number, applicantId: number): Promise<number | null> {
+   444→   444→  const link = await db.applicantWorkExperienceLink.findFirst({
+   445→   445→    where: { applicantWorkExperienceId: id, applicantId },
+   446→   446→  });
+   447→   447→  return link?.applicantWorkExperienceId ?? null;
+   448→   448→}
+   449→   449→
+   450→   450→export async function findApplicantTrainingId(id: number, applicantId: number): Promise<number | null> {
+   451→   451→  const link = await db.applicantTrainingLink.findFirst({
+   452→   452→    where: { applicantTrainingId: id, applicantId },
+   453→   453→  });
+   454→   454→  return link?.applicantTrainingId ?? null;
+   455→   455→}
+   456→   456→
+   457→   457→export async function findApplicantEligibilityId(id: number, applicantId: number): Promise<number | null> {
+   458→   458→  const link = await db.applicantEligibilityLink.findFirst({
+   459→   459→    where: { applicantEligibilityId: id, applicantId },
+   460→   460→  });
+   461→   461→  return link?.applicantEligibilityId ?? null;
+   462→   462→}
+   463→   463→
+   464→   464→export async function findApplicantAwardId(id: number, applicantId: number): Promise<number | null> {
+   465→   465→  const link = await db.applicantAwardLink.findFirst({
+   466→   466→    where: { applicantAwardId: id, applicantId },
+   467→   467→  });
+   468→   468→  return link?.applicantAwardId ?? null;
+   469→   469→}
+   470→   470→
+   471→   471→// ---- JobPosting ↔ Position (junction: jobpostings_postions_lnk) ----
+   472→   472→export async function loadJobPostingPositions(jobpostingId: number) {
+   473→   473→  const links = await db.jobPostingPositionLink.findMany({
+   474→   474→    where: { jobpostingId },
+   475→   475→    orderBy: { postionOrd: "asc" },
+   476→   476→  });
+   477→   477→  if (!links.length) return [];
+   478→   478→  const ids = links.map((l) => l.postionId).filter((x): x is number => x != null);
+   479→   479→  const positions = await db.position.findMany({ where: { id: { in: ids } } });
+   480→   480→  const byId = new Map(positions.map((p) => [p.id, p]));
+   481→   481→  return links
+   482→   482→    .map((l) => (l.postionId ? byId.get(l.postionId) : undefined))
+   483→   483→    .filter((x): x is NonNullable<typeof x> => x != null);
+   484→   484→}
+   485→   485→
+   486→   486→// Load the single (first) position linked to a job posting — most jobs map to one position.
+   487→   487→export async function loadJobPostingPosition(jobpostingId: number) {
+   488→   488→  const positions = await loadJobPostingPositions(jobpostingId);
+   489→   489→  return positions[0] ?? null;
+   490→   490→}
+   491→   491→
+   492→   492→// Load linked PlaceOfAssignment rows for a position.
+   493→   493→export async function loadPositionPlaceOfAssignment(postionId: number) {
+   494→   494→  const links = await db.positionPlaceOfAssignmentLink.findMany({
+   495→   495→    where: { postionId },
+   496→   496→  });
+   497→   497→  if (!links.length) return [];
+   498→   498→  const ids = links.map((l) => l.placeOfAssignmentId).filter((x): x is number => x != null);
+   499→   499→  const places = await db.placeOfAssignment.findMany({ where: { id: { in: ids } } });
+   500→   500→  const byId = new Map(places.map((p) => [p.id, p]));
+   501→   501→  return links
+   502→   502→    .map((l) => (l.placeOfAssignmentId ? byId.get(l.placeOfAssignmentId) : undefined))
+   503→   503→    .filter((x): x is NonNullable<typeof x> => x != null);
+   504→   504→}
+   505→   505→
+   506→   506→// ---- Application ↔ Applicant / JobPosting (junction tables) ----
+   507→   507→export async function findApplicationForApplicantJob(applicantId: number, jobpostingId: number) {
+   508→   508→  // Find all applications linked to this applicant, then check which one is
+   509→   509→  // also linked to the given job posting.
+   510→   510→  const applLinks = await db.applicationApplicantLink.findMany({ where: { applicantId } });
+   511→   511→  const applicationIds = applLinks
+   512→   512→    .map((l) => l.applicationId)
+   513→   513→    .filter((x): x is number => x != null);
+   514→   514→  if (!applicationIds.length) return null;
+   515→   515→  const jobLinks = await db.applicationJobLink.findMany({
+   516→   516→    where: { applicationId: { in: applicationIds }, jobpostingId },
+   517→   517→  });
+   518→   518→  if (!jobLinks.length) return null;
+   519→   519→  const applicationId = jobLinks[0].applicationId;
+   520→   520→  return db.application.findUnique({ where: { id: applicationId! } });
+   521→   521→}
+   522→   522→
+   523→   523→export async function findApplicationsForApplicant(applicantId: number) {
+   524→   524→  const links = await db.applicationApplicantLink.findMany({ where: { applicantId } });
+   525→   525→  const applicationIds = links
+   526→   526→    .map((l) => l.applicationId)
+   527→   527→    .filter((x): x is number => x != null);
+   528→   528→  if (!applicationIds.length) return [];
+   529→   529→  return db.application.findMany({
+   530→   530→    where: { id: { in: applicationIds } },
+   531→   531→    orderBy: { dateApplied: "desc" },
+   532→   532→  });
+   533→   533→}
+   534→   534→
+   535→   535→export async function findApplicationsForJob(jobpostingId: number) {
+   536→   536→  const links = await db.applicationJobLink.findMany({ where: { jobpostingId } });
+   537→   537→  const applicationIds = links
+   538→   538→    .map((l) => l.applicationId)
+   539→   539→    .filter((x): x is number => x != null);
+   540→   540→  if (!applicationIds.length) return [];
+   541→   541→  return db.application.findMany({
+   542→   542→    where: { id: { in: applicationIds } },
+   543→   543→    orderBy: { dateApplied: "desc" },
+   544→   544→  });
+   545→   545→}
+   546→   546→
+   547→   547→export async function findApplicationApplicantId(applicationId: number): Promise<number | null> {
+   548→   548→  const link = await db.applicationApplicantLink.findFirst({ where: { applicationId } });
+   549→   549→  return link?.applicantId ?? null;
+   550→   550→}
+   551→   551→
+   552→   552→export async function findApplicationJobId(applicationId: number): Promise<number | null> {
+   553→   553→  const link = await db.applicationJobLink.findFirst({ where: { applicationId } });
+   554→   554→  return link?.jobpostingId ?? null;
+   555→   555→}
+   556→   556→
+   557→   557→export async function findApplicationsForApplicantList(applicantId: number): Promise<number[]> {
+   558→   558→  const links = await db.applicationApplicantLink.findMany({ where: { applicantId } });
+   559→   559→  return links.map((l) => l.applicationId).filter((x): x is number => x != null);
+   560→   560→}
+   561→   561→
+   562→   562→// ---- Batch loaders (eliminate N+1 in list endpoints) ----
+   563→   563→
+   564→   564→/**
+   565→   565→ * Batch-load the first position for each of multiple job postings.
+   566→   566→ * Returns a Map<jobPostingId, Position> for O(1) lookup.
+   567→   567→ * Uses 2 queries total (junction + positions) instead of 2N.
+   568→   568→ */
+   569→   569→export async function batchLoadJobPostingPositions(jobPostingIds: number[]) {
+   570→   570→  const result = new Map<number, Awaited<ReturnType<typeof db.position.findFirst>>>();
+   571→   571→  if (!jobPostingIds.length) return result;
+   572→   572→
+   573→   573→  const links = await db.jobPostingPositionLink.findMany({
+   574→   574→    where: { jobpostingId: { in: jobPostingIds } },
+   575→   575→    orderBy: { postionOrd: "asc" },
+   576→   576→  });
+   577→   577→  const positionIds = links
+   578→   578→    .map((l) => l.postionId)
+   579→   579→    .filter((x): x is number => x != null);
+   580→   580→  if (!positionIds.length) return result;
+   581→   581→
+   582→   582→  const positions = await db.position.findMany({ where: { id: { in: positionIds } } });
+   583→   583→  const positionById = new Map(positions.map((p) => [p.id, p]));
+   584→   584→
+   585→   585→  // For each job posting, take the first linked position (lowest ord)
+   586→   586→  const seen = new Set<number>();
+   587→   587→  for (const link of links) {
+   588→   588→    if (link.jobpostingId == null) continue;
+   589→   589→    if (seen.has(link.jobpostingId)) continue;
+   590→   590→    seen.add(link.jobpostingId);
+   591→   591→    if (link.postionId != null) {
+   592→   592→      const pos = positionById.get(link.postionId);
+   593→   593→      if (pos) result.set(link.jobpostingId, pos);
+   594→   594→    }
+   595→   595→  }
+   596→   596→  return result;
+   597→   597→}
+   598→   598→
+   599→   599→/**
+   600→   600→ * Batch-load the first place of assignment for each of multiple positions.
+   601→   601→ * Returns a Map<positionId, {id, name}> for O(1) lookup.
+   602→   602→ * Uses 2 queries total instead of 2N.
+   603→   603→ */
+   604→   604→export async function batchLoadPositionPlaceOfAssignment(positionIds: number[]) {
+   605→   605→  const result = new Map<number, { id: number; name: string | null }>();
+   606→   606→  if (!positionIds.length) return result;
+   607→   607→
+   608→   608→  const links = await db.positionPlaceOfAssignmentLink.findMany({
+   609→   609→    where: { postionId: { in: positionIds } },
+   610→   610→  });
+   611→   611→  const placeIds = links
+   612→   612→    .map((l) => l.placeOfAssignmentId)
+   613→   613→    .filter((x): x is number => x != null);
+   614→   614→  if (!placeIds.length) return result;
+   615→   615→
+   616→   616→  const places = await db.placeOfAssignment.findMany({ where: { id: { in: placeIds } } });
+   617→   617→  const placeById = new Map(places.map((p) => [p.id, p]));
+   618→   618→
+   619→   619→  const seen = new Set<number>();
+   620→   620→  for (const link of links) {
+   621→   621→    if (link.postionId == null) continue;
+   622→   622→    if (seen.has(link.postionId)) continue;
+   623→   623→    seen.add(link.postionId);
+   624→   624→    if (link.placeOfAssignmentId != null) {
+   625→   625→      const place = placeById.get(link.placeOfAssignmentId);
+   626→   626→      if (place) result.set(link.postionId, { id: place.id, name: place.name });
+   627→   627→    }
+   628→   628→  }
+   629→   629→  return result;
+   630→   630→}
+   631→   631→

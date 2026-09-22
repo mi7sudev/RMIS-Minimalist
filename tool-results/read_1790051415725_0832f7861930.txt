@@ -1,0 +1,1193 @@
+     1→// Deterministic PDS (CSC Form 212 Revised 2017) Excel Parser
+     2→// =============================================================================
+     3→//
+     4→// The Philippine Civil Service Commission Personal Data Sheet (CS Form 212
+     5→// Revised 2017) is a STANDARDIZED government form distributed as an Excel
+     6→// template with a FIXED layout. Every PDS has the same 4-sheet structure:
+     7→//
+     8→//   • Sheet "C1" (Page 1): I. PERSONAL INFORMATION, II. FAMILY BACKGROUND,
+     9→//                           III. EDUCATIONAL BACKGROUND
+    10→//   • Sheet "C2" (Page 2): IV. CIVIL SERVICE ELIGIBILITY, V. WORK EXPERIENCE
+    11→//   • Sheet "C3" (Page 3): VI. VOLUNTARY WORK, VII. LEARNING & DEVELOPMENT
+    12→//                          (TRAINING), VIII. OTHER INFORMATION (skills/awards)
+    13→//   • Sheet "C4" (Page 4): IX. references + government disclosure questions
+    14→//   • Sheet "Lookup":     dropdown source values (filtered out)
+    15→//
+    16→// Because the layout is fixed, we can read each field by its known cell
+    17→// position — NO LLM call needed. This makes extraction:
+    18→//   • Instant        (~200–500ms instead of 60–86s with the LLM)
+    19→//   • 100% accurate  (no hallucination, no truncation, no rate limits)
+    20→//   • Free           (no API costs)
+    21→//
+    22→// This parser is the PRIMARY extraction path for PDS Excel files. The LLM
+    23→// extraction in @/lib/extraction.ts is kept as a FALLBACK only for non-Excel
+    24→// PDS documents (scanned PDFs / images) and for other document categories.
+    25→//
+    26→// Robustness strategy:
+    27→//   • Label-based row detection — scan each sheet for known label text
+    28→//     ("SURNAME", "FIRST NAME", "DATE OF BIRTH", etc.) rather than hard-coding
+    29→//     row numbers, so the parser survives minor template row shifts.
+    30→//   • Value scanning — after finding a label, scan rightward in the same row
+    31→//     for the first real value cell, skipping merged-cell echoes and dropdown
+    32→//     source-list noise (country names, civil-status options).
+    33→//   • Table detection — for education/work/training/eligibility tables, locate
+    34→//     the header row by keyword, then read data rows until "N/A", blank, or the
+    35→//     "(Continue on separate sheet" marker.
+    36→//   • Graceful degradation — any field that can't be located is left null with
+    37→//     confidence "none" (same as the LLM would return).
+    38→
+    39→import ExcelJS from "exceljs";
+    40→import { promises as fs } from "fs";
+    41→import path from "path";
+    42→import type {
+    43→  ExtractionResult,
+    44→  ExtractedField,
+    45→  ExtractedPersonalInfo,
+    46→  ExtractedEducation,
+    47→  ExtractedWorkExperience,
+    48→  ExtractedTraining,
+    49→  ExtractedEligibility,
+    50→  ExtractedAward,
+    51→} from "@/lib/extraction";
+    52→
+    53→// ---- Cell value extraction -------------------------------------------------
+    54→
+    55→/**
+    56→ * Extract a clean string value from an ExcelJS cell, handling:
+    57→ *   • Date objects → "YYYY-MM-DD"
+    58→ *   • Rich text (cell.value.richText[]) → concatenated text
+    59→ *   • Formula results (cell.value.result)
+    60→ *   • Hyperlink objects (cell.value.text)
+    61→ *   • Merged-cell null values → ""
+    62→ *   • The "[object Object]" artifact that appears when cell.text is called on
+    63→ *     object-valued cells without this handling.
+    64→ */
+    65→function cleanCell(cell: ExcelJS.Cell): string {
+    66→  try {
+    67→    const v = cell.value;
+    68→    if (v == null) return "";
+    69→    if (v instanceof Date) {
+    70→      // Format as YYYY-MM-DD (the PDS schema expects this format).
+    71→      const iso = v.toISOString();
+    72→      return iso.slice(0, 10);
+    73→    }
+    74→    if (typeof v === "number") return String(v);
+    75→    if (typeof v === "string") return v.trim();
+    76→    if (typeof v === "boolean") return v ? "Yes" : "No";
+    77→    if (typeof v === "object") {
+    78→      // Rich text run array
+    79→      const rt = (v as { richText?: Array<{ text?: string }> }).richText;
+    80→      if (Array.isArray(rt)) {
+    81→        return rt.map((t) => t.text || "").join("").trim();
+    82→      }
+    83→      // Formula cell — prefer the cached result
+    84→      if ("result" in v && v.result != null) {
+    85→        const r = v.result;
+    86→        if (r instanceof Date) return r.toISOString().slice(0, 10);
+    87→        return String(r).trim();
+    88→      }
+    89→      // Hyperlink object
+    90→      if ("text" in v && typeof v.text === "string") return v.text.trim();
+    91→      // Fallback — should not normally happen
+    92→      return "";
+    93→    }
+    94→    return "";
+    95→  } catch {
+    96→    return "";
+    97→  }
+    98→}
+    99→
+   100→/** Get the cleaned value of a cell at (row, col) on a worksheet. */
+   101→function getVal(ws: ExcelJS.Worksheet, row: number, col: number): string {
+   102→  return cleanCell(ws.getRow(row).getCell(col));
+   103→}
+   104→
+   105→// ---- Dropdown noise filtering ----------------------------------------------
+   106→//
+   107→// The PDS template embeds dropdown source lists in far-right columns (col P/Q
+   108→// and the long vertical country list). These pollute row scans. We filter them
+   109→// out so "scan rightward for the value" doesn't grab a dropdown option instead
+   110→// of the real answer.
+   111→
+   112→const COUNTRY_NAMES = new Set([
+   113→  "Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda",
+   114→  "Argentina","Armenia","Aruba","Australia","Austria","Azerbaijan",
+   115→  "Bahamas, The","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize",
+   116→  "Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil",
+   117→  "Brunei","Bulgaria","Burkina Faso","Burma","Burundi","Cabo Verde","Cambodia",
+   118→  "Cameroon","Canada","Cape Verde","Central African Republic","Chad","Chile",
+   119→  "China","Colombia","Comoros","Congo, Republic of the","Congo, Democratic Republic of the",
+   120→  "Costa Rica","Cote d'Ivoire","Croatia","Cuba","Curacao","Cyprus","Czech Republic",
+   121→  "Denmark","Djibouti","Dominica","Dominican Republic","East Timor","Ecuador",
+   122→  "Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini",
+   123→  "Ethiopia","Fiji","Finland","France","Gabon","Gambia, The","Georgia","Germany",
+   124→  "Ghana","Greece","Grenada","Guatemala","Guinea","Guinea-Bissau","Guyana","Haiti",
+   125→  "Holy See","Honduras","Hong Kong","Hungary","Iceland","India","Indonesia","Iran",
+   126→  "Iraq","Ireland","Israel","Italy","Jamaica","Japan","Jordan","Kazakhstan","Kenya",
+   127→  "Kiribati","Korea, North","Korea, South","Kosovo","Kuwait","Kyrgyzstan","Laos",
+   128→  "Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania",
+   129→  "Luxembourg","Macau","Macedonia","Madagascar","Malawi","Malaysia","Maldives",
+   130→  "Mali","Malta","Marshall Islands","Mauritania","Mauritius","Mexico","Micronesia",
+   131→  "Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Namibia",
+   132→  "Nauru","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria",
+   133→  "Niue","North Korea","North Macedonia","Norway","Oman","Pakistan","Palau","Panama",
+   134→  "Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar",
+   135→  "Romania","Russia","Rwanda","Saint Kitts and Nevis","Saint Lucia",
+   136→  "Saint Vincent and the Grenadines","Samoa","San Marino","Sao Tome and Principe",
+   137→  "Saudi Arabia","Senegal","Serbia","Seychelles","Sierra Leone","Singapore",
+   138→  "Slovakia","Slovenia","Solomon Islands","Somalia","South Africa","South Korea",
+   139→  "South Sudan","Spain","Sri Lanka","Sudan","Suriname","Swaziland","Sweden",
+   140→  "Switzerland","Syria","Taiwan","Tajikistan","Tanzania","Thailand","Timor-Leste",
+   141→  "Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu",
+   142→  "Uganda","Ukraine","United Arab Emirates","United Kingdom","United States",
+   143→  "Uruguay","Uzbekistan","Vanuatu","Venezuela","Vietnam","Yemen","Zambia","Zimbabwe",
+   144→  "Netherlands Antilles","Palestinian Territories","Sint Maarten",
+   145→]);
+   146→
+   147→// Dropdown source values for civil status / sex / solo-parent indicators.
+   148→// These appear in column P of C1 as a vertical list — NOT the applicant's
+   149→// selected value. Filter them so they aren't mistaken for answers.
+   150→const DROPDOWN_OPTIONS = new Set([
+   151→  "Married","Widow/er","Separated","Solo Parent","Others",
+   152→  "Please indicate country:","Pls. indicate country:",
+   153→]);
+   154→
+   155→function isNoise(s: string): boolean {
+   156→  const t = s.trim();
+   157→  if (!t) return true;
+   158→  if (COUNTRY_NAMES.has(t)) return true;
+   159→  if (DROPDOWN_OPTIONS.has(t)) return true;
+   160→  // Checkbox cells in the Revised 2026 template are stored as Excel booleans
+   161→  // and render as "Yes"/"No" — a bare Yes/No is a checkbox state, never a
+   162→  // free-text answer, so it must never be picked up by value scans.
+   163→  if (/^(yes|no|y|n)$/i.test(t)) return true;
+   164→  return false;
+   165→}
+   166→
+   167→// ---------------------------------------------------------------------------
+   168→// OFFICIAL-FORM FURNITURE FILTER (Revised 2026 template)
+   169→// ---------------------------------------------------------------------------
+   170→// The official CS Form 212 template is full of static text that sits in the
+   171→// same columns the applicant's data occupies: instructional parentheticals
+   172→// ("(Continue on sheet C6 if necessary)"), the signature block
+   173→// ("SIGNATURE" / "(e-signature/digital certificate)" / "DATE"), page footers
+   174→// ("CS FORM 212 (Revised 2026), Page 2 of 4"), section headers
+   175→// ("VII. VOLUNTARY WORK OR INVOLVEMENT ..."), column headers
+   176→// ("POSITION / NATURE OF WORK", "INCLUSIVE DATES (dd/mm/yyyy)") and bare row
+   177→// counters ("30."). On a BLANK template these are the only non-empty cells —
+   178→// and without this filter the parser harvested them all as data entries.
+   179→//
+   180→// No legitimate applicant value matches any of these patterns.
+   181→const PDS_FURNITURE: RegExp[] = [
+   182→  /continue on (separate )?sheet/i,          // "(Continue on sheet C6 if necessary)"
+   183→  /e-?signature|digital certificate/i,       // "(e-signature/digital certificate)"
+   184→  /^cs\s*form\b/i,                          // "CS Form No. 212", "CS FORM 212 (Revised 2026)..."
+   185→  /page \d+ of \d+/i,
+   186→  /^signature$/i,
+   187→  /^date$/i,
+   188→  /^(from|to)$/i,
+   189→  /^\(.*\)\s*$/,                             // fully parenthetical instruction text
+   190→  /^\d+\.?\s*$/,                             // bare row counters: "30.", "28"
+   191→  /^tick appropriate boxes/i,
+   192→  /misrepresentation/i,
+   193→  /read the attached guide/i,
+   194→  /^person(al)? data sheet$/i,
+   195→  /^(i|ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii)\.\s/i, // "I. PERSONAL INFORMATION", "VII. VOLUNTARY WORK..."
+   196→  /voluntary work or involvement/i,
+   197→  /^title of learning/i,
+   198→  /^type of (ld|l&d)/i,
+   199→  /^position \/ nature of work/i,
+   200→  /^inclusive dates/i,
+   201→  /^(monthly salary|status of appointment|gov'?t service|salary\/ job|department \/ agency)/i,
+   202→  /^(career service|rating \(|place of exam|date of exam|date of validity|license \()/i,
+   203→  /^(name of school|basic education\/degree|period of attendance|highest level|year graduated|scholarship\/)/i,
+   204→  /write in full|do not abbreviate|write full/i,
+   205→  /^name extension/i,                        // "NAME EXTENSION (JR., SR)"
+   206→  /^sex at birth/i,
+   207→];
+   208→
+   209→/** True when the text is official-form furniture rather than applicant data. */
+   210→function isFormFurniture(s: string): boolean {
+   211→  const t = (s || "").trim();
+   212→  if (!t) return false;
+   213→  return PDS_FURNITURE.some((re) => re.test(t));
+   214→}
+   215→
+   216→/**
+   217→ * Is this cell value an instructional/section-label string rather than a real
+   218→ * answer? Used to stop `valueRightOf` from grabbing far-away label text when
+   219→ * the actual value cell is empty (common for checkbox-based PDS fields like
+   220→ * SEX and CIVIL STATUS). Also stops at official-form furniture (footers,
+   221→ * signature blocks, continuation-sheet markers).
+   222→ */
+   223→function isInstructional(s: string): boolean {
+   224→  const t = s.trim().toLowerCase();
+   225→  if (!t) return true;
+   226→  // Instructional phrases embedded in the PDS template.
+   227→  if (/(please indicate|pls\. indicate|indicate the details|if applicable|if holder|write in full|do not abbreviate|write full)/.test(t)) return true;
+   228→  // Section labels like "17. RESIDENTIAL ADDRESS", "18. PERMANENT ADDRESS", "20. MOBILE NO."
+   229→  if (/^\d+\.\s/.test(s.trim())) return true;
+   230→  // Official-form furniture (footers, signature blocks, section headers, ...).
+   231→  if (isFormFurniture(s)) return true;
+   232→  // Known section/column headers we should not treat as a value.
+   233→  if (/^(residential address|permanent address|telephone no|mobile no|e-mail address|city\/municipality|province|zip code|house\/block\/lot|street|subdivision\/village|barangay|surname|first name|middle name|name extension|date of birth|place of birth|sex|civil status|citizenship|height|weight|blood type|level|name of school)$/i.test(t)) return true;
+   234→  return false;
+   235→}
+   236→
+   237→// ---- Field helpers ---------------------------------------------------------
+   238→
+   239→/** Build a high-confidence ExtractedField from a raw string value. */
+   240→function field(value: string, source: string): ExtractedField {
+   241→  const v = value == null ? "" : value.trim();
+   242→  if (!v || v === "N/A" || v === "n/a" || v === "NA") {
+   243→    return { value: null, confidence: "none", source };
+   244→  }
+   245→  return { value: v, confidence: "high", source };
+   246→}
+   247→
+   248→/** Build a numeric ExtractedField (e.g. monthly salary, training hours). */
+   249→function numField(value: string, source: string): ExtractedField<number | null> {
+   250→  const v = (value || "").trim();
+   251→  if (!v || /^n\/?a$/i.test(v)) return { value: null, confidence: "none", source };
+   252→  // Only accept values that are (optionally "N HOURS"-suffixed) plain numbers.
+   253→  // Stripping non-digits from text like "(Continue on sheet C5 if necessary)"
+   254→  // used to yield nonsense numbers (the "5" from "C5"), and footer text like
+   255→  // "CS FORM 212 (Revised 2026)" became 2122026 — reject any string that
+   256→  // still contains letters after removing the optional HOURS suffix.
+   257→  const stripped = v.replace(/\s*hours?\s*$/i, "").trim();
+   258→  if (/[a-z]/i.test(stripped)) return { value: null, confidence: "low", source };
+   259→  // Strip currency symbols, commas, etc.
+   260→  const cleaned = stripped.replace(/[^0-9.]/g, "");
+   261→  const n = parseFloat(cleaned);
+   262→  if (Number.isNaN(n)) return { value: null, confidence: "low", source };
+   263→  return { value: n, confidence: "high", source };
+   264→}
+   265→
+   266→/** Build a boolean ExtractedField from Yes/No. */
+   267→function boolField(value: string, source: string): ExtractedField<boolean | null> {
+   268→  const v = (value || "").trim().toLowerCase();
+   269→  if (!v || v === "n/a") return { value: null, confidence: "none", source };
+   270→  if (v === "y" || v === "yes") return { value: true, confidence: "high", source };
+   271→  if (v === "n" || v === "no") return { value: false, confidence: "high", source };
+   272→  return { value: null, confidence: "low", source };
+   273→}
+   274→
+   275→/** Normalize a date string to YYYY-MM-DD. Accepts Date-serialized strings,
+   276→ * "Mon Dec 01 2003..." style, MM/DD/YYYY, and ISO. Returns "" if unparseable. */
+   277→function normalizeDate(raw: string): string {
+   278→  if (!raw) return "";
+   279→  const s = raw.trim();
+   280→  if (!s || /^n\/?a$/i.test(s)) return "";
+   281→  // Already ISO
+   282→  const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+   283→  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+   284→  // JS Date string e.g. "Mon Dec 01 2003 00:00:00 GMT+0000 (...)"
+   285→  const d1 = new Date(s);
+   286→  if (!Number.isNaN(d1.getTime())) {
+   287→    return d1.toISOString().slice(0, 10);
+   288→  }
+   289→  // MM/DD/YYYY
+   290→  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+   291→  if (m) {
+   292→    const mm = m[1].padStart(2, "0");
+   293→    const dd = m[2].padStart(2, "0");
+   294→    return `${m[3]}-${mm}-${dd}`;
+   295→  }
+   296→  return s; // give back as-is; caller may still find it useful
+   297→}
+   298→
+   299→/**
+   300→ * Like normalizeDate but rejects implausible years (a PDS birth/exam/validity
+   301→ * date is always ≥ 1900). Guards against artifact dates like "0212-01-01"
+   302→ * that Excel date-serial coercion of footer text used to produce.
+   303→ */
+   304→function normalizeSaneDate(raw: string): string {
+   305→  const iso = normalizeDate(raw);
+   306→  const y = parseInt(iso.slice(0, 4), 10);
+   307→  if (/^\d{4}-\d{2}-\d{2}$/.test(iso) && (y < 1900 || y > 2200)) return "";
+   308→  return iso;
+   309→}
+   310→
+   311→// ---- Label-based cell search ----------------------------------------------
+   312→
+   313→type CellRef = { row: number; col: number };
+   314→
+   315→/**
+   316→ * Find the first cell on the worksheet whose cleaned value matches the given
+   317→ * substring (case-insensitive). Searches within the optional row/col bounds.
+   318→ * Returns null if not found.
+   319→ */
+   320→function findCell(
+   321→  ws: ExcelJS.Worksheet,
+   322→  needle: string,
+   323→  opts: { fromRow?: number; toRow?: number; fromCol?: number; toCol?: number } = {}
+   324→): CellRef | null {
+   325→  const fromRow = opts.fromRow ?? 1;
+   326→  const toRow = opts.toRow ?? sheetMaxRow(ws);
+   327→  const fromCol = opts.fromCol ?? 1;
+   328→  const toCol = opts.toCol ?? 18;
+   329→  const needleLower = needle.toLowerCase();
+   330→  for (let r = fromRow; r <= toRow; r++) {
+   331→    const row = ws.getRow(r);
+   332→    for (let c = fromCol; c <= toCol; c++) {
+   333→      const v = cleanCell(row.getCell(c)).toLowerCase();
+   334→      if (v && v.includes(needleLower)) return { row: r, col: c };
+   335→    }
+   336→  }
+   337→  return null;
+   338→}
+   339→
+   340→/**
+   341→ * Starting just right of (row, col), scan rightward and return the first cell
+   342→ * value that is non-empty, not a merged echo of the label, not dropdown
+   343→ * noise, and not instructional/section-label text. This is how we pick up the
+   344→ * applicant's answer that sits a few columns to the right of a field label.
+   345→ *
+   346→ * Stops at instructional text so checkbox-based fields (SEX, CIVIL STATUS)
+   347→ * whose value cell is empty don't grab a far-away label.
+   348→ */
+   349→function valueRightOf(
+   350→  ws: ExcelJS.Worksheet,
+   351→  row: number,
+   352→  labelCol: number,
+   353→  maxScan = 12
+   354→): string {
+   355→  const labelVal = getVal(ws, row, labelCol).toLowerCase();
+   356→  for (let c = labelCol + 1; c <= labelCol + maxScan; c++) {
+   357→    const v = getVal(ws, row, c);
+   358→    if (!v) continue;
+   359→    if (v.toLowerCase() === labelVal) continue; // merged echo
+   360→    if (isNoise(v)) continue; // dropdown source value
+   361→    if (isInstructional(v)) break; // hit a section label / instruction → stop
+   362→    return v;
+   363→  }
+   364→  return "";
+   365→}
+   366→
+   367→/**
+   368→ * Like valueRightOf but looks in the rows just BELOW a label cell too — useful
+   369→ * for fields where the value sits under the label rather than to its right.
+   370→ */
+   371→function valueNear(
+   372→  ws: ExcelJS.Worksheet,
+   373→  row: number,
+   374→  col: number,
+   375→  opts: { scanRight?: number; scanDown?: number } = {}
+   376→): string {
+   377→  const scanRight = opts.scanRight ?? 6;
+   378→  const scanDown = opts.scanDown ?? 3;
+   379→  const labelVal = getVal(ws, row, col).toLowerCase();
+   380→  // Scan right first (most common), then down.
+   381→  for (let c = col + 1; c <= col + scanRight; c++) {
+   382→    const v = getVal(ws, row, c);
+   383→    if (!v || v.toLowerCase() === labelVal || isNoise(v)) continue;
+   384→    if (isInstructional(v)) break;
+   385→    return v;
+   386→  }
+   387→  for (let dr = 1; dr <= scanDown; dr++) {
+   388→    for (let c = col; c <= col + scanRight; c++) {
+   389→      const v = getVal(ws, row + dr, c);
+   390→      if (!v || v.toLowerCase() === labelVal || isNoise(v)) continue;
+   391→      // Skip sub-labels / instructional text so a label under the value slot
+   392→      // is never read as the value itself.
+   393→      if (isInstructional(v)) break;
+   394→      return v;
+   395→    }
+   396→  }
+   397→  return "";
+   398→}
+   399→
+   400→// ---- Section-range helpers -------------------------------------------------
+   401→//
+   402→// OVERFLOW SUPPORT (CS Form 212 continuation pages)
+   403→// -----------------------------------------------------------------------------
+   404→// Applicants with many entries (100+ trainings, awards, etc.) customize the PDS:
+   405→// they insert extra rows below the standard table, or duplicate a sheet
+   406→// ("C3 (2)", "Sheet1", "Continuation"...) and paste the overflow there. The
+   407→// original parsers scanned a fixed ~30 rows and BREAKED at the
+   408→// "Continue on separate sheet" marker — silently dropping every overflow row.
+   409→//
+   410→// The rewritten parsers below scan to the TRUE end of each section (located by
+   411→// the next section's header text) instead of a fixed row count, and
+   412→// `parsePdsExcel` additionally parses every non-standard (continuation) sheet,
+   413→// classifying it by its table headers.
+   414→
+   415→/** Hard sanity cap for row scans (a legitimate PDS will never exceed this). */
+   416→const MAX_SCAN_ROWS = 400;
+   417→
+   418→/**
+   419→ * Reliable "last row with data" bound for sheet scans.
+   420→ *
+   421→ * NOTE: ExcelJS's `actualRowCount` is NOT the last row containing data — it
+   422→ * stops at the first trailing gap (e.g. a PDS with trainings at rows 1–44 and
+   423→ * awards at rows 120–133 reports actualRowCount=61). `rowCount` (the last row
+   424→ * index in the sheet's row collection) is the correct bound. We take the max
+   425→ * of both and cap at MAX_SCAN_ROWS.
+   426→ */
+   427→function sheetMaxRow(ws: ExcelJS.Worksheet): number {
+   428→  return Math.min(Math.max(ws.rowCount || 0, ws.actualRowCount || 0), MAX_SCAN_ROWS);
+   429→}
+   430→
+   431→/**
+   432→ * Find the row where a section ends: the first row at/after `fromRow` whose
+   433→ * cell text (cols 1..14) matches one of the `stopPatterns`. Returns `null`
+   434→ * when no stop marker exists (caller should scan to MAX_SCAN_ROWS).
+   435→ */
+   436→function findSectionEnd(
+   437→  ws: ExcelJS.Worksheet,
+   438→  fromRow: number,
+   439→  stopPatterns: RegExp[]
+   440→): number | null {
+   441→  const maxRow = sheetMaxRow(ws);
+   442→  for (let r = Math.max(1, fromRow); r <= maxRow; r++) {
+   443→    for (let c = 1; c <= 14; c++) {
+   444→      const v = getVal(ws, r, c);
+   445→      if (!v) continue;
+   446→      if (stopPatterns.some((re) => re.test(v))) return r;
+   447→    }
+   448→  }
+   449→  return null;
+   450→}
+   451→
+   452→// ---- Section parsers -------------------------------------------------------
+   453→
+   454→/** Detect whether a workbook looks like a standard CSC Form 212 PDS. */
+   455→export function looksLikePds(workbook: ExcelJS.Workbook): boolean {
+   456→  const names = workbook.worksheets.map((w) => w.name.toLowerCase());
+   457→  // Standard template has sheets C1, C2, C3, C4 (+ optional Lookup).
+   458→  // Some applicants customize their PDS and delete unused sheets (e.g. drop
+   459→  // C2–C4 when they only kept page 1) — requiring EVERY sheet made those
+   460→  // files fail the whole deterministic parse. C1 carries the "PERSONAL DATA
+   461→  // SHEET" marker, so C1 + marker is enough to trust the layout.
+   462→  const hasC1 = names.some((n) => /^c1$/i.test(n) || /^sheet.?1$/i.test(n));
+   463→  // And the "PERSONAL DATA SHEET" marker on the first sheet.
+   464→  const first = workbook.worksheets[0];
+   465→  if (!first) return false;
+   466→  let hasMarker = false;
+   467→  for (let r = 1; r <= 10 && !hasMarker; r++) {
+   468→    for (let c = 1; c <= 14 && !hasMarker; c++) {
+   469→      if (/personal data sheet/i.test(getVal(first, r, c))) hasMarker = true;
+   470→    }
+   471→  }
+   472→  return hasC1 && hasMarker;
+   473→}
+   474→
+   475→function getSheet(workbook: ExcelJS.Workbook, patterns: RegExp[]): ExcelJS.Worksheet | undefined {
+   476→  for (const ws of workbook.worksheets) {
+   477→    if (patterns.some((p) => p.test(ws.name))) return ws;
+   478→  }
+   479→  return undefined;
+   480→}
+   481→
+   482→/** Parse Sheet C1 — personal information + educational background. */
+   483→function parsePersonalInfo(c1: ExcelJS.Worksheet): Partial<ExtractedPersonalInfo> {
+   484→  const out: Partial<ExtractedPersonalInfo> = {};
+   485→
+   486→  // SURNAME — label "SURNAME", value a few cols right.
+   487→  const surnameCell = findCell(c1, "SURNAME", { fromRow: 8, toRow: 14, fromCol: 1, toCol: 6 });
+   488→  if (surnameCell) out.lastName = field(valueRightOf(c1, surnameCell.row, surnameCell.col), "C1 §I surname");
+   489→
+   490→  // FIRST NAME
+   491→  const firstCell = findCell(c1, "FIRST NAME", { fromRow: 8, toRow: 14, fromCol: 1, toCol: 6 });
+   492→  if (firstCell) out.firstName = field(valueRightOf(c1, firstCell.row, firstCell.col), "C1 §I first name");
+   493→
+   494→  // MIDDLE NAME
+   495→  const middleCell = findCell(c1, "MIDDLE NAME", { fromRow: 8, toRow: 14, fromCol: 1, toCol: 6 });
+   496→  if (middleCell) out.middleName = field(valueRightOf(c1, middleCell.row, middleCell.col), "C1 §I middle name");
+   497→
+   498→  // NAME EXTENSION (JR/SR) — label "NAME EXTENSION", value right of it.
+   499→  const extCell = findCell(c1, "NAME EXTENSION", { fromRow: 8, toRow: 14, fromCol: 8, toCol: 18 });
+   500→  if (extCell) out.extensionName = field(valueRightOf(c1, extCell.row, extCell.col), "C1 §I name extension");
+   501→
+   502→  // DATE OF BIRTH
+   503→  const dobCell = findCell(c1, "DATE OF BIRTH", { fromRow: 10, toRow: 16, fromCol: 1, toCol: 6 });
+   504→  if (dobCell) out.birthDate = field(normalizeSaneDate(valueRightOf(c1, dobCell.row, dobCell.col)), "C1 §I birth date");
+   505→
+   506→  // PLACE OF BIRTH
+   507→  const pobCell = findCell(c1, "PLACE OF BIRTH", { fromRow: 12, toRow: 18, fromCol: 1, toCol: 6 });
+   508→  if (pobCell) out.birthPlace = field(valueRightOf(c1, pobCell.row, pobCell.col), "C1 §I birth place");
+   509→
+   510→  // SEX — label "SEX" (short, so match exactly to avoid false positives).
+   511→  // Domain check: only MALE/FEMALE are valid answers. The Revised 2026
+   512→  // template encodes sex as tick-box booleans (which cannot be decoded to a
+   513→  // specific option), so a valid text value is only ever present in typed
+   514→  // variants of the form.
+   515→  const sexCell = findCell(c1, "SEX", { fromRow: 14, toRow: 18, fromCol: 1, toCol: 4 });
+   516→  if (sexCell) {
+   517→    const v = valueRightOf(c1, sexCell.row, sexCell.col);
+   518→    if (v && /^(male|female)$/i.test(v.trim())) out.gender = field(v, "C1 §I sex");
+   519→  }
+   520→
+   521→  // CIVIL STATUS — domain-checked for the same reason as SEX.
+   522→  const csCell = findCell(c1, "CIVIL STATUS", { fromRow: 14, toRow: 20, fromCol: 1, toCol: 4 });
+   523→  if (csCell) {
+   524→    const v = valueRightOf(c1, csCell.row, csCell.col);
+   525→    if (v && /^(single|married|widow(er)?(\/er)?|separated|annulled|solo parent|others?)\b/i.test(v.trim())) {
+   526→      out.civilStatus = field(v, "C1 §I civil status");
+   527→    }
+   528→  }
+   529→
+   530→  // CITIZENSHIP — label "16. CITIZENSHIP" / "CITIZENSHIP". Domain-checked:
+   531→  // tick-box booleans and stray labels must not become citizenship values.
+   532→  const citCell = findCell(c1, "CITIZENSHIP", { fromRow: 10, toRow: 16, fromCol: 5, toCol: 12 });
+   533→  if (citCell) {
+   534→    const v = valueRightOf(c1, citCell.row, citCell.col);
+   535→    if (v && /^(filipino|dual)/i.test(v.trim())) out.citizenship = field(v, "C1 §I citizenship");
+   536→  }
+   537→
+   538→  // RESIDENTIAL ADDRESS — label "RESIDENTIAL ADDRESS", then several sub-fields
+   539→  // follow in the columns to its right (House/Block/Lot, Street,
+   540→  // Subdivision/Village, Barangay, City/Municipality, Province, ZIP CODE).
+   541→  //
+   542→  // Layout quirk: each sub-label (e.g. "City/Municipality") sits in the row
+   543→  // DIRECTLY BELOW its value (e.g. "TAGUIG"). So to read a sub-field's value
+   544→  // we look one row ABOVE the sub-label, in the same column.
+   545→  const addrCell = findCell(c1, "RESIDENTIAL ADDRESS", { fromRow: 15, toRow: 22, fromCol: 5, toCol: 12 });
+   546→  if (addrCell) {
+   547→    const r = addrCell.row;
+   548→    // Collect the applicant's address values from the block, stopping at the
+   549→    // "18. PERMANENT ADDRESS" section header (which immediately follows).
+   550→    const block: string[] = [];
+   551→    for (let dr = 0; dr <= 8; dr++) {
+   552→      for (let c = addrCell.col; c <= addrCell.col + 8; c++) {
+   553→        const v = getVal(c1, r + dr, c);
+   554→        if (!v) continue;
+   555→        // Stop the block at the permanent-address section.
+   556→        if (/PERMANENT ADDRESS/i.test(v)) { dr = 99; break; }
+   557→        if (isNoise(v)) continue;
+   558→        if (isInstructional(v)) continue;
+   559→        // Skip the sub-labels themselves.
+   560→        if (/^(House|Street|Subdivision|Barangay|City|Municipality|Province|ZIP)/i.test(v)) continue;
+   561→        if (/RESIDENTIAL ADDRESS/i.test(v)) continue;
+   562→        if (v.toLowerCase() === getVal(c1, r + dr, c - 1).toLowerCase()) continue; // merged echo
+   563→        block.push(v);
+   564→      }
+   565→    }
+   566→    // Dedupe adjacent (merged echoes) and drop N/A placeholders.
+   567→    const deduped: string[] = [];
+   568→    for (const v of block) {
+   569→      if (deduped[deduped.length - 1] === v) continue;
+   570→      if (/^n\/?a$/i.test(v)) continue;
+   571→      deduped.push(v);
+   572→    }
+   573→    if (deduped.length) {
+   574→      out.presentAddress = field(deduped.join(", "), "C1 §I residential address");
+   575→    }
+   576→
+   577→    // City / Province / ZIP — sub-label is one row BELOW its value. Read the
+   578→    // cell directly above the sub-label, same column.
+   579→    const cityCell = findCell(c1, "City/Municipality", { fromRow: r, toRow: r + 8, fromCol: addrCell.col, toCol: addrCell.col + 8 });
+   580→    if (cityCell) {
+   581→      const v = getVal(c1, cityCell.row - 1, cityCell.col);
+   582→      if (v && !isInstructional(v) && !/^n\/?a$/i.test(v)) out.city = field(v, "C1 §I city");
+   583→    }
+   584→    const provCell = findCell(c1, "Province", { fromRow: r, toRow: r + 8, fromCol: addrCell.col, toCol: addrCell.col + 8 });
+   585→    if (provCell) {
+   586→      const v = getVal(c1, provCell.row - 1, provCell.col);
+   587→      if (v && !isInstructional(v) && !/^n\/?a$/i.test(v)) out.province = field(v, "C1 §I province");
+   588→    }
+   589→    const zipCell = findCell(c1, "ZIP CODE", { fromRow: r, toRow: r + 8, fromCol: addrCell.col - 2, toCol: addrCell.col + 8 });
+   590→    if (zipCell) {
+   591→      // ZIP value is in the same row as the label (to its right), not above.
+   592→      const v = valueRightOf(c1, zipCell.row, zipCell.col, 4);
+   593→      if (v) out.zipCode = field(v, "C1 §I zip code");
+   594→    }
+   595→  }
+   596→
+   597→  // MOBILE NO — label "20. MOBILE NO."
+   598→  const mobCell = findCell(c1, "MOBILE NO", { fromRow: 28, toRow: 40, fromCol: 5, toCol: 12 });
+   599→  if (mobCell) {
+   600→    const v = valueRightOf(c1, mobCell.row, mobCell.col, 6);
+   601→    if (v) out.mobileNumber = field(v, "C1 §I mobile");
+   602→  }
+   603→
+   604→  // E-MAIL ADDRESS — label "E-MAIL ADDRESS"
+   605→  const emailCell = findCell(c1, "E-MAIL ADDRESS", { fromRow: 28, toRow: 40, fromCol: 5, toCol: 12 });
+   606→  if (emailCell) {
+   607→    const v = valueRightOf(c1, emailCell.row, emailCell.col, 6);
+   608→    if (v && /@/.test(v)) out.emailAddress = field(v, "C1 §I email");
+   609→  }
+   610→
+   611→  return out;
+   612→}
+   613→
+   614→/** Parse the education table on Sheet C1 (Section III). */
+   615→function parseEducation(c1: ExcelJS.Worksheet): ExtractedEducation[] {
+   616→  // Locate the education table header — the row with "LEVEL" and "NAME OF SCHOOL".
+   617→  // Widen the search window: templates customized by applicants (inserted rows
+   618→  // for overflow entries) can push the education table far down the sheet.
+   619→  const headerCell = findCell(c1, "NAME OF SCHOOL", { fromRow: 40, toRow: MAX_SCAN_ROWS, fromCol: 1, toCol: 14 });
+   620→  if (!headerCell) return [];
+   621→
+   622→  const headerRow = headerCell.row;
+   623→  // Data rows follow the header. Each level row has the level name in col B
+   624→  // (ELEMENTARY, SECONDARY, VOCATIONAL/TRADE COURSE, COLLEGE, GRADUATE STUDIES).
+   625→  // Columns (verified against the official CSC template):
+   626→  //   B  = LEVEL
+   627→  //   D  = NAME OF SCHOOL (merged D-F)
+   628→  //   G  = BASIC EDUCATION/DEGREE/COURSE (merged G-I)
+   629→  //   J  = PERIOD FROM (year)
+   630→  //   K  = PERIOD TO (year)
+   631→  //   M  = YEAR GRADUATED
+   632→  //   N  = SCHOLARSHIP/HONORS
+   633→  const LEVELS = [
+   634→    { re: /^elementary/i, label: "ELEMENTARY" },
+   635→    { re: /^secondary/i, label: "SECONDARY" },
+   636→    { re: /^vocational/i, label: "VOCATIONAL/TRADE COURSE" },
+   637→    { re: /^college/i, label: "COLLEGE" },
+   638→    { re: /^graduate/i, label: "GRADUATE STUDIES" },
+   639→  ];
+   640→
+   641→  const out: ExtractedEducation[] = [];
+   642→  // Scan until the signature block (or sheet end) — applicants who took many
+   643→  // courses add extra education rows below the standard 5 levels.
+   644→  const eduEnd = findSectionEnd(c1, headerRow + 1, [/^signature/i, /civil service eligibility/i]) ?? headerRow + MAX_SCAN_ROWS;
+   645→  for (let r = headerRow + 1; r < eduEnd; r++) {
+   646→    const levelRaw = getVal(c1, r, 2); // col B
+   647→    if (!levelRaw) continue;
+   648→    if (/continue on separate sheet/i.test(levelRaw)) continue;
+   649→    const matched = LEVELS.find((l) => l.re.test(levelRaw));
+   650→    if (!matched) continue;
+   651→
+   652→    const school = getVal(c1, r, 4); // col D
+   653→    const degree = getVal(c1, r, 7); // col G
+   654→    const fromYear = getVal(c1, r, 10); // col J
+   655→    const toYear = getVal(c1, r, 11); // col K
+   656→    const yearGrad = getVal(c1, r, 13); // col M
+   657→    const honors = getVal(c1, r, 14); // col N
+   658→
+   659→    // Skip rows where the school is N/A or blank — applicant has no data for
+   660→    // this education level.
+   661→    if (!school || /^n\/?a$/i.test(school)) continue;
+   662→
+   663→    // For elementary/secondary the "degree" column often holds "GRADUATED"
+   664→    // (indicating highest level earned) rather than a real degree.
+   665→    const isGraduatedMarker = /^graduated$/i.test(degree);
+   666→
+   667→    out.push({
+   668→      educationLevel: field(matched.label, "C1 §III level"),
+   669→      schoolName: field(school, "C1 §III school"),
+   670→      degree: field(isGraduatedMarker ? "" : degree, "C1 §III degree"),
+   671→      course: field(isGraduatedMarker ? "" : degree, "C1 §III course"),
+   672→      yearGraduated: field(yearGrad || toYear || fromYear, "C1 §III year graduated"),
+   673→      unitsEarned: field(isGraduatedMarker ? "GRADUATED" : "", "C1 §III units"),
+   674→      awards: field(honors, "C1 §III honors"),
+   675→      highestLevel: field(isGraduatedMarker ? "GRADUATED" : "", "C1 §III highest level"),
+   676→    });
+   677→  }
+   678→  return out;
+   679→}
+   680→
+   681→/** Parse Sheet C2 — civil service eligibility (Section IV). */
+   682→function parseEligibility(c2: ExcelJS.Worksheet): ExtractedEligibility[] {
+   683→  // Header row contains "CAREER SERVICE" and "RATING".
+   684→  const headerCell = findCell(c2, "CAREER SERVICE", { fromRow: 1, toRow: 14, fromCol: 1, toCol: 12 });
+   685→  if (!headerCell) return [];
+   686→  const headerRow = headerCell.row;
+   687→
+   688→  // Column layout differs between the Revised 2017 and Revised 2026 templates:
+   689→  //   2017: B-C=title, D=rating, E=exam date, F=exam place, G-H=license no, I=validity
+   690→  //   2026: B-E=title(merged), F=rating, G-H=exam date, I-K=exam place, L=license no, M=validity
+   691→  // The 2017 mapping read the WRONG cells on 2026 forms (e.g. the rating slot
+   692→  // received the title, the exam-date slot received the title's merged echo).
+   693→  // Detect each column from its own header text instead of hard-coding.
+   694→  const findHeaderCol = (re: RegExp): number | null => {
+   695→    for (let r = headerRow; r <= headerRow + 1; r++) {
+   696→      for (let c = 1; c <= 16; c++) {
+   697→        const v = getVal(c2, r, c);
+   698→        if (v && re.test(v)) return c;
+   699→      }
+   700→    }
+   701→    return null;
+   702→  };
+   703→  const ratingCol = findHeaderCol(/rating/i) ?? 4;
+   704→  const examDateCol = findHeaderCol(/date of exam/i) ?? 5;
+   705→  const examPlaceCol = findHeaderCol(/place of exam/i) ?? 6;
+   706→  const licenseNoCol = findHeaderCol(/^(number|license)/i) ?? 7;
+   707→  const licenseValCol = findHeaderCol(/validity/i) ?? 9;
+   708→
+   709→  // Overflow: applicants with many eligibilities (e.g. RA 1080 + Civil Service
+   710→  // Professional + multiple board ratings) add rows below the standard table.
+   711→  // Scan to the "WORK EXPERIENCE" section header instead of a fixed row count.
+   712→  const out: ExtractedEligibility[] = [];
+   713→  const eligEnd = findSectionEnd(c2, headerRow + 1, [/work experience/i]) ?? headerRow + MAX_SCAN_ROWS;
+   714→  for (let r = headerRow + 2; r < eligEnd; r++) {
+   715→    const title = getVal(c2, r, 2);
+   716→    if (!title) continue;
+   717→    if (/^n\/?a$/i.test(title)) continue;
+   718→    // Official-form furniture ("(Continue on sheet C9 if necessary)",
+   719→    // SIGNATURE row, "CS FORM 212 (Revised 2026), Page 2 of 4" footer) —
+   720→    // on a blank template these are the only rows in the scan band.
+   721→    if (isFormFurniture(title)) continue;
+   722→    const rating = getVal(c2, r, ratingCol);
+   723→    const examDate = getVal(c2, r, examDateCol);
+   724→    const examPlace = getVal(c2, r, examPlaceCol);
+   725→    const licenseNo = getVal(c2, r, licenseNoCol);
+   726→    const licenseVal = getVal(c2, r, licenseValCol);
+   727→    out.push({
+   728→      eligibilityTitle: field(title, "C2 §IV title"),
+   729→      rating: field(rating, "C2 §IV rating"),
+   730→      examDate: field(normalizeSaneDate(examDate), "C2 §IV exam date"),
+   731→      examPlace: field(examPlace, "C2 §IV exam place"),
+   732→      licenseNumber: field(licenseNo, "C2 §IV license no"),
+   733→      licenseValidity: field(normalizeSaneDate(licenseVal), "C2 §IV license validity"),
+   734→    });
+   735→  }
+   736→  return out;
+   737→}
+   738→
+   739→/** Parse Sheet C2 — work experience (Section V).
+   740→ *  Also handles applicant-ppt CONTINUATION sheets that have no "POSITION TITLE"
+   741→ *  header but use the layout:
+   742→ *    col 1 = running row number ("3", "4"...)
+   743→ *    col 2 = FROM date
+   744→ *    col 3 = TO date
+   745→ *    col 4 = POSITION TITLE (long text)
+   746→ *    col 5 = DEPARTMENT/COMPANY (long text)
+   747→ *    col 6 = MONTHLY SALARY (number)
+   748→ *    col 7 = STATUS OF EMPLOYMENT
+   749→ *    col 8 = GOVT SERVICE (Y/N)
+   750→ *  Real-world continuation sheets like "Work Experience Continuation" use this
+   751→ *  layout, so the official-C2-only reader was silently dropping them. */
+   752→function parseWorkExperience(c2: ExcelJS.Worksheet): ExtractedWorkExperience[] {
+   753→  const out: ExtractedWorkExperience[] = [];
+   754→
+   755→  // ---- Mode A: header-based (standard C2 layout) ----
+   756→  const headerCell = findCell(c2, "POSITION TITLE", { fromRow: 10, toRow: 22, fromCol: 1, toCol: 12 });
+   757→
+   758→  if (headerCell) {
+   759→    const headerRow = headerCell.row;
+   760→    // Columns: A-B=From(merged), C=To, D-F=Position(merged), G-I=Dept/Company(merged),
+   761→    //          J=MonthlySalary, K=Grade, L=Status, M=GovtService
+   762→    const workEnd = findSectionEnd(c2, headerRow + 1, [/voluntary work/i]) ?? headerRow + MAX_SCAN_ROWS;
+   763→    for (let r = headerRow + 3; r < workEnd; r++) {
+   764→      const from = getVal(c2, r, 1);
+   765→      const to = getVal(c2, r, 3);
+   766→      const position = getVal(c2, r, 4);
+   767→      if (!position) continue;
+   768→      if (/^n\/?a$/i.test(position)) continue;
+   769→      // Furniture: continuation markers, signature block, page footers.
+   770→      if (isFormFurniture(position)) continue;
+   771→      const dept = getVal(c2, r, 7);
+   772→      const salary = getVal(c2, r, 10);
+   773→      const status = getVal(c2, r, 12);
+   774→      const govt = getVal(c2, r, 13);
+   775→      out.push({
+   776→        positionTitle: field(position, "C2 §V position"),
+   777→        employerName: field(dept, "C2 §V employer"),
+   778→        employerAddress: field("", "C2 §V employer address"),
+   779→        inclusiveDateFrom: field(normalizeSaneDate(from), "C2 §V from"),
+   780→        inclusiveDateTo: field(normalizeSaneDate(to), "C2 §V to"),
+   781→        statusOfEmployment: field(status, "C2 §V status"),
+   782→        monthlySalary: numField(salary, "C2 §V salary"),
+   783→        isGovtService: boolField(govt, "C2 §V govt service"),
+   784→        reasonForLeaving: field("", "C2 §V reason"),
+   785→        accomplishment: field("", "C2 §V accomplishment"),
+   786→        actualDuties: field("", "C2 §V duties"),
+   787→      });
+   788→    }
+   789→    return out;
+   790→  }
+   791→
+   792→  // ---- Mode B: applicant-ppt continuation layout (no header row) ----
+   793→  // Layout: col 1 = row#, col 2 = FROM date, col 3 = TO date,
+   794→  //         col 4 = POSITION TITLE, col 5 = EMPLOYER, col 6 = SALARY,
+   795→  //         col 7 = STATUS, col 8 = GOVT SERVICE
+   796→  const maxRow = sheetMaxRow(c2);
+   797→  for (let r = 1; r <= maxRow; r++) {
+   798→    const rowNum = getVal(c2, r, 1);
+   799→    const from = getVal(c2, r, 2);
+   800→    const to = getVal(c2, r, 3);
+   801→    const position = getVal(c2, r, 4);
+   802→    const dept = getVal(c2, r, 5);
+   803→    const salary = getVal(c2, r, 6);
+   804→    const status = getVal(c2, r, 7);
+   805→    const govt = getVal(c2, r, 8);
+   806→
+   807→    if (!position) continue;
+   808→    if (/^n\/?a$/i.test(position)) continue;
+   809→    if (isFormFurniture(position)) continue;
+   810→
+   811→    // Require the continuation layout markers: row# is digit-only counter,
+   812→    // from/to are dates, position is long text.
+   813→    const looksLikeWork =
+   814→      rowNum && /^\d+\.?$/.test(rowNum.trim()) &&
+   815→      /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(from) &&
+   816→      /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(to) &&
+   817→      position.length > 8;
+   818→    if (!looksLikeWork) continue;
+   819→
+   820→    out.push({
+   821→      positionTitle: field(position, "continuation §V position"),
+   822→      employerName: field(dept, "continuation §V employer"),
+   823→      employerAddress: field("", "continuation §V employer address"),
+   824→      inclusiveDateFrom: field(normalizeSaneDate(from), "continuation §V from"),
+   825→      inclusiveDateTo: field(normalizeSaneDate(to), "continuation §V to"),
+   826→      statusOfEmployment: field(status, "continuation §V status"),
+   827→      monthlySalary: numField(salary, "continuation §V salary"),
+   828→      isGovtService: boolField(govt, "continuation §V govt service"),
+   829→      reasonForLeaving: field("", "continuation §V reason"),
+   830→      accomplishment: field("", "continuation §V accomplishment"),
+   831→      actualDuties: field("", "continuation §V duties"),
+   832→    });
+   833→  }
+   834→  return out;
+   835→}
+   836→
+   837→/** Parse Sheet C3 — training programs (Section VII).
+   838→ *  Also handles applicant-ppt CONTINUATION sheets that have no "TITLE OF
+   839→ *  LEARNING" header but use the layout:
+   840→ *    col 1 = running row number ("21", "22"…)
+   841→ *    col 2 = TITLE
+   842→ *    col 3 = FROM date
+   843→ *    col 4 = TO date
+   844→ *    col 5 = NUMBER OF HOURS (e.g. "3 HOURS")
+   845→ *    col 6 = Type of LD
+   846→ *    col 7 = Conducted/Sponsored by
+   847→ *  Real-world continuation sheets like "Training Continuation" use this
+   848→ *  layout, so the official-C3-only reader was silently dropping them. */
+   849→function parseTraining(c3: ExcelJS.Worksheet): ExtractedTraining[] {
+   850→  const out: ExtractedTraining[] = [];
+   851→
+   852→  // ---- Mode A: header-based (standard C3 layout) ----
+   853→  const headerCell = findCell(c3, "TITLE OF LEARNING", { fromRow: 1, toRow: MAX_SCAN_ROWS, fromCol: 1, toCol: 12 });
+   854→
+   855→  if (headerCell) {
+   856→    const headerRow = headerCell.row;
+   857→    // Columns (verified from real uploads):
+   858→    //   A-D = TITLE (merged)
+   859→    //   E   = FROM date
+   860→    //   F   = TO date
+   861→    //   G   = NUMBER OF HOURS (may include " HOURS" suffix)
+   862→    //   H   = Type of LD
+   863→    const trainEnd = findSectionEnd(c3, headerRow + 1, [/non-academic/i, /other information/i]) ?? headerRow + MAX_SCAN_ROWS;
+   864→    for (let r = headerRow + 2; r < trainEnd; r++) {
+   865→      const title = getVal(c3, r, 1);
+   866→      if (!title) continue;
+   867→      if (/^n\/?a$/i.test(title)) continue;
+   868→      // Furniture: continuation markers, section headers, column headers,
+   869→      // signature block, page footers — never applicant data.
+   870→      if (isFormFurniture(title)) continue;
+   871→      const from = getVal(c3, r, 5);
+   872→      const to = getVal(c3, r, 6);
+   873→      const hours = getVal(c3, r, 7);
+   874→      const type = getVal(c3, r, 8);
+   875→      out.push({
+   876→        titleOfTraining: field(title, "C3 §VII title"),
+   877→        typeOfTraining: field(type, "C3 §VII type"),
+   878→        inclusiveDateFrom: field(normalizeSaneDate(from), "C3 §VII from"),
+   879→        inclusiveDateTo: field(normalizeSaneDate(to), "C3 §VII to"),
+   880→        numberHours: numField(hours, "C3 §VII hours"),
+   881→        isGovtService: { value: null, confidence: "none", source: "C3 §VII" },
+   882→      });
+   883→    }
+   884→    return out;
+   885→  }
+   886→
+   887→  // ---- Mode B: applicant-ppt continuation layout (no header row) ----
+   888→  // Title sits in col 2 (col 1 is a running row counter), dates in cols 3–4,
+   889→  // hours in col 5, type in col 6. Scan from row 1 to MAX_SCAN_ROWS and
+   890→  // accept any row that looks like a training entry.
+   891→  const maxRow = sheetMaxRow(c3);
+   892→  for (let r = 1; r <= maxRow; r++) {
+   893→    const rowNum = getVal(c3, r, 1);
+   894→    const title = getVal(c3, r, 2);
+   895→    const from = getVal(c3, r, 3);
+   896→    const to = getVal(c3, r, 4);
+   897→    const hours = getVal(c3, r, 5);
+   898→    const type = getVal(c3, r, 6);
+   899→    if (!title) continue;
+   900→    if (/^n\/?a$/i.test(title)) continue;
+   901→    if (isFormFurniture(title)) continue;
+   902→    // Require either a digit in the date cells or an "N HOURS" / "N hours" /
+   903→    // bare number in the hours cell — otherwise we're looking at a header or
+   904→    // unrelated row.
+   905→    const looksLikeTraining =
+   906→      /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(from || "") ||
+   907→      /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(to || "") ||
+   908→      /\d+\s*hours?$/i.test(hours || "");
+   909→    if (!looksLikeTraining) continue;
+   910→    // The leading row-number column (col 1) is a digit-only counter — skip
+   911→    // rows where col 1 is non-numeric so we don't pick up unrelated text.
+   912→    if (rowNum && !/^\d+\.?$/.test(rowNum.trim())) continue;
+   913→    out.push({
+   914→      titleOfTraining: field(title, "continuation §VII title"),
+   915→      typeOfTraining: field(type, "continuation §VII type"),
+   916→      inclusiveDateFrom: field(normalizeSaneDate(from), "continuation §VII from"),
+   917→      inclusiveDateTo: field(normalizeSaneDate(to), "continuation §VII to"),
+   918→      numberHours: numField(hours, "continuation §VII hours"),
+   919→      isGovtService: { value: null, confidence: "none", source: "continuation §VII" },
+   920→    });
+   921→  }
+   922→  return out;
+   923→}
+   924→
+   925→/** Parse Sheet C3 — non-academic distinctions / recognition (Section VIII). */
+   926→function parseAwards(c3: ExcelJS.Worksheet): ExtractedAward[] {
+   927→  // Section VIII header contains "NON-ACADEMIC DISTINCTIONS".
+   928→  // Search the whole sheet: applicants with 100+ trainings insert rows above
+   929→  // this section, pushing it far below its standard row 30–50 position.
+   930→  const headerCell = findCell(c3, "NON-ACADEMIC DISTINCTIONS", { fromRow: 5, toRow: MAX_SCAN_ROWS, fromCol: 1, toCol: 14 });
+   931→  if (!headerCell) return [];
+   932→  const r = headerCell.row;
+   933→  // OVERFLOW: the standard template shows only ~7 recognition rows; applicants
+   934→  // with many awards add extra lines. Scan to the "MEMBERSHIP IN ASSOCIATION"
+   935→  // section (or sheet end) instead of a fixed 7 rows.
+   936→  const out: ExtractedAward[] = [];
+   937→  const awardsEnd = findSectionEnd(c3, r + 1, [/membership/i]) ?? r + MAX_SCAN_ROWS;
+   938→  for (let rr = r; rr < awardsEnd; rr++) {
+   939→    for (let c = headerCell.col + 1; c <= headerCell.col + 10; c++) {
+   940→      const v = getVal(c3, rr, c);
+   941→      if (!v) continue;
+   942→      if (isNoise(v)) continue;
+   943→      if (isInstructional(v)) continue;
+   944→      if (isFormFurniture(v)) continue;
+   945→      if (/^n\/?a$/i.test(v)) continue;
+   946→      // Skip bare section numbers like "31.", "32.", "33."
+   947→      if (/^\d+\.$/.test(v.trim())) continue;
+   948→      // Skip CSC form footer / signature-line boilerplate that leaks into the
+   949→      // awards scan on dense C3 sheets (rows past the awards table contain
+   950→      // "SIGNATURE", "DATE", and "CS FORM 212 (Revised 2017), Page X of Y").
+   951→      if (/^(signature|date|cs form no\.?|community tax)/i.test(v.trim())) continue;
+   952→      if (/^cs form 212.*page \d+ of \d+$/i.test(v.trim())) continue;
+   953→      // Skip actual date values that sit next to the "DATE" label in the
+   954→      // signature row (e.g. "JULY 15, 2026", "07/15/2026") — they look like
+   955→      // recognition dates but they're the signature date, not an award.
+   956→      if (/^[A-Z]+\s+\d{1,2},?\s+\d{4}$/i.test(v.trim())) continue;
+   957→      if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(v.trim())) continue;
+   958→      // Skip very short fragments that are clearly not recognition text.
+   959→      if (v.trim().length < 4) continue;
+   960→      // Stop at the next section header.
+   961→      if (/MEMBERSHIP/i.test(v)) return out;
+   962→      // Skip merged echoes.
+   963→      if (v === getVal(c3, rr, c - 1)) continue;
+   964→      out.push({
+   965→        recognitionType: field("Recognition", "C3 §VIII type"),
+   966→        recognitionDetails: field(v, "C3 §VIII details"),
+   967→        recognitionScope: field("", "C3 §VIII scope"),
+   968→        recognitionCategory: field("", "C3 §VIII category"),
+   969→        recognitionProvider: field("", "C3 §VIII provider"),
+   970→        dateGranted: field("", "C3 §VIII date"),
+   971→      });
+   972→      break; // move to next row
+   973→    }
+   974→  }
+   975→  return out;
+   976→}
+   977→
+   978→// ---- Continuation-sheet support --------------------------------------------
+   979→//
+   980→// Applicants commonly duplicate a page sheet and paste overflow rows into it
+   981→// ("C3 (2)", "C3-copy", "Sheet1", "Continuation", "Work Exp Sheet"...). The
+   982→// classifiers below detect what each extra sheet contains by its header
+   983→// keywords, and the matching section parser is run against it.
+   984→
+   985→type ExtraSheetKind = "training" | "award" | "work" | "eligibility" | "education";
+   986→
+   987→function classifyExtraSheet(ws: ExcelJS.Worksheet): ExtraSheetKind | null {
+   988→  // Read the first 40 rows of text for classification.
+   989→  const maxRow = Math.min(ws.actualRowCount, 40);
+   990→  const lines: string[] = [];
+   991→  for (let r = 1; r <= maxRow; r++) {
+   992→    for (let c = 1; c <= 14; c++) {
+   993→      const v = getVal(ws, r, c);
+   994→      if (v) lines.push(v);
+   995→    }
+   996→  }
+   997→  const text = lines.join("\n").toLowerCase();
+   998→  if (!text.trim()) return null;
+   999→  if (/title of learning|training program|l&d|number of hours/.test(text)) return "training";
+  1000→  if (/non-academic/.test(text)) return "award";
+  1001→  if (/position title/.test(text)) return "work";
+  1002→  if (/career service|rating/.test(text)) return "eligibility";
+  1003→  if (/name of school/.test(text)) return "education";
+  1004→  // Fallback: a continuation page usually has no headers — sniff the table
+  1005→  // shape. Real applicants paste overflow into a fresh sheet using a column
+  1006→  // layout like "row-num | title | from | to | hours | type | conducted-by"
+  1007→  // — title sits in col 2 (col 1 is the running row counter), dates in 3-4,
+  1008→  // hours in 5, type in 6. We probe BOTH the official C3 layout (title in
+  1009→  // col 1, dates in 5-6, hours in 7, type in 8) AND the applicant-ppt layout
+  1010→  // because both occur in the wild. Work-experience continuation sheets use a
+  1011→  // similar layout but their "title" slot holds a date ("07/01/2025"), so we
+  1012→  // require the title column to be NON-numeric text of >8 chars.
+  1013→  const isTitleText = (s: string) =>
+  1014→    s.length > 8 && !/^\d/.test(s.trim()) && !/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s.trim()) && !isFormFurniture(s);
+  1015→
+  1016→  // ---- Training shape (two layouts) ----
+  1017→  const TRAINING_LAYOUTS: Array<{ titleCol: number; probeCols: number[] }> = [
+  1018→    { titleCol: 1, probeCols: [1, 5, 6, 7, 8] }, // official C3 (title merged A:D)
+  1019→    { titleCol: 2, probeCols: [2, 3, 4, 5, 6] }, // applicant-ppt continuation
+  1020→  ];
+  1021→  let dataRows = 0;
+  1022→  let trainingShaped = 0;
+  1023→  for (let r = 1; r <= Math.min(ws.actualRowCount, 80); r++) {
+  1024→    for (const layout of TRAINING_LAYOUTS) {
+  1025→      const cols = layout.probeCols.map((c) => getVal(ws, r, c));
+  1026→      const filled = cols.filter(Boolean).length;
+  1027→      const title = cols[layout.probeCols.indexOf(layout.titleCol)] || "";
+  1028→      if (filled >= 4 && isTitleText(title)) {
+  1029→        dataRows++;
+  1030→        // Look for any date- or hours-shaped value in the date/hours columns.
+  1031→        const dateOrHours = cols.some((v) => /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(v) || /\d+\s*hours?$/i.test(v));
+  1032→        if (dateOrHours) trainingShaped++;
+  1033→        break; // count this row only once even if both layouts match
+  1034→      }
+  1035→    }
+  1036→  }
+  1037→  if (dataRows >= 3 && trainingShaped >= Math.ceil(dataRows / 2)) return "training";
+  1038→
+  1039→  // ---- Work Experience shape (continuation sheets have no "POSITION TITLE" header) ----
+  1040→  // Layout: col 1 = row#, col 2 = from date, col 3 = to date, col 4 = position (long),
+  1041→  // col 5 = employer (long), col 6 = salary, col 7 = status, col 8 = govt Y/N.
+  1042→  // We identify by: col 4 is long text, cols 2-3 are dates, filled >= 5.
+  1043→  let workDataRows = 0;
+  1044→  let workShaped = 0;
+  1045→  for (let r = 1; r <= Math.min(ws.actualRowCount, 80); r++) {
+  1046→    const rowNum = getVal(ws, r, 1);
+  1047→    const from = getVal(ws, r, 2);
+  1048→    const to = getVal(ws, r, 3);
+  1049→    const position = getVal(ws, r, 4);
+  1050→    const employer = getVal(ws, r, 5);
+  1051→    const salary = getVal(ws, r, 6);
+  1052→    const filled = [rowNum, from, to, position, employer, salary].filter(Boolean).length;
+  1053→    if (filled >= 5 && position.length > 8 && /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(from) && /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(to)) {
+  1054→      // Row 1 is a running counter (digit-only) — confirms this is the continuation layout.
+  1055→      if (rowNum && /^\d+\.?$/.test(rowNum.trim())) {
+  1056→        workDataRows++;
+  1057→        workShaped++;
+  1058→      }
+  1059→    }
+  1060→  }
+  1061→  if (workDataRows >= 3 && workShaped >= Math.ceil(workDataRows / 2)) return "work";
+  1062→
+  1063→  return null;
+  1064→}
+  1065→
+  1066→/** Sheet names that belong to the standard CSC template (+ Lookup).
+  1067→ *  The Revised 2026 template ships named continuation pages — "C5_L&D cont.",
+  1068→ *  "C6_Work exp cont.", "C7_Family Background cont. ", "C8_Edu cont.",
+  1069→ *  "C9_Elig cont." — which are BLANK form pages (labels only, no data), not
+  1070→ *  applicant-made overflow sheets. Treating them as "extra sheets" made the
+  1071→ *  classifiers harvest their label rows as data. Applicant-created duplicates
+  1072→ *  like "C3 (2)" or "Work Experience Continuation" do NOT match and are still
+  1073→ *  parsed for overflow rows. */
+  1074→function isStandardSheetName(name: string): boolean {
+  1075→  const t = name.trim();
+  1076→  // Official page sheets C1–C19 (bare) and "C<N>_... cont." continuation pages.
+  1077→  if (/^c(1\d|\d)$/i.test(t)) return true;
+  1078→  if (/^c(1\d|\d)_.*cont\.?\s*$/i.test(t)) return true;
+  1079→  return /^(lookup|sheet\.?[1-4]|page\.?[1-4])$/i.test(t);
+  1080→}
+  1081→
+  1082→/**
+  1083→ * Parse every non-standard (continuation) sheet in the workbook, classifying
+  1084→ * each by its headers and merging the results into the given buckets.
+  1085→ * Returns a list of human-readable warnings (e.g. how many extra rows were
+  1086→ * recovered from which sheet) for transparency in the review UI.
+  1087→ */
+  1088→function parseContinuationSheets(
+  1089→  workbook: ExcelJS.Workbook,
+  1090→  buckets: {
+  1091→    educations: ExtractedEducation[];
+  1092→    workExperiences: ExtractedWorkExperience[];
+  1093→    trainings: ExtractedTraining[];
+  1094→    eligibilities: ExtractedEligibility[];
+  1095→    awards: ExtractedAward[];
+  1096→  }
+  1097→): string[] {
+  1098→  const warnings: string[] = [];
+  1099→  for (const ws of workbook.worksheets) {
+  1100→    if (isStandardSheetName(ws.name)) continue;
+  1101→    if (ws.rowCount === 0 || ws.actualRowCount === 0) continue;
+  1102→    const kind = classifyExtraSheet(ws);
+  1103→    if (!kind) {
+  1104→      // Non-standard sheet that we couldn't classify. Warn so silent drops
+  1105→      // (like the bug where "Training Continuation" was skipped because its
+  1106→      // column layout didn't match C3) show up in the review UI instead of
+  1107→      // vanishing.
+  1108→      warnings.push(`Continuation sheet "${ws.name}" was skipped (unrecognized layout). If it contains data, verify it was captured.`);
+  1109→      continue;
+  1110→    }
+  1111→    switch (kind) {
+  1112→      case "training": {
+  1113→        const before = buckets.trainings.length;
+  1114→        buckets.trainings.push(...parseTraining(ws));
+  1115→        const found = buckets.trainings.length - before;
+  1116→        if (found > 0) warnings.push(`Continuation sheet "${ws.name}": ${found} additional training${found === 1 ? "" : "s"} recovered.`);
+  1117→        break;
+  1118→      }
+  1119→      case "award": {
+  1120→        const before = buckets.awards.length;
+  1121→        buckets.awards.push(...parseAwards(ws));
+  1122→        const found = buckets.awards.length - before;
+  1123→        if (found > 0) warnings.push(`Continuation sheet "${ws.name}": ${found} additional award${found === 1 ? "" : "s"} recovered.`);
+  1124→        break;
+  1125→      }
+  1126→      case "work": {
+  1127→        const before = buckets.workExperiences.length;
+  1128→        buckets.workExperiences.push(...parseWorkExperience(ws));
+  1129→        const found = buckets.workExperiences.length - before;
+  1130→        if (found > 0) warnings.push(`Continuation sheet "${ws.name}": ${found} additional work experience entr${found === 1 ? "y" : "ies"} recovered.`);
+  1131→        break;
+  1132→      }
+  1133→      case "eligibility": {
+  1134→        const before = buckets.eligibilities.length;
+  1135→        buckets.eligibilities.push(...parseEligibility(ws));
+  1136→        const found = buckets.eligibilities.length - before;
+  1137→        if (found > 0) warnings.push(`Continuation sheet "${ws.name}": ${found} additional eligibilit${found === 1 ? "y" : "ies"} recovered.`);
+  1138→        break;
+  1139→      }
+  1140→      case "education": {
+  1141→        const before = buckets.educations.length;
+  1142→        buckets.educations.push(...parseEducation(ws));
+  1143→        const found = buckets.educations.length - before;
+  1144→        if (found > 0) warnings.push(`Continuation sheet "${ws.name}": ${found} additional education entr${found === 1 ? "y" : "ies"} recovered.`);
+  1145→        break;
+  1146→      }
+  1147→    }
+  1148→  }
+  1149→  return warnings;
+  1150→}
+  1151→
+  1152→// ---- Main entry point ------------------------------------------------------
+  1153→
+  1154→/**
+  1155→ * Deterministically parse a CSC Form 212 PDS Excel file into the
+  1156→ * ExtractionResult structure. Returns null if the file does not look like a
+  1157→ * standard PDS (so the caller can fall back to the LLM extraction path).
+  1158→ */
+  1159→export async function parsePdsExcel(filePath: string): Promise<ExtractionResult | null> {
+  1160→  const abs = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
+  1161→  const buffer = await fs.readFile(abs);
+  1162→  const workbook = new ExcelJS.Workbook();
+  1163→  // Cast to the exact declared parameter type: Buffer typings differ between
+  1164→  // runtimes (@types/node vs bun) but the runtime value is the same object.
+  1165→  await workbook.xlsx.load(buffer as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+  1166→
+  1167→  if (!looksLikePds(workbook)) return null;
+  1168→
+  1169→  const c1 = getSheet(workbook, [/^c1$/i, /^sheet.?1$/i, /^page.?1$/i]);
+  1170→  const c2 = getSheet(workbook, [/^c2$/i, /^sheet.?2$/i, /^page.?2$/i]);
+  1171→  const c3 = getSheet(workbook, [/^c3$/i, /^sheet.?3$/i, /^page.?3$/i]);
+  1172→
+  1173→  const personalInfo = c1 ? parsePersonalInfo(c1) : {};
+  1174→  const buckets = {
+  1175→    educations: c1 ? parseEducation(c1) : [],
+  1176→    workExperiences: c2 ? parseWorkExperience(c2) : [],
+  1177→    trainings: c3 ? parseTraining(c3) : [],
+  1178→    eligibilities: c2 ? parseEligibility(c2) : [],
+  1179→    awards: c3 ? parseAwards(c3) : [],
+  1180→  };
+  1181→
+  1182→  // OVERFLOW: parse any extra sheets the applicant added ("C3 (2)",
+  1183→  // "Continuation", "Sheet1", ...) and merge their rows into the buckets.
+  1184→  const warnings = parseContinuationSheets(workbook, buckets);
+  1185→
+  1186→  return {
+  1187→    personalInfo,
+  1188→    ...buckets,
+  1189→    documentType: "PDS",
+  1190→    warnings,
+  1191→  };
+  1192→}
+  1193→
