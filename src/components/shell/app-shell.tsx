@@ -1,0 +1,79 @@
+"use client";
+
+// ============================================================================
+// RMIS — Application shells (spec §13): AppShell for signed-in users
+// (NavRail + mobile top bar + WorkspaceHeader + main + Footer) and
+// PublicShell for the anonymous jobs board (SiteHeader + main + Footer).
+// Sticky-footer rule: root is min-h-screen flex flex-col; main is flex-1;
+// footer sits at mt-auto.
+// ============================================================================
+
+import { useSession } from "@/components/session-provider";
+import { MobileNav } from "@/components/shell/mobile-nav";
+import { NavRail } from "@/components/shell/nav-rail";
+import { WorkspaceHeader } from "@/components/shell/workspace-header";
+import { Footer } from "@/components/shell/footer";
+import { SiteHeader } from "@/components/shell/site-header";
+import { navigate, ROLE_HOME } from "@/lib/router";
+import type { ViewParams } from "@/lib/router";
+
+export function AppShell({
+  view,
+  params,
+  children,
+}: {
+  view: string;
+  params: ViewParams;
+  children: React.ReactNode;
+}) {
+  const { user } = useSession();
+
+  return (
+    <div className="flex min-h-screen flex-col bg-fog">
+      <div className="flex flex-1 items-stretch">
+        {/* Desktop left rail (lg+) */}
+        <NavRail view={view} />
+
+        {/* Content column */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Mobile top bar with sheet menu */}
+          <div className="sticky top-0 z-40 flex h-16 items-center gap-1.5 border-b border-border bg-white px-3 sm:px-4 lg:hidden">
+            <MobileNav view={view} />
+            <button
+              onClick={() => {
+                if (user) navigate(ROLE_HOME[user.role]);
+              }}
+              className="flex min-h-[44px] items-center gap-2.5"
+              aria-label="Go to my workspace"
+            >
+              <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-ink text-base font-medium text-white">
+                M
+              </span>
+              <span className="text-sm font-medium text-ink">MIRDC Recruitment</span>
+            </button>
+          </div>
+
+          <WorkspaceHeader view={view} params={params} />
+
+          <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-6 sm:px-6 sm:py-8">
+            {children}
+          </main>
+
+          <Footer />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function PublicShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-screen flex-col bg-fog">
+      <SiteHeader />
+      <main className="w-full flex-1">{children}</main>
+      <Footer />
+    </div>
+  );
+}
+
+export default AppShell;
