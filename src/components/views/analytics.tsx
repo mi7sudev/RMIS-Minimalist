@@ -393,7 +393,7 @@ export default function Analytics() {
           actions={
             <>
               <Select value={drill} onValueChange={(v) => setDrill(v as Drill)}>
-                <SelectTrigger className="dlg-input min-h-[44px] w-[170px]" aria-label="Stage drill filter">
+                <SelectTrigger className="dlg-input min-h-[44px] w-full sm:w-[170px]" aria-label="Stage drill filter">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -406,7 +406,7 @@ export default function Analytics() {
                 </SelectContent>
               </Select>
               <Select value={cycle} onValueChange={setCycle}>
-                <SelectTrigger className="dlg-input min-h-[44px] w-[140px]" aria-label="Recruitment cycle">
+                <SelectTrigger className="dlg-input min-h-[44px] w-full sm:w-[140px]" aria-label="Recruitment cycle">
                   <SelectValue placeholder="All time" />
                 </SelectTrigger>
                 <SelectContent>

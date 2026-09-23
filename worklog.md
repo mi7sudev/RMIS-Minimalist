@@ -560,3 +560,100 @@ Stage Summary:
 - Auth pages now carry the full public chrome; header is a sharp full-width enterprise bar with Positions + orange Sign in (Sign up removed as requested).
 - System-wide 1600px content grid eliminates the wide-screen margin complaint; overlap between header and page content is structurally impossible (top-0 anchored, opaque-frost bar, proper section padding).
 - No business logic, API contracts, routes, or state machines touched — presentation layer only (RMIS-FLOW-SPECIFICATION.md intact).
+
+---
+Task ID: 3-d
+Agent: frontend-styling-expert
+Task: Responsive fixes — applicant-home split/positions grid/journey label, profile-view sticky rail
+
+Work Log:
+- Read worklog.md (last ~150 lines) for design-system contract (sharp edges, orange only on .dlg-cta, 44px targets, max-w-[1600px] px-4 sm:px-6 lg:px-8 gutters) and confirmed ui/shell.tsx SectionCard/PageHeader changes stay untouched.
+- applicant-home.tsx main content split (was the confirmed 1024px crush: left column ~248px while positions grid ran 2-up): `lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-14` → `lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)] lg:gap-10 xl:gap-14` so the rail flexes 320→400px and the left column keeps usable width at 1024–1279.
+- applicant-home.tsx open-positions grid: `grid gap-4 sm:grid-cols-2` → `grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2` (2-up on full-width tablet portrait, 1-up beside the rail at 1024–1279, 2-up again ≥1280). Ends the ~116px card crush / vertical letter-wrap.
+- JourneyTimeline (320px fix, allowed copy swap): added optional `short` field to the local steps render array; the pending third checkpoint now renders `<span className="sm:hidden">Awaiting decision</span><span className="hidden sm:inline">Awaiting the shortlist decision</span>` inside the existing typography span (both variants inherit identical text-[10px] leading-tight + color, visually identical). "Shortlisted"/"Not Shortlisted"/"Submitted"/"Review" left verbatim; no handler/state/key changes (`key` still derives from the string label).
+- KPI rows audited: the sm:grid-cols-3 summary row and skeleton KPI row sit FULL-WIDTH above the split → left as-is per contract. In-split crush rule applied by extension to the two skeleton mirrors so first-load skeletons match the fixed layout: skeleton split container got the same `minmax(320px,400px) lg:gap-10 xl:gap-14`, and the 4-up skeleton KPI row inside the left column `sm:grid-cols-2 lg:grid-cols-2` → `sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2` (mirrors the real positions grid behavior; presentation-only).
+- profile-view.tsx (~line 314): desktop step rail `lg:sticky lg:top-24` → `lg:sticky lg:top-6`, matching the six other rails (applicant-home rail already uses lg:top-6); rail now actually sticks instead of floating 96px down. Split container `lg:grid-cols-[16rem_minmax(0,1fr)]` audited — healthy.
+- profile/* spot-check (awards, documents, education, eligibility, personal-info, training, work-experience, form-dialog, pds-upload-card, save-hint): grep for w-/min-w-/max-w- ≥300px and fixed grid tracks — only `sm:grid-cols-[minmax(0,220px)_minmax(0,1fr)]` (documents-section) which is <300px with a minmax(0,1fr) fallback → healthy, no changes.
+- VERIFY: `bunx tsc --noEmit` — zero errors outside the known pre-existing examples//skills//mini-services/ set; `bun run lint` — clean (exit 0). No agent-browser used; dev server untouched.
+
+Stage Summary:
+- Applicant home no longer crushes at 1024–1279: rail flexes 320–400px, positions cards drop to 1-up beside the rail (2-up at <1024 and ≥1280), gaps tighten at lg and restore at xl; first-load skeletons mirror the new layout.
+- Journey timeline third checkpoint uses the sanctioned short mobile label ("Awaiting decision" / full label sm+) with identical styling; other labels untouched.
+- Profile step rail sticks at lg:top-6 like every other rail. Zero logic/handler/fetch/state/routing/aria changes — classNames + the one allowed copy swap only.
+
+---
+Task ID: 3-b
+Agent: frontend-styling-expert
+Task: Responsive fixes — analytics (drill-down selects), settings (dialog grids, mock-mode pill), command-center (tablet band)
+
+Work Log:
+- Read worklog.md tail + re-confirmed ui/shell.tsx already carries the systemic fix (SectionCard root `min-w-0`, header row `flex-wrap`, PageHeader xl stacking) — not re-touched; KpiCard/SectionCard grepped for fixed widths (none).
+- analytics.tsx (Drill-down SectionCard `actions`): SelectTrigger "Stage drill filter" `w-[170px]` → `w-full sm:w-[170px]` and "Recruitment cycle" `w-[140px]` → `w-full sm:w-[140px]` — both selects stack full-width inside the wrapping SectionCard header on phones; `dlg-input min-h-[44px]`, aria-labels, onValueChange untouched.
+- settings.tsx: Create User + Edit User dialogs' name rows `grid grid-cols-2 gap-3` → `grid grid-cols-1 gap-3 sm:grid-cols-2` (both instances, ~L346 and ~L395; First/Last name inputs now stack 1-col at 320px).
+- settings.tsx (notification channels provider row): mock StatusPill label shortened "Mock mode — messages are logged only" → "Mock mode" (the one allowed copy change; kills the ~260px nowrap overflow at 320px). Meaning preserved via a conditional muted line in the same row's text block: `<p className="mt-1 text-xs text-stone">Messages are logged only.</p>` — rendered only when provider === "mock" so it never contradicts a configured real provider. Nothing else in the row changed.
+- command-center.tsx audit at the 1024px tablet band (content ≈704px beside 256px rail → main-grid cols ≈219px):
+  - KPI row `grid gap-4 sm:grid-cols-2 lg:grid-cols-4` → `xl:grid-cols-4` (4-up inside the lg:col-span-2 area was ≈103px/card at 1024px — crushed; now 2-up at lg, 4-up from 1280px).
+  - Main grid KEPT `lg:grid-cols-3` (4a condition not met): no child has a fixed width ≥300px — only fixed widths are the w-16 PipelineSpark, 28/36px chips and icon glyphs; every row/card uses flex-wrap + min-w-0 + truncate, so stacking the split at xl was unnecessary. Loading skeleton mirrors the unchanged lg:grid-cols-3 (stays consistent).
+  - Sticky aside confirmed `self-start lg:sticky lg:top-6` — no drift, left as-is.
+- Verification: `bunx tsc --noEmit` — 0 errors in src/ and 0 in analytics/settings/command-center (exit 1 solely from pre-existing examples/, skills/, mini-services/ errors, known/OK); `bun run lint` exit 0, no findings.
+
+Stage Summary:
+- Phones: analytics drill-down selects go full-width stacked; both settings user-dialog name fields stack 1-col; the mock-mode provider row no longer overflows its card (short pill + wrapped muted explanation).
+- Tablet (1024–1279px): command-center KPIs read 2-up instead of four ~100px cards; main 2/3+aside split, sticky top-6, and all fixed-width checks verified healthy.
+- Presentation-only: zero handler/fetch/payload/state/routing/aria-label changes; no new rounded-*, no orange outside .dlg-cta, 44px touch targets and gutter contract untouched.
+
+---
+Task ID: 3-a
+Agent: frontend-styling-expert
+Task: Responsive fixes — jobs-view (double gutters, pagination wrap, session-aware sticky rail, sort select)
+
+Work Log:
+- Read worklog.md (last 150+ lines), app-shell.tsx (PublicShell main = bare `flex w-full flex-1 flex-col`; AppShell main = `mx-auto w-full max-w-[1600px] flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8`), page.tsx (JobsView renders inside PublicShell when anonymous, AppShell for applicant/evaluator/admin) and session-provider.tsx before coding.
+- DOUBLE GUTTERS: jobs-view previously painted its own `mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8` container in BOTH shells — inside AppShell that doubled the gutters (~128px combined at lg) on list AND detail views. Added `const { user } = useSession()` (new import from @/components/session-provider — import did not pre-exist) and a `shellPad` variable: signed-in → `"w-full"` (plain wrapper; AppShell main already supplies the identical px/py so vertical rhythm is byte-identical), anonymous → the full original container string, unchanged. Applied to both containers (detail-mode root at ~line 692 and list-mode root at ~line 894) via className={shellPad}; no conditional rendering logic changed. No flicker risk: page.tsx renders JobsView only after session loading resolves, so `user` is settled before mount.
+- PAGINATION: `<nav>` row gained `flex-wrap` (was unwrapped ~9 × 44px ≈ 444px, overflowing ≤414px phones) and gap tightened to `gap-1 sm:gap-1.5`; justify-center keeps wrapped rows centered; all buttons keep h-11/min-w-11 (44px touch targets), ellipsis spans stay non-interactive w-8.
+- FILTER RAIL STICKY: desktop rail aside is now session-aware — `lg:top-20` kept for anonymous (public SiteHeader is sticky h-16), `lg:top-6` when signed-in (nothing sticky at lg+ in AppShell, matches detail view's existing xl:top-6 precedent); implemented as template-merge `${user ? "lg:top-6" : "lg:top-20"}`.
+- SORT SELECT: SelectTrigger `w-[170px]` → `w-[140px] sm:w-[170px]`. Flex context inspected: outer row is flex-wrap justify-between (sort group can sit on its own wrapped line), inner group hides the "Sort" label below sm; 140px fits 320px viewports (px-4 leaves 288px; results text + 140px ≈ 222px worst case) and min-h-[44px] kept.
+- Presentation-only: zero handler/fetch/payload/state/routing/aria-label changes; no new rounded-*, no orange added, 44px targets intact everywhere, gutter contract string (`max-w-[1600px] px-4 sm:px-6 lg:px-8`) preserved verbatim for the public branch.
+
+Stage Summary:
+- JobsView now consumes exactly one gutter system in both shells: public keeps its own 1600px container (unchanged), signed-in inherits AppShell's container with no double padding at any viewport; pagination wraps on ≤414px instead of overflowing; the desktop filter rail reclaims 56px of viewport height when signed-in; the sort select can no longer overflow 320px phones.
+- Verification: `bunx tsc --noEmit` → zero errors in src/ (only pre-existing examples/ + skills/ errors remain); `bun run lint` clean. Dev server not restarted (hot reload).
+- Note for follow-up (out of scope, not changed): the detail view's summary rail uses a fixed `xl:sticky xl:top-6`, which for ANONYMOUS users can tuck under the sticky public SiteHeader (h-16) when scrolled — same session-aware treatment would be needed if confirmed.
+
+---
+Task ID: 3-c
+Agent: frontend-styling-expert
+Task: Responsive fixes — evaluator kanban breakpoints (lg 2-col), KPI grids xl, review-workspace dossier split + dialogs
+
+Work Log:
+- Kanban boards (review-queue.tsx:300, candidates.tsx:553, job-workspace.tsx:329): all three board containers changed `lg:grid lg:grid-cols-4` → `lg:grid lg:grid-cols-2 xl:grid-cols-4`, so 1024–1279px (256px rail leaves ~704px) renders a 2×2 grid of ~340px columns instead of ~164px crushed columns; full 4-up only at ≥1280. Snap-scroll flex row (`flex snap-x snap-proximity … overflow-x-auto scroll-thin pb-2 lg:overflow-visible lg:pb-0`) and equal-height stretching (`items-stretch`, KanbanColumn internals) kept byte-identical below lg.
+- KPI rows: review-queue.tsx:290 and candidates.tsx:378 stage/KPI grids `grid grid-cols-2 gap-4 lg:grid-cols-4` → `xl:grid-cols-4` (KpiCard's 34px numeral + hint crushed at ~164px on lg). job-workspace.tsx audited: no KPI/stat grid on `lg:grid-cols-*` (overview split is already `xl:grid-cols-[1fr_320px]`, mini pipeline is a dl list) — no change needed there.
+- ui/shell.tsx SkeletonKanban: `grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5` → `grid grid-cols-2 gap-4 xl:grid-cols-4` so loading skeletons mirror the real 4-column boards (2-up below xl). Default `columns` 5 → 4 to match the board. Call-site audit: SkeletonKanban has exactly ONE call site in src (review-queue.tsx:284) and it already passes `columns={4}` — nothing to align (candidates/job-workspace load with SkeletonKpis+SkeletonRows).
+- review-workspace.tsx: (a) dossier split — both occurrences of `grid gap-6 lg:grid-cols-[1fr_380px]` (line 915 `!payload` loading skeleton + line 949 loaded dossier) → `lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_380px]` so the decision rail doesn't eat the dossier at 1024 (~340px rail leaves ~340px+ for the dossier); (b) NoticeFormDialog date+time grid line 548 `grid grid-cols-2 gap-3` → `grid grid-cols-1 gap-3 sm:grid-cols-2` (inputs readable at 320px, side-by-side from sm); (c) notice history rows (1157/1159) and direct-email history rows (753/755): row +`flex-wrap`, timestamp+status pill cluster `shrink-0` → `shrink` so the cluster wraps under the label on phones instead of crowding the truncated label; (d) decision rail `lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto scroll-thin` left byte-identical.
+- PageHeader re-force check: review-queue/candidates/review-workspace use the shared PageHeader (xl-stacking already fixes "Review Qu…" truncation). job-workspace.tsx:218 hand-rolls the "PageHeader pattern" with `sm:flex-row sm:items-end sm:justify-between` — re-forced a row from 640px; aligned to `xl:flex-row xl:items-end xl:justify-between` (presentation-only; Refresh/Edit/Delete cluster now stacks under the title below xl, no handler/aria touched).
+- Contract: classNames only — zero handler/fetch/payload/state/routing/aria-label changes; no new rounded-* or colors introduced; 44px targets untouched.
+
+Stage Summary:
+- At 1024px evaluator boards now render 2×2 (~340px columns) with snap-scroll below lg, KPIs go 2-up until xl, skeletons mirror the real boards, and the review-workspace dossier keeps ~340px of rail-safe width at lg (380px restored at xl).
+- Only call-site delta found vs. task brief: SkeletonKanban has one call site (not two), already columns={4}; job-workspace has no lg KPI grid (nothing to change there beyond its kanban + header row).
+- Verification: `bunx tsc --noEmit` zero errors in src (only pre-existing examples/websocket + skills/* errors remain); `bun run lint` clean; dev server untouched (hot-reload).
+
+---
+Task ID: R1 (responsive wave, orchestrator)
+Agent: Z.ai Code (main orchestrator)
+Task: Owner directive — "make sure that the system is fully responsive on any aspect ratio like mobile view or tablets etc", then run the two-axis code-review skill on the changes.
+
+Work Log:
+- Static hazard scan (Explore agent) over all views/shell/apply/kanban: fixed widths, table wrappers, grid bases, calc heights, dialog widths, nowrap rows, sticky offsets, hidden-splits, charts, overflow-hidden clipping, min-w-0 coverage.
+- Live multi-viewport audit (agent-browser, sessions per role via API-issued JWT cookies): 4 roles x 15 views x {320,375,768,1024,2560}px = 75 combos, body-level overflow check + culprit extraction; screenshots of flagged combos (audit-shots/resp/01-15).
+- Confirmed defects: analytics funnel/status cards BLOW OUT their grid track (grid items refuse to shrink below min-content of nowrap SectionCard description -> card clipped at 320-1279px); review-queue/candidates/job-workspace kanban lg:grid-cols-4 = ~164px crushed columns at 1024; applicant-home fixed 400px rail + 2-up job cards = ~116px cards at 1024; PageHeader title truncates ("Review Qu...") when wide action clusters sit beside it from sm (640px); jobs-view double gutters (own 1600px container inside AppShell's identical main) at every viewport; notifications popover w-[340px] > 320px viewport; mobile-nav sheet w-[300px] at 320; analytics fixed-width drill-down selects; jobs pagination ~444px unwrapped; settings grid-cols-2 name fields + nowrap "Mock mode — messages are logged only" pill at 320; review-workspace dossier 380px rail at lg (300px dossier) + grid-cols-2 date/time inputs; sticky-offset drift (profile lg:top-24, jobs rail/session mismatch); jobs detail summary rail tucks under the public sticky header for anonymous users.
+- ORCHESTRATOR FIXES (shared primitives, own edits): ui/shell.tsx SectionCard root +min-w-0 (kills the grid-track blowout systemically), header row +flex-wrap, actions +flex-wrap; PageHeader row breakpoint sm: -> xl: (stacks below 1280 so action clusters can never squeeze the title); notifications-panel PopoverContent w-[340px] -> w-[min(340px,calc(100vw-2rem))]; mobile-nav SheetContent w-[300px] -> w-[min(300px,85vw)]; jobs-view detail aside xl:top-6 -> session-aware (public xl:top-20 under sticky header / signed-in xl:top-6).
+- PARALLEL FIX AGENTS (worklog sections 3-a..3-d with per-edit old->new strings): 3-a jobs-view (session-aware shellPad container kills double gutters; pagination flex-wrap; session-aware lg:top-20/6 filter rail; sort select 140->170); 3-b analytics (selects w-full sm:w-[170/140px]), settings (dialog grids grid-cols-1 sm:grid-cols-2 x2; mock pill label -> "Mock mode" + "Messages are logged only." description line), command-center (KPI lg:grid-cols-4 -> xl:grid-cols-4); 3-c review-queue/candidates/job-workspace kanban boards lg:grid-cols-2 xl:grid-cols-4 (2x2 at 1024-1279, 4-up at 1280+), SkeletonKanban mirrored, KPI rows lg->xl, review-workspace dossier split lg:[1fr_340px] xl:[1fr_380px], notice dialog date/time stack, history rows flex-wrap, job-workspace hand-rolled header row sm:->xl:; 3-d applicant-home split minmax(320px,400px) + gap-10/14, positions grid sm:2/lg:1/xl:2, journey third label responsive short variant "Awaiting decision" (<sm), skeleton mirrors, profile-view rail top-24 -> top-6.
+- ENVIRONMENT INCIDENTS: sandbox OOM (4GB) killed next-server repeatedly (dmesg: task=next-server killed, chrome sessions + dev server > RAM) -> audit rerun made memory-safe (single session alive, per-suite close, self-healing ensure_server with restart); agent-browser cookie timing (cookies set before fresh Chrome had a page context were lost; SPA caches anonymous session so hash-only nav never refetches) -> boot: open -> networkidle -> wait -> cookie set -> open -> full reload; screenshots re-verified as authenticated via h1 eval, not blindly trusted (two earlier "all OV=0" runs were error-page artifacts and were discarded).
+- POST-FIX VERIFICATION: full 75-combo audit with PAGE=ok canary -> all PAGE=ok OV=0; screenshots f01-f10 confirm analytics card fits w/ ellipsis @320/375, kanban 2x2 @1024 w/ full tag text, title untruncated @768/1024, applicant home 1-up cards @1024, settings/ops/profile clean; dynamic states: notifications popover 288px in 320vw, quick-view modal 288 contained, mobile nav sheet 272px (85vw), review dossier modal at 1024 well-proportioned (dossier + MQR rail), ov=0.
+- GATES: bun run lint clean; bunx tsc --noEmit zero errors in src (known examples/skills/mini-services errors pre-exist); dev server healthy; zero business-logic/API/payload/handler changes (presentation-only; the only copy changes: settings "Mock mode" pill split, applicant-home <sm journey label short variant).
+
+Stage Summary:
+- System is now overflow-free and proportioned across 320/375/768/1024/1280/1440/2560 for anonymous + all three roles, including overlays (popovers, dialogs, sheets) and dynamic states.
+- Two systemic primitive fixes (SectionCard min-w-0; PageHeader xl stacking) prevent whole defect classes rather than per-view patches.
+- Evidence: audit-shots/resp/{01-15,f01-f10,d01-d04,audit-run1-3.log}; next step: two-axis code-review since a24102f.

@@ -375,7 +375,7 @@ export default function Candidates() {
       {!error && (rows === null ? (
         <SkeletonKpis count={4} />
       ) : (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
           <KpiCard label="Total on file" value={total} icon={UsersRound} tone="info" hint="all registered candidates" />
           <KpiCard label="Showing" value={`${start}–${end}`} icon={List} tone="neutral" hint={`of ${total}`} />
           <KpiCard label="Complete profiles" value={completeOnPage} icon={UserCheck} tone="ok" hint="on this page" />
@@ -550,7 +550,7 @@ export default function Candidates() {
         </div>
       ) : (
         /* Kanban — reference board: bordered columns with dot + label + count headers */
-        <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible lg:pb-0">
+        <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-2 xl:grid-cols-4 lg:overflow-visible lg:pb-0">
           {PIPELINE_STAGES.map((stage) => {
             const cards = kanban[stage];
             return (

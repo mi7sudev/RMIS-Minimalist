@@ -114,7 +114,7 @@ function JourneyTimeline({ status }: { status: string }) {
   const stage = stageForStatus(status);
   const decided = stage === "Shortlisted" || stage === "Rejected";
 
-  const steps: { label: string; state: CheckpointState }[] = [
+  const steps: { label: string; short?: string; state: CheckpointState }[] = [
     { label: "Submitted", state: "done" },
     {
       label: "Review",
@@ -123,6 +123,9 @@ function JourneyTimeline({ status }: { status: string }) {
     {
       label:
         stage === "Shortlisted" ? "Shortlisted" : stage === "Rejected" ? "Not Shortlisted" : "Awaiting the shortlist decision",
+      // Responsive copy swap (3-d, presentation-only): the full label wraps to 4+ lines
+      // inside a 3-up timeline at 320px; "Shortlisted"/"Not Shortlisted" stay verbatim.
+      short: stage === "Shortlisted" || stage === "Rejected" ? undefined : "Awaiting decision",
       state: stage === "Shortlisted" ? "done" : stage === "Rejected" ? "failed" : "pending",
     },
   ];
@@ -154,7 +157,14 @@ function JourneyTimeline({ status }: { status: string }) {
               />
             </div>
             <span className={cn("text-[10px] leading-tight", s.state === "current" ? "font-medium text-ink" : "text-stone")}>
-              {s.label}
+              {s.short ? (
+                <>
+                  <span className="sm:hidden">{s.short}</span>
+                  <span className="hidden sm:inline">{s.label}</span>
+                </>
+              ) : (
+                s.label
+              )}
             </span>
           </div>
         );
@@ -570,8 +580,8 @@ export default function ApplicantHome() {
         /* First-load skeletons — never stale data, never a blank pane. */
         <div className="mt-6 space-y-10">
           <SkeletonKpis count={3} className="grid-cols-1 sm:grid-cols-3 lg:grid-cols-3" />
-          <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start lg:gap-14">
-            <SkeletonKpis count={4} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 [&>div]:h-44" />
+          <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)] lg:items-start lg:gap-10 xl:gap-14">
+            <SkeletonKpis count={4} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 [&>div]:h-44" />
             <div className="space-y-4">
               <SkeletonRows rows={1} rowClassName="h-44" />
               <SkeletonRows rows={1} rowClassName="h-44" />
@@ -579,7 +589,7 @@ export default function ApplicantHome() {
           </div>
         </div>
       ) : (
-        <div className="mt-6 grid animate-in fade-in slide-in-from-bottom-2 gap-10 duration-300 lg:grid-cols-[minmax(0,1fr)_400px] lg:items-start lg:gap-14">
+        <div className="mt-6 grid animate-in fade-in slide-in-from-bottom-2 gap-10 duration-300 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)] lg:items-start lg:gap-10 xl:gap-14">
           {/* LEFT — Open positions */}
           <section className="lg:col-start-1 lg:row-start-1">
             <div className="mb-4 flex items-center gap-3">
@@ -613,7 +623,7 @@ export default function ApplicantHome() {
                 />
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                 {openJobs.map((j) => (
                   <OpenJobCard key={j.id} job={j} />
                 ))}

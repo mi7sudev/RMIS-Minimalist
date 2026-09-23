@@ -311,7 +311,7 @@ export default function ProfileView() {
         </div>
 
         {/* Desktop step rail — sticky card with tonal chips + ember progress */}
-        <nav className="hidden self-start lg:sticky lg:top-24 lg:block" aria-label="Profile sections">
+        <nav className="hidden self-start lg:sticky lg:top-6 lg:block" aria-label="Profile sections">
           <div className="dlg-card p-4">
             <div className="mb-3 flex items-center gap-3 px-1 pt-1">
               <IconChip icon={UserRound} tone="slate" size={38} iconSize={17} />

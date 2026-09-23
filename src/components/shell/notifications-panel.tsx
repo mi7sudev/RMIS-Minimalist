@@ -113,7 +113,9 @@ export function NotificationCenter() {
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[340px] rounded-none p-0">
+      {/* min(340px, 100vw-2rem): the popover must never exceed a 320px phone
+          viewport (Radix can reposition but cannot shrink a fixed width). */}
+      <PopoverContent align="end" className="w-[min(340px,calc(100vw-2rem))] rounded-none p-0">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <p className="text-sm font-medium text-ink">Notifications</p>
           <span className="dlg-pill bg-fog px-2.5 py-0.5 text-[11px] font-medium text-graphite">

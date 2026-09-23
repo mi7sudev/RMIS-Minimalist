@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useApplyFlow } from "@/components/apply/apply-dialogs";
+import { useSession } from "@/components/session-provider";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
@@ -538,6 +539,17 @@ function DetailBody({ job }: { job: JobWire }) {
 export default function JobsView() {
   const route = useHashRoute();
   const detailParam = route.params.job ?? null;
+  const { user } = useSession();
+
+  // Shell contract (responsive fix 3-a): PublicShell's <main> is a bare flex
+  // column (no padding), so the anonymous board paints its own 1600px container
+  // + gutters + vertical rhythm. AppShell's <main> already carries the exact
+  // same container (px-4 py-6 sm:px-6 sm:py-8 lg:px-8), so signed-in views must
+  // not repeat it (double gutters ~128px at lg) — a plain w-full wrapper keeps
+  // identical spacing since AppShell main provides the same py.
+  const shellPad = user
+    ? "w-full"
+    : "mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8";
 
   const [jobs, setJobs] = useState<JobWire[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -677,7 +689,7 @@ export default function JobsView() {
     const detail = jobs?.find((j) => j.id === detailId) ?? null;
 
     return (
-      <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+      <div className={shellPad}>
         <button
           onClick={() => navigate("jobs")}
           className="mb-5 flex min-h-[44px] items-center gap-2 text-sm text-stone hover:text-ink"
@@ -715,7 +727,9 @@ export default function JobsView() {
         ) : (
           <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[1fr_340px]">
             <DetailBody job={detail} />
-            <aside className="xl:sticky xl:top-6">
+            {/* Session-aware sticky offset: the public SiteHeader is sticky
+                h-16, the signed-in shell has no sticky chrome at xl. */}
+            <aside className={`xl:sticky ${user ? "xl:top-6" : "xl:top-20"}`}>
               <SummaryCard
                 job={detail}
                 onApply={applyTo}
@@ -835,7 +849,10 @@ export default function JobsView() {
         </div>
 
         {totalPages > 1 && (
-          <nav className="mt-6 flex items-center justify-center gap-1.5" aria-label="Pagination">
+          <nav
+            className="mt-6 flex flex-wrap items-center justify-center gap-1 sm:gap-1.5"
+            aria-label="Pagination"
+          >
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={current === 1}
@@ -879,7 +896,7 @@ export default function JobsView() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+    <div className={shellPad}>
       <div className="mb-5 max-w-2xl">
         <h1 className="text-heading-lg">Positions</h1>
         <p className="mt-2 text-sm leading-relaxed text-stone">
@@ -889,7 +906,9 @@ export default function JobsView() {
 
       <div className="items-start lg:flex lg:gap-6">
         {/* Search rail — sticky on desktop, collapsible on mobile */}
-        <aside className="mb-4 w-full lg:sticky lg:top-20 lg:mb-0 lg:w-72 lg:shrink-0">
+        <aside
+          className={`mb-4 w-full lg:sticky ${user ? "lg:top-6" : "lg:top-20"} lg:mb-0 lg:w-72 lg:shrink-0`}
+        >
           <div className="lg:hidden">
             <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
               <CollapsibleTrigger asChild>
@@ -932,7 +951,10 @@ export default function JobsView() {
                   setPage(1);
                 }}
               >
-                <SelectTrigger className="dlg-input min-h-[44px] w-[170px]" aria-label="Sort results">
+                <SelectTrigger
+                  className="dlg-input min-h-[44px] w-[140px] sm:w-[170px]"
+                  aria-label="Sort results"
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="rounded-none">

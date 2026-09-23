@@ -227,7 +227,7 @@ export default function CommandCenter() {
                 <span className="num">{attentionTotal}</span> item{attentionTotal === 1 ? "" : "s"} across the board
               </span>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <KpiCard
                 label="Awaiting review"
                 value={stats.pendingReview}

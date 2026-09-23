@@ -27,9 +27,11 @@ export function PageHeader({
   className?: string;
 }) {
   return (
+    // Stacks below xl so wide action clusters (filters, toggles, refresh) can
+    // never squeeze the title into a truncated stub on tablet widths.
     <div
       className={cn(
-        "flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between animate-in fade-in slide-in-from-bottom-2 duration-300",
+        "flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between animate-in fade-in slide-in-from-bottom-2 duration-300",
         className
       )}
     >
@@ -256,10 +258,13 @@ export function SectionCard({
   className?: string;
   bodyClassName?: string;
 }) {
+  // min-w-0: as a CSS-grid child the card must be allowed to shrink below the
+  // min-content floor of its nowrap description, or the grid track blows out
+  // and the card overflows its viewport (observed at 320–1279px).
   return (
-    <section className={cn("dlg-card p-6", className)} aria-label={title}>
+    <section className={cn("dlg-card min-w-0 p-6", className)} aria-label={title}>
       {title || actions ? (
-        <div className="mb-5 flex items-start justify-between gap-3">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             {Icon ? (
               <IconChip
@@ -274,7 +279,7 @@ export function SectionCard({
               {description ? <p className="truncate text-xs text-stone">{description}</p> : null}
             </div>
           </div>
-          {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+          {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
         </div>
       ) : null}
       <div className={bodyClassName}>{children}</div>
@@ -318,9 +323,9 @@ export function SkeletonRows({
   );
 }
 
-export function SkeletonKanban({ columns = 5, className }: { columns?: number; className?: string }) {
+export function SkeletonKanban({ columns = 4, className }: { columns?: number; className?: string }) {
   return (
-    <div className={cn("grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5", className)} aria-hidden="true">
+    <div className={cn("grid grid-cols-2 gap-4 xl:grid-cols-4", className)} aria-hidden="true">
       {Array.from({ length: columns }).map((_, i) => (
         <div key={i} className="space-y-3">
           <div className="skel h-8 w-full" />

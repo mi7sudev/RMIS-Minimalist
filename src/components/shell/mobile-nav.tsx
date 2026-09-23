@@ -39,7 +39,7 @@ export function MobileNav({ view }: { view: string }) {
           <Menu className="h-5 w-5" aria-hidden="true" />
         </button>
       </SheetTrigger>
-      <SheetContent side="left" className="w-[300px] rounded-none bg-white p-0 sm:w-[340px]">
+      <SheetContent side="left" className="w-[min(300px,85vw)] rounded-none bg-white p-0 sm:w-[340px]">
         <SheetTitle className="sr-only">Navigation</SheetTitle>
         <SheetDescription className="sr-only">Workspace sections and account</SheetDescription>
         <div className="flex h-full flex-col">

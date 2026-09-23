@@ -287,7 +287,7 @@ export default function ReviewQueue() {
 
       {/* Stage KPIs (wave-3) */}
       {!error && queue !== null && (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
           <KpiCard label="Applied" value={kanbanColumns["Applied"].length} icon={Inbox} tone="info" hint="awaiting start" />
           <KpiCard label="Under Review" value={kanbanColumns["Under Review"].length} icon={ScanSearch} tone="warn" hint="being screened" />
           <KpiCard label="Shortlisted" value={kanbanColumns["Shortlisted"].length} icon={Star} tone="ok" hint="advancing" />
@@ -297,7 +297,7 @@ export default function ReviewQueue() {
 
       {/* Kanban — reference board: 4 pipeline columns, dot + label + count headers */}
       {!error && queue !== null && mode === "kanban" && (
-        <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible lg:pb-0">
+        <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-2 xl:grid-cols-4 lg:overflow-visible lg:pb-0">
           {PIPELINE_STAGES.map((stage) => {
             const rows = kanbanColumns[stage];
             return (

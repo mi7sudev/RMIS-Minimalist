@@ -545,7 +545,7 @@ function NoticeFormDialog({
               />
             </div>
           )}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="notice-date" className="text-xs text-stone">
                 Date *
@@ -750,9 +750,9 @@ function DirectEmailCard({
             emails.map((m) => {
               const atts = parseAttachments(m.attachments);
               return (
-                <div key={m.id} className="flex items-center justify-between gap-2 text-xs">
+                <div key={m.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <span className="truncate text-ink">{m.subject || "(no subject)"}</span>
-                  <span className="flex shrink-0 items-center gap-2 text-pebble">
+                  <span className="flex shrink items-center gap-2 text-pebble">
                     {atts.length > 0 && <span className="num">{atts.length} att.</span>}
                     <span className="num">{timeAgo(m.createdAt)}</span>
                     <span className={pillClass(emailStatusVariant(m.status))}>{m.status}</span>
@@ -912,7 +912,7 @@ export function ReviewWorkspace({
 
   if (!payload) {
     return (
-      <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+      <div className="grid gap-6 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_380px]">
         <div className="dlg-card space-y-5 p-6">
           <div className="space-y-2.5">
             <Skeleton className="h-7 w-1/2" />
@@ -946,7 +946,7 @@ export function ReviewWorkspace({
   const place = payload.job.position?.placeOfAssignment ?? null;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+    <div className="grid gap-6 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_380px]">
       {/* ── LEFT: frozen dossier ── */}
       <div className="dlg-card space-y-4 p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1154,9 +1154,9 @@ export function ReviewWorkspace({
               <p className="text-xs text-pebble">No notices sent yet.</p>
             ) : (
               notices.map((n) => (
-                <div key={n.id} className="flex items-center justify-between gap-2 text-xs">
+                <div key={n.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
                   <span className="truncate text-ink">{noticeLabel[n.type] ?? n.type}</span>
-                  <span className="flex shrink-0 items-center gap-2 text-pebble">
+                  <span className="flex shrink items-center gap-2 text-pebble">
                     <span className="num">{formatDateTime(n.sentAt)}</span>
                     <span className={pillClass(n.status === "sent" || n.status === "mock" ? "neutral" : "bad")}>{n.status}</span>
                   </span>

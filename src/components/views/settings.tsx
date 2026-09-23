@@ -343,7 +343,7 @@ function CreateUserDialog({ open, onOpenChange, onCreated }: { open: boolean; on
               </SelectContent>
             </Select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div><Label className={labelCls()}>First name</Label><Input className="dlg-input min-h-[44px]" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></div>
             <div><Label className={labelCls()}>Last name</Label><Input className="dlg-input min-h-[44px]" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></div>
           </div>
@@ -392,7 +392,7 @@ function EditUserDialog({ user, onOpenChange, onSaved }: { user: UserRow; onOpen
           <DialogDescription className="text-sm text-stone">{user.email}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div><Label className={labelCls()}>First name</Label><Input className="dlg-input min-h-[44px]" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></div>
             <div><Label className={labelCls()}>Last name</Label><Input className="dlg-input min-h-[44px]" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></div>
           </div>
@@ -634,9 +634,12 @@ function MessagingPanel({ kind }: { kind: "sms" | "email" }) {
           <div>
             <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Active provider</p>
             <p className="num mt-1 text-xl font-medium text-ink">{humanize(data?.provider ?? "…")}</p>
+            {data?.provider === "mock" ? (
+              <p className="mt-1 text-xs text-stone">Messages are logged only.</p>
+            ) : null}
           </div>
           {data?.provider === "mock" ? (
-            <StatusPill status="Mock mode — messages are logged only" variant="neutral" />
+            <StatusPill status="Mock mode" variant="neutral" />
           ) : (
             <StatusPill status={data?.configured ? "Configured" : "Not configured"} variant={data?.configured ? "ok" : "warn"} />
           )}

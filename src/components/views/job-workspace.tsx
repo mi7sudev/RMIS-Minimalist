@@ -215,7 +215,7 @@ export default function JobWorkspace() {
   return (
     <div className="space-y-6">
       {/* Header — PageHeader pattern with back affordance */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div className="flex min-w-0 items-start gap-1.5">
           <button
             type="button"
@@ -326,7 +326,7 @@ export default function JobWorkspace() {
 
         {/* Pipeline — reference board: bordered columns with dot + label + count headers */}
         <TabsContent value="pipeline" className="mt-4">
-          <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible lg:pb-0">
+          <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-2 xl:grid-cols-4 lg:overflow-visible lg:pb-0">
             {PIPELINE_STAGES.map((stage) => {
               const rows = pipeline[stage];
               return (
