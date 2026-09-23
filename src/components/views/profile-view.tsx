@@ -152,7 +152,7 @@ export default function ProfileView() {
       <div>
         <div className="dlg-card-plain border border-border p-6">
           <div className="flex items-center gap-4">
-            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-[14px]">
+            <div className="h-14 w-14 shrink-0 overflow-hidden rounded-none">
               <div className="skel h-full w-full" />
             </div>
             <div className="min-w-0 flex-1 space-y-2">
@@ -201,7 +201,7 @@ export default function ProfileView() {
               <img
                 src={`/api/files/${pictureDoc.filePath}`}
                 alt="Profile picture"
-                className="h-14 w-14 rounded-[14px] object-cover shadow-e1"
+                className="h-14 w-14 rounded-none object-cover shadow-e1"
               />
             ) : (
               <Monogram size={56}>{initials}</Monogram>
@@ -234,7 +234,7 @@ export default function ProfileView() {
               <span className="text-xs text-pebble">sections done</span>
             </div>
             <div
-              className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-fog"
+              className="mt-2 h-1.5 w-full overflow-hidden bg-fog"
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={7}
@@ -242,7 +242,7 @@ export default function ProfileView() {
               aria-label={`${completedCount} of 7 sections completed`}
             >
               <div
-                className="h-full rounded-full bg-gradient-to-r from-[#f69251] to-[#ef8340] motion-safe:transition-[width] duration-500 ease-out"
+                className="h-full bg-gradient-to-r from-[#f69251] to-[#ef8340] motion-safe:transition-[width] duration-500 ease-out"
                 style={{ width: `${(completedCount / 7) * 100}%` }}
               />
             </div>
@@ -323,7 +323,7 @@ export default function ProfileView() {
               </div>
             </div>
             <div
-              className="mx-1 mb-4 h-1.5 overflow-hidden rounded-full bg-fog"
+              className="mx-1 mb-4 h-1.5 overflow-hidden bg-fog"
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={7}
@@ -331,7 +331,7 @@ export default function ProfileView() {
               aria-label={`Profile sections: ${completedCount} of 7 completed`}
             >
               <div
-                className="h-full rounded-full bg-gradient-to-r from-[#f69251] to-[#ef8340] motion-safe:transition-[width] duration-500 ease-out"
+                className="h-full bg-gradient-to-r from-[#f69251] to-[#ef8340] motion-safe:transition-[width] duration-500 ease-out"
                 style={{ width: `${(completedCount / 7) * 100}%` }}
               />
             </div>
@@ -345,7 +345,7 @@ export default function ProfileView() {
                       type="button"
                       onClick={() => setActive(s.n)}
                       aria-current={isActive ? "step" : undefined}
-                      className={`focus-ring flex min-h-[44px] w-full items-center gap-3 rounded-full py-1.5 pl-1.5 pr-3 text-left text-sm transition-colors ${
+                      className={`focus-ring flex min-h-[44px] w-full items-center gap-3 py-1.5 pl-1.5 pr-3 text-left text-sm transition-colors ${
                         isActive ? "text-ink" : "text-stone hover:bg-fog hover:text-ink"
                       }`}
                     >

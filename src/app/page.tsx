@@ -52,7 +52,7 @@ function LoadingShell() {
         <div className="dlg-card p-8 space-y-6 animate-pulse">
           <div className="h-10 w-2/3 bg-fog rounded-lg" />
           <div className="h-4 w-1/2 bg-fog rounded-lg" />
-          <div className="h-32 w-full bg-fog rounded-[12px]" />
+          <div className="h-32 w-full bg-fog rounded-none" />
         </div>
       </div>
     </div>

@@ -82,7 +82,7 @@ export default function CommandMenu({
       onOpenChange={onOpenChange}
       title="Command menu"
       description="Search navigation, positions and applicants"
-      className="rounded-[24px]"
+      className="rounded-none"
     >
       <CommandInput placeholder="Type a command or search…" />
       <CommandList className="max-h-[420px] scroll-thin">

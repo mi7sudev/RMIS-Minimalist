@@ -52,7 +52,7 @@ function AuthBrandPanel() {
       </span>
 
       <div className="relative z-10 flex w-full max-w-md flex-col justify-center px-12 py-16 xl:pl-20 xl:pr-16">
-        <div className="inline-flex w-fit items-center gap-3 rounded-full bg-white/[0.06] py-2 pl-2 pr-4 ring-1 ring-white/10 backdrop-blur">
+        <div className="inline-flex w-fit items-center gap-3 bg-white/[0.06] py-2 pl-2 pr-4 ring-1 ring-white/10 backdrop-blur">
           <Monogram warm size={32}>
             M
           </Monogram>
@@ -203,7 +203,7 @@ export default function SignInView() {
                         setPassword("password123");
                       }}
                       className={cn(
-                        "inline-flex min-h-[44px] items-center gap-1.5 rounded-full px-4 text-xs font-medium transition-all duration-150",
+                        "inline-flex min-h-[44px] items-center gap-1.5 px-4 text-xs font-medium transition-all duration-150",
                         selected
                           ? "bg-[linear-gradient(135deg,#2b2b3d,#181825)] text-[#f0ede8] shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_2px_4px_rgba(24,24,37,0.25)]"
                           : "bg-[linear-gradient(135deg,#f0eff2,#e4e3e8)] text-graphite shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_1px_2px_rgba(24,24,37,0.06)] hover:brightness-[1.03]"

@@ -229,7 +229,7 @@ export default function EligibilitySection({
       ) : (
         <div className="space-y-3">
           {items.map((row) => (
-            <div key={row.id} className="dlg-card-plain rounded-[12px] border border-border p-4">
+            <div key={row.id} className="dlg-card-plain rounded-none border border-border p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="font-medium text-ink">{row.title}</p>
@@ -259,7 +259,7 @@ export default function EligibilitySection({
                     type="button"
                     onClick={() => setDeleteId(row.id)}
                     aria-label="Delete eligibility"
-                    className="inline-flex h-[44px] w-[44px] items-center justify-center rounded-full text-pebble transition-colors hover:bg-[var(--bad)]/10 hover:text-[var(--bad)]"
+                    className="inline-flex h-[44px] w-[44px] items-center justify-center text-pebble transition-colors hover:bg-[var(--bad)]/10 hover:text-[var(--bad)]"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -299,7 +299,7 @@ export default function EligibilitySection({
                 e.preventDefault();
                 if (deleteId !== null) void remove(deleteId);
               }}
-              className="min-h-[44px] rounded-full border border-[var(--bad)]/30 bg-white px-5 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog"
+              className="min-h-[44px] border border-[var(--bad)]/30 bg-white px-5 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog"
             >
               Remove
             </AlertDialogAction>

@@ -111,7 +111,7 @@ function HeroMockup() {
           <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#c97b84]" />
           <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#f69251]" />
           <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#8b8b8b]" />
-          <span className="ml-2.5 min-w-0 flex-1 truncate rounded-full bg-white px-3.5 py-1.5 text-[11px] leading-none text-stone">
+          <span className="ml-2.5 min-w-0 flex-1 truncate bg-white px-3.5 py-1.5 text-[11px] leading-none text-stone">
             mirdc.gov.ph/careers
           </span>
         </div>
@@ -129,7 +129,7 @@ function HeroMockup() {
             {MOCK_POSITIONS.map((p) => (
               <div
                 key={p.title}
-                className="flex items-center gap-3 rounded-[12px] border border-black/[0.05] bg-white p-3.5"
+                className="flex items-center gap-3 rounded-none border border-black/[0.05] bg-white p-3.5"
               >
                 <Monogram size={34} className="text-[11px]">
                   M
@@ -406,7 +406,7 @@ export default function PublicLanding() {
                 ))}
               </div>
             ) : error !== null ? (
-              <div className="rounded-[12px] border border-dusty-rose/30 bg-dusty-rose/10 p-4">
+              <div className="rounded-none border border-dusty-rose/30 bg-dusty-rose/10 p-4">
                 <p className="text-sm text-ink">{error}</p>
                 <button
                   onClick={() => void load(false)}
@@ -527,13 +527,13 @@ export default function PublicLanding() {
               {APPLY_STEPS.map((step, i) => (
                 <div
                   key={step.title}
-                  className="relative rounded-[16px] border border-black/[0.06] bg-white p-5 shadow-e1"
+                  className="relative rounded-none border border-black/[0.06] bg-white p-5 shadow-e1"
                 >
                   {/* Connector arrow between steps (lg+ only) */}
                   {i > 0 && (
                     <span
                       aria-hidden="true"
-                      className="absolute -right-7 top-1/2 z-10 hidden h-8 w-8 -translate-y-1/2 place-items-center rounded-full border border-black/[0.07] bg-white shadow-e1 lg:grid"
+                      className="absolute -right-7 top-1/2 z-10 hidden h-8 w-8 -translate-y-1/2 place-items-center border border-black/[0.07] bg-white shadow-e1 lg:grid"
                     >
                       <ArrowRight className="h-3.5 w-3.5 text-stone" />
                     </span>
@@ -573,7 +573,7 @@ export default function PublicLanding() {
 
         {/* Footer CTA band — sanctioned dark moment */}
         <section className="mx-auto w-full max-w-[1200px] px-4 pb-16 pt-2 sm:px-6 sm:pb-20">
-          <div className="relative overflow-hidden rounded-[24px] bg-[linear-gradient(135deg,#1b1b28_0%,#14141d_100%)] px-6 py-12 shadow-e4 sm:px-12 sm:py-14">
+          <div className="relative overflow-hidden rounded-none bg-[linear-gradient(135deg,#1b1b28_0%,#14141d_100%)] px-6 py-12 shadow-e4 sm:px-12 sm:py-14">
             {/* Ember radials (decorative) */}
             <div
               aria-hidden="true"

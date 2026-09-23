@@ -50,7 +50,7 @@ function AuthBrandPanel() {
       </span>
 
       <div className="relative z-10 flex w-full max-w-md flex-col justify-center px-12 py-16 xl:pl-20 xl:pr-16">
-        <div className="inline-flex w-fit items-center gap-3 rounded-full bg-white/[0.06] py-2 pl-2 pr-4 ring-1 ring-white/10 backdrop-blur">
+        <div className="inline-flex w-fit items-center gap-3 bg-white/[0.06] py-2 pl-2 pr-4 ring-1 ring-white/10 backdrop-blur">
           <Monogram warm size={32}>
             M
           </Monogram>
@@ -241,7 +241,7 @@ export default function SignUpView() {
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
                     aria-label={showPassword ? "Hide password" : "Show password"}
-                    className="absolute right-0.5 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full text-stone hover:bg-fog hover:text-ink"
+                    className="absolute right-0.5 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center text-stone hover:bg-fog hover:text-ink"
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4" aria-hidden="true" />
@@ -268,7 +268,7 @@ export default function SignUpView() {
               </div>
 
               {/* Mandatory data-privacy consent (RA 10173) */}
-              <label className="flex cursor-pointer items-start gap-3 rounded-[12px] bg-fog p-4 ring-1 ring-black/[0.04]">
+              <label className="flex cursor-pointer items-start gap-3 rounded-none bg-fog p-4 ring-1 ring-black/[0.04]">
                 <Checkbox
                   checked={consent}
                   onCheckedChange={(v) => setConsent(v === true)}

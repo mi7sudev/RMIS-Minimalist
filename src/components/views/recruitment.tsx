@@ -39,19 +39,19 @@ import {
 // ── Shared visuals ──────────────────────────────────────────────────────────
 
 export const ghostBtn =
-  "dlg-ghost inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+  "dlg-ghost inline-flex min-h-[44px] items-center justify-center gap-2 px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 export const ctaBtn =
-  "dlg-cta inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-5 text-sm transition-all disabled:cursor-not-allowed disabled:opacity-50";
+  "dlg-cta inline-flex min-h-[44px] items-center justify-center gap-2 px-5 text-sm transition-all disabled:cursor-not-allowed disabled:opacity-50";
 
 /** Destructive ghost (contract §3): ghost shape with the functional --bad tint. */
 export const ghostBadBtn =
-  "inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full border border-[var(--bad)]/30 bg-white px-4 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-[var(--bad-bg)] disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex min-h-[44px] items-center justify-center gap-2 border border-[var(--bad)]/30 bg-white px-4 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-[var(--bad-bg)] disabled:cursor-not-allowed disabled:opacity-50";
 /** 32px icon button (fog tile on hover) for row quick actions. */
 export const iconBtn =
-  "grid h-8 w-8 place-items-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink focus-ring";
+  "grid h-8 w-8 place-items-center text-stone transition-colors hover:bg-fog hover:text-ink focus-ring";
 /** 32px destructive icon button for row quick actions. */
 export const iconBtnBad =
-  "grid h-8 w-8 place-items-center rounded-full text-[var(--bad)] transition-colors hover:bg-[var(--bad-bg)] focus-ring";
+  "grid h-8 w-8 place-items-center text-[var(--bad)] transition-colors hover:bg-[var(--bad-bg)] focus-ring";
 
 function isOpenJob(j: JobWire): boolean {
   return j.isActive && !deadlineState(j.deadlineDate).overdue;
@@ -284,7 +284,7 @@ export function JobFormDialog({
                 </datalist>
               </Field>
 
-              <div className="space-y-4 rounded-[12px] bg-fog p-4">
+              <div className="space-y-4 rounded-none bg-fog p-4">
                 <p className="text-xs font-medium text-stone">Qualification vitals (write-through to the position master)</p>
                 <Field id="job-education" label="Education (CSC standard)">
                   <Input
@@ -620,7 +620,7 @@ export default function Recruitment() {
           <div className="flex items-center gap-3 border-b border-[#ececec] px-5 py-4">
             <IconChip icon={Briefcase} tone="amber" size={36} iconSize={16} />
             <h2 className="text-[15px] font-semibold leading-6 text-ink">Job postings</h2>
-            <span className="num ml-auto rounded-full bg-fog px-2.5 py-1 text-xs font-medium text-stone">
+            <span className="num ml-auto bg-fog px-2.5 py-1 text-xs font-medium text-stone">
               {filtered.length} total
             </span>
           </div>

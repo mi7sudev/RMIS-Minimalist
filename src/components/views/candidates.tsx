@@ -84,7 +84,7 @@ type QueueRow = {
 const PAGE_SIZE = 25;
 
 const iconBtn =
-  "focus-ring inline-flex h-9 w-9 items-center justify-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink";
+  "focus-ring inline-flex h-9 w-9 items-center justify-center text-stone transition-colors hover:bg-fog hover:text-ink";
 
 function s(v: unknown): string {
   if (v === null || v === undefined) return "";
@@ -134,7 +134,7 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
         ) : !detail ? (
           <div className="space-y-3">
             <Skeleton className="h-10 w-2/3" />
-            <Skeleton className="h-20 w-full rounded-[12px]" />
+            <Skeleton className="h-20 w-full rounded-none" />
           </div>
         ) : (
           <div className="space-y-4">
@@ -156,7 +156,7 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
               {detail.emailAddress && (
                 <a
                   href={`mailto:${detail.emailAddress}`}
-                  className="focus-ring inline-flex min-h-[36px] items-center gap-1.5 rounded-full bg-fog px-3 text-xs text-ink transition-colors hover:bg-[#ececec]"
+                  className="focus-ring inline-flex min-h-[36px] items-center gap-1.5 bg-fog px-3 text-xs text-ink transition-colors hover:bg-[#ececec]"
                 >
                   <Mail className="h-3.5 w-3.5" aria-hidden />
                   {detail.emailAddress}
@@ -165,7 +165,7 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
               {detail.mobileNumber && (
                 <a
                   href={`tel:${detail.mobileNumber}`}
-                  className="focus-ring inline-flex min-h-[36px] items-center gap-1.5 rounded-full bg-fog px-3 text-xs text-ink transition-colors hover:bg-[#ececec]"
+                  className="focus-ring inline-flex min-h-[36px] items-center gap-1.5 bg-fog px-3 text-xs text-ink transition-colors hover:bg-[#ececec]"
                 >
                   <Phone className="h-3.5 w-3.5" aria-hidden />
                   {detail.mobileNumber}
@@ -174,7 +174,7 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
             </div>
 
             {/* Mini pipeline dots: Submitted → Review → Shortlisted */}
-            <div className="rounded-[12px] bg-fog p-4">
+            <div className="rounded-none bg-fog p-4">
               <div className="flex items-center justify-between gap-2">
                 {(["Applied", "Under Review", "Shortlisted"] as StageKey[]).map((stage, i) => (
                   <div key={stage} className="flex flex-1 items-center gap-2">
@@ -343,10 +343,10 @@ export default function Candidates() {
         description="Registry of every candidate on file — profiles, logins, and pipeline activity."
         actions={
           <>
-            <div className="flex items-center gap-1 rounded-full bg-fog p-1" role="group" aria-label="View mode">
+            <div className="flex items-center gap-1 bg-fog p-1" role="group" aria-label="View mode">
               <button
                 type="button"
-                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${mode === "list" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
+                className={`inline-flex min-h-[36px] items-center gap-1.5 px-3 text-xs font-medium transition-colors ${mode === "list" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
                 onClick={() => setMode("list")}
                 aria-pressed={mode === "list"}
               >
@@ -355,7 +355,7 @@ export default function Candidates() {
               </button>
               <button
                 type="button"
-                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${mode === "kanban" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
+                className={`inline-flex min-h-[36px] items-center gap-1.5 px-3 text-xs font-medium transition-colors ${mode === "kanban" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
                 onClick={() => setMode("kanban")}
                 aria-pressed={mode === "kanban"}
               >

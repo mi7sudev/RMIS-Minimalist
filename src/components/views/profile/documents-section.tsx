@@ -165,7 +165,7 @@ export default function DocumentsSection({
       actions={<SaveHint saving={uploading} saved={savedFlash} />}
     >
       {/* Upload rail — category REQUIRED before any file is accepted (§7.4) */}
-      <div className="rounded-[12px] bg-fog p-4">
+      <div className="rounded-none bg-fog p-4">
         <div className="grid gap-3 sm:grid-cols-[minmax(0,220px)_minmax(0,1fr)] sm:items-end">
           <div>
             <p className="mb-1.5 text-xs font-medium text-graphite">
@@ -205,7 +205,7 @@ export default function DocumentsSection({
               inputRef.current?.click();
             }}
             disabled={uploading}
-            className={`flex min-h-[44px] items-center justify-center gap-2 rounded-[12px] border border-dashed px-5 py-3 text-sm font-medium transition-colors ${
+            className={`flex min-h-[44px] items-center justify-center gap-2 rounded-none border border-dashed px-5 py-3 text-sm font-medium transition-colors ${
               categoryError
                 ? "border-[var(--bad)]/40 bg-white text-[var(--bad)]"
                 : "border-divider bg-white text-ink hover:bg-[radial-gradient(420px_160px_at_50%_0%,rgba(246,146,81,0.055),transparent_70%)]"
@@ -230,7 +230,7 @@ export default function DocumentsSection({
 
       {/* Batch action bar */}
       {selected.size > 0 && (
-        <div className="mt-4 flex items-center justify-between rounded-[12px] border border-border px-4 py-2">
+        <div className="mt-4 flex items-center justify-between rounded-none border border-border px-4 py-2">
           <span className="num text-xs text-stone">{selected.size} selected</span>
           <button
             type="button"
@@ -254,7 +254,7 @@ export default function DocumentsSection({
               return (
                 <div
                   key={doc.id}
-                  className="flex items-center gap-3 rounded-[12px] border border-border bg-white px-3 py-2.5 transition-colors hover:bg-fog/60"
+                  className="flex items-center gap-3 rounded-none border border-border bg-white px-3 py-2.5 transition-colors hover:bg-fog/60"
                 >
                   <Checkbox
                     checked={selected.has(doc.id)}
@@ -287,7 +287,7 @@ export default function DocumentsSection({
                     type="button"
                     onClick={() => setDeleteTargets([doc.id])}
                     aria-label={`Delete ${doc.originalName}`}
-                    className="inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-full text-pebble transition-colors hover:bg-[var(--bad)]/10 hover:text-[var(--bad)]"
+                    className="inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center text-pebble transition-colors hover:bg-[var(--bad)]/10 hover:text-[var(--bad)]"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -316,7 +316,7 @@ export default function DocumentsSection({
                 if (deleteTargets) void runDelete(deleteTargets);
               }}
               disabled={deleting}
-              className="min-h-[44px] rounded-full border border-[var(--bad)]/30 bg-white px-5 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
+              className="min-h-[44px] border border-[var(--bad)]/30 bg-white px-5 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
             >
               {deleting ? "Deleting…" : "Delete"}
             </AlertDialogAction>

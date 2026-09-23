@@ -49,7 +49,7 @@ export function AppShell({
               aria-label="Go to my workspace"
             >
               <span
-                className="grid h-9 w-9 place-items-center rounded-[10px] text-base font-semibold text-[#2a1608]"
+                className="grid h-9 w-9 place-items-center rounded-none text-base font-semibold text-[#2a1608]"
                 style={{
                   background: "linear-gradient(145deg, #f9a468 0%, #ef8340 100%)",
                   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 6px rgba(246,146,81,0.4)",

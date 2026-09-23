@@ -217,7 +217,7 @@ export function EmptyState({
     >
       <span
         className={cn(
-          "chip mb-4 rounded-full",
+          "chip mb-4",
           `chip-${tone}`,
           compact ? "h-10 w-10" : "h-14 w-14"
         )}

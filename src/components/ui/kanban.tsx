@@ -100,7 +100,7 @@ export function MatchBadge({
   return (
     <span
       className={cn(
-        "num inline-flex shrink-0 items-center rounded-full px-2 py-[3px] text-[11px] font-semibold leading-none",
+        "num inline-flex shrink-0 items-center rounded-none px-2 py-[3px] text-[11px] font-semibold leading-none",
         tone,
         className
       )}
@@ -142,7 +142,7 @@ export function KanbanTags({ tags, className }: { tags: string[]; className?: st
 
 /** White card: resting hairline elevation + hover lift (clickable surfaces). */
 export const KANBAN_CARD =
-  "rounded-[12px] border border-black/[0.07] bg-white shadow-e1 lift duration-200 hover:border-ink/15";
+  "rounded-none border border-black/[0.07] bg-white shadow-e1 lift duration-200 hover:border-ink/15";
 
 /** Hairline divider above the credential tags. */
 export const KANBAN_DIVIDER = "mt-3 border-t border-black/[0.06] pt-2.5";
@@ -168,7 +168,7 @@ export function KanbanColumn({
 }) {
   return (
     <div className="flex w-[290px] min-w-[290px] shrink-0 snap-start flex-col lg:w-auto lg:min-w-0">
-      <div className="flex min-h-[320px] flex-col rounded-[16px] border border-black/[0.06] bg-white/60 p-3 lg:min-h-0 lg:flex-1">
+      <div className="flex min-h-[320px] flex-col rounded-none border border-black/[0.06] bg-white/60 p-3 lg:min-h-0 lg:flex-1">
         <div className="flex items-center justify-between gap-2 px-1.5 pb-3">
           <h2 className="flex min-w-0 items-center gap-2 text-[13.5px] font-semibold tracking-[-0.01em] text-ink">
             <StageDot stage={stage} />

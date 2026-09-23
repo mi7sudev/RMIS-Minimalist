@@ -76,10 +76,10 @@ type RegretSummary = {
 // ── Small shared visuals ────────────────────────────────────────────────────
 
 const ghostBtn =
-  "dlg-ghost inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+  "dlg-ghost inline-flex min-h-[44px] items-center justify-center gap-2 px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 
 const iconBtn =
-  "focus-ring inline-flex h-9 w-9 items-center justify-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink";
+  "focus-ring inline-flex h-9 w-9 items-center justify-center text-stone transition-colors hover:bg-fog hover:text-ink";
 
 function useFocusRefresh(fn: () => void) {
   useEffect(() => {
@@ -195,14 +195,14 @@ export default function ReviewQueue() {
             <span className="status-pill status-neutral num">
               {filtered.length} application{filtered.length === 1 ? "" : "s"}
             </span>
-            <label className="focus-ring inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-full border border-border bg-white px-3.5 text-sm text-stone transition-colors hover:border-ink/10">
+            <label className="focus-ring inline-flex min-h-[44px] cursor-pointer items-center gap-2 border border-border bg-white px-3.5 text-sm text-stone transition-colors hover:border-ink/10">
               <Switch checked={qualifiedOnly} onCheckedChange={setQualifiedOnly} aria-label="Qualified only" />
               Qualified only
             </label>
-            <div className="flex items-center gap-1 rounded-full bg-fog p-1" role="group" aria-label="View mode">
+            <div className="flex items-center gap-1 bg-fog p-1" role="group" aria-label="View mode">
               <button
                 type="button"
-                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${mode === "kanban" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
+                className={`inline-flex min-h-[36px] items-center gap-1.5 px-3 text-xs font-medium transition-colors ${mode === "kanban" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
                 onClick={() => setMode("kanban")}
                 aria-pressed={mode === "kanban"}
               >
@@ -211,7 +211,7 @@ export default function ReviewQueue() {
               </button>
               <button
                 type="button"
-                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${mode === "list" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
+                className={`inline-flex min-h-[36px] items-center gap-1.5 px-3 text-xs font-medium transition-colors ${mode === "list" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
                 onClick={() => setMode("list")}
                 aria-pressed={mode === "list"}
               >
@@ -237,13 +237,13 @@ export default function ReviewQueue() {
               <button
                 key={s}
                 type="button"
-                className={`inline-flex min-h-[36px] items-center gap-2 rounded-full px-3.5 text-xs font-medium transition-colors ${active ? "bg-ink text-white" : "dlg-ghost"}`}
+                className={`inline-flex min-h-[36px] items-center gap-2 px-3.5 text-xs font-medium transition-colors ${active ? "bg-ink text-white" : "dlg-ghost"}`}
                 onClick={() => setListStage(s)}
                 aria-pressed={active}
               >
                 {s !== "All" && <StageDot stage={s} />}
                 {s}
-                <span className={`num rounded-full px-1.5 ${active ? "bg-white/20" : "bg-fog"}`}>{count}</span>
+                <span className={`num px-1.5 ${active ? "bg-white/20" : "bg-fog"}`}>{count}</span>
               </button>
             );
           })}

@@ -171,9 +171,9 @@ export function VerdictPill({ verdict, className = "" }: { verdict: string | nul
 }
 
 const ghostBtn =
-  "dlg-ghost inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+  "dlg-ghost inline-flex min-h-[44px] items-center justify-center gap-2 px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 const ctaBtn =
-  "dlg-cta inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-5 text-sm transition-all disabled:cursor-not-allowed disabled:opacity-50";
+  "dlg-cta inline-flex min-h-[44px] items-center justify-center gap-2 px-5 text-sm transition-all disabled:cursor-not-allowed disabled:opacity-50";
 const destructiveGhost =
   "border-[var(--bad)]/30 text-[var(--bad)] hover:bg-[var(--bad-bg)]";
 
@@ -187,7 +187,7 @@ function MonogramAvatar({ name, size = 36, warm = false }: { name: string; size?
     .join("");
   return (
     <span aria-hidden="true">
-      <Monogram size={size} warm={warm}>{initials || "?"}</Monogram>
+      <Monogram size={size} warm={warm} className="rounded-full">{initials || "?"}</Monogram>
     </span>
   );
 }
@@ -257,7 +257,7 @@ function EducationCards({ rows }: { rows: SnapRow[] }) {
   return (
     <div className="space-y-3">
       {rows.map((r, i) => (
-        <div key={i} className="rounded-[12px] bg-fog p-4">
+        <div key={i} className="rounded-none bg-fog p-4">
           <div className="flex items-start justify-between gap-3">
             <p className="text-sm text-ink">{str(r.degree) || str(r.course) || str(r.specifyOthers) || "—"}</p>
             {r.ongoing === true && <span className="status-pill status-neutral shrink-0">Ongoing</span>}
@@ -282,11 +282,11 @@ function ExperienceCards({ rows }: { rows: SnapRow[] }) {
   return (
     <div className="space-y-3">
       {rows.map((r, i) => (
-        <div key={i} className="rounded-[12px] bg-fog p-4">
+        <div key={i} className="rounded-none bg-fog p-4">
           <div className="flex items-start justify-between gap-3">
             <p className="text-sm text-ink">{str(r.positionTitle) || "—"}</p>
             {r.isPresentWork === true && (
-              <span className="shrink-0 rounded-full bg-ink px-2 py-0.5 text-xs text-white">Present</span>
+              <span className="shrink-0 bg-ink px-2 py-0.5 text-xs text-white">Present</span>
             )}
           </div>
           <p className="mt-1 text-xs text-stone">{str(r.employerName) || "—"}</p>
@@ -310,7 +310,7 @@ function TrainingCards({ rows }: { rows: SnapRow[] }) {
   return (
     <div className="space-y-3">
       {rows.map((r, i) => (
-        <div key={i} className="rounded-[12px] bg-fog p-4">
+        <div key={i} className="rounded-none bg-fog p-4">
           <p className="text-sm text-ink">{str(r.title) || "—"}</p>
           <p className="num mt-1 text-xs text-stone">
             {[str(r.typeOfTraining), str(r.numberHours) && `${str(r.numberHours)} hrs`, str(r.hourDecimal) && `${str(r.hourDecimal)} hrs`]
@@ -333,7 +333,7 @@ function EligibilityCards({ rows }: { rows: SnapRow[] }) {
   return (
     <div className="space-y-3">
       {rows.map((r, i) => (
-        <div key={i} className="rounded-[12px] bg-fog p-4">
+        <div key={i} className="rounded-none bg-fog p-4">
           <p className="text-sm text-ink">{str(r.title) || str(r.eligibilityTitle) || "—"}</p>
           <p className="num mt-1 text-xs text-stone">
             {[str(r.rating) && `Rating: ${str(r.rating)}`, snapshotDisplayDate(r.examDate), str(r.examPlace), str(r.licenseNumber) && `License ${str(r.licenseNumber)}`]
@@ -351,7 +351,7 @@ function AwardCards({ rows }: { rows: SnapRow[] }) {
   return (
     <div className="space-y-3">
       {rows.map((r, i) => (
-        <div key={i} className="rounded-[12px] bg-fog p-4">
+        <div key={i} className="rounded-none bg-fog p-4">
           <p className="text-sm text-ink">{str(r.details) || "—"}</p>
           <p className="num mt-1 text-xs text-stone">
             {[str(r.recognitionType), str(r.scope), str(r.provider), snapshotDisplayDate(r.dateGranted)]
@@ -405,7 +405,7 @@ function RequirementsMatchPanel({ report }: { report: RequirementsReport }) {
             const cp = checkPill(c.status);
             const cc = checkChip(c.status);
             return (
-              <div key={i} className="rounded-[12px] border border-border p-3.5">
+              <div key={i} className="rounded-none border border-border p-3.5">
                 <div className="flex items-start gap-2.5">
                   <IconChip icon={cc.icon} tone={cc.tone} size={22} iconSize={12} className="mt-0.5" />
                   <p className="min-w-0 flex-1 text-[13px] leading-5 text-ink line-clamp-2">{c.standard || "—"}</p>
@@ -420,7 +420,7 @@ function RequirementsMatchPanel({ report }: { report: RequirementsReport }) {
                   ) : (
                     <span aria-hidden />
                   )}
-                  <span className="shrink-0 rounded-full bg-fog px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-pebble">
+                  <span className="shrink-0 bg-fog px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-pebble">
                     {c.dimension}
                   </span>
                 </div>
@@ -705,7 +705,7 @@ function DirectEmailCard({
           aria-label="Email message"
         />
         <div>
-          <label className="dlg-ghost focus-ring inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-full px-4 text-sm">
+          <label className="dlg-ghost focus-ring inline-flex min-h-[44px] cursor-pointer items-center gap-2 px-4 text-sm">
             <Paperclip className="h-4 w-4" aria-hidden />
             Attach files
             <input
@@ -982,7 +982,7 @@ export function ReviewWorkspace({
           </TabsList>
 
           <TabsContent value="profile" className="pt-4">
-            <div className="rounded-[12px] bg-fog p-4">
+            <div className="rounded-none bg-fog p-4">
               <LedgerRow label="Email" value={str(p.emailAddress) || str(payload.applicant.emailAddress)} />
               <LedgerRow label="Mobile" value={str(p.mobileNumber) || str(p.contactNumber)} num />
               <LedgerRow label="Other phone" value={[str(p.contactNumberSec), str(p.telephoneNumber)].filter(Boolean).join(" · ")} num />
@@ -1023,7 +1023,7 @@ export function ReviewWorkspace({
             <AwardCards rows={payload.snapshots.awards} />
           </TabsContent>
           <TabsContent value="documents" className="pt-4">
-            <div className="rounded-[12px] bg-fog p-6 text-center">
+            <div className="rounded-none bg-fog p-6 text-center">
               <IconChip icon={FileText} tone="slate" size={40} className="mx-auto" />
               <p className="mt-2 text-sm text-stone">Supporting documents are verified in person at the next stage.</p>
             </div>
@@ -1036,7 +1036,7 @@ export function ReviewWorkspace({
         <RequirementsMatchPanel report={payload.requirements} />
         <CredentialsRow payload={payload} />
 
-        <div className={`rounded-[12px] bg-fog p-4 text-sm ${banner.cls}`}>
+        <div className={`rounded-none bg-fog p-4 text-sm ${banner.cls}`}>
           <StatusPill status={payload.status} className="mr-2" />
           {banner.text}
         </div>

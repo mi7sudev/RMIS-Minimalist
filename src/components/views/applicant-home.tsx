@@ -242,7 +242,7 @@ function MqrLedger({ position }: { position: PositionWire | null }) {
       <h4 className="font-display text-lg text-ink">Minimum Qualification Requirements</h4>
       <div className="space-y-2">
         {visible.map((r) => (
-          <div key={r.label} className="rounded-[12px] bg-fog p-3">
+          <div key={r.label} className="rounded-none bg-fog p-3">
             <p className="text-xs font-medium text-graphite">{r.label}</p>
             <p className="mt-0.5 whitespace-pre-line text-sm text-stone">{r.value}</p>
           </div>
@@ -304,7 +304,7 @@ function ApplicationDetailModal({
           <DialogHeader className="space-y-2 text-left">
             <div className="flex flex-wrap items-center gap-2">
               <StatusPill status={label} variant={stageVariant(label)} />
-              <span className="num rounded-full bg-fog px-3 py-1 text-xs font-medium text-graphite">
+              <span className="num bg-fog px-3 py-1 text-xs font-medium text-graphite">
                 Application #{application.id}
               </span>
             </div>
@@ -314,7 +314,7 @@ function ApplicationDetailModal({
           </DialogHeader>
 
           {/* Successfully-applied strip (§7.7) */}
-          <div className="mt-4 flex items-center gap-3 rounded-[12px] bg-fog p-3">
+          <div className="mt-4 flex items-center gap-3 rounded-none bg-fog p-3">
             <IconChip icon={BadgeCheck} tone="emerald" size={36} iconSize={17} />
             <div>
               <p className="text-sm font-medium text-ink">Successfully Applied</p>
@@ -327,7 +327,7 @@ function ApplicationDetailModal({
           {/* Vitals summary grid */}
           <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
             {facts.map(([k, v]) => (
-              <div key={k} className="rounded-[12px] bg-fog p-3">
+              <div key={k} className="rounded-none bg-fog p-3">
                 <p className="text-[11px] text-pebble">{k}</p>
                 <p className="num mt-0.5 truncate text-sm text-ink" title={v}>
                   {v}
@@ -350,7 +350,7 @@ function ApplicationDetailModal({
                 type="button"
                 onClick={() => setConfirmOpen(true)}
                 disabled={cancelling}
-                className="min-h-[44px] rounded-full border border-[var(--bad)]/30 bg-white px-6 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
+                className="min-h-[44px] border border-[var(--bad)]/30 bg-white px-6 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
               >
                 Cancel Application
               </button>
@@ -379,7 +379,7 @@ function ApplicationDetailModal({
                   void cancelApplication();
                 }}
                 disabled={cancelling}
-                className="min-h-[44px] rounded-full border border-[var(--bad)]/30 bg-white px-5 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
+                className="min-h-[44px] border border-[var(--bad)]/30 bg-white px-5 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
               >
                 {cancelling ? "Cancelling…" : "Cancel Application"}
               </AlertDialogAction>

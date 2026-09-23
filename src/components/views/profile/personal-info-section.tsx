@@ -181,7 +181,7 @@ function SelectField({
 
 function SwitchField({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <div className="flex min-h-[44px] items-center justify-between rounded-[12px] bg-fog px-3">
+    <div className="flex min-h-[44px] items-center justify-between rounded-none bg-fog px-3">
       <span className="text-xs font-medium text-graphite">{label}</span>
       <Switch checked={checked} onCheckedChange={onChange} />
     </div>
@@ -195,7 +195,7 @@ function GroupHeading({ n, title, done, total }: { n: string; title: string; don
         <span className="mr-2 text-sm text-pebble">{n}</span>
         {title}
       </h3>
-      <span className="rounded-full bg-fog px-3 py-1 text-xs font-medium text-graphite">
+      <span className="bg-fog px-3 py-1 text-xs font-medium text-graphite">
         <span className="num">{done}</span> of <span className="num">{total}</span> completed
       </span>
     </div>
@@ -217,7 +217,7 @@ function RefRow({
     { key: "contact", label: "Contact No." },
   ];
   return (
-    <div className="dlg-card-plain rounded-[12px] border border-border p-4">
+    <div className="dlg-card-plain rounded-none border border-border p-4">
       <div className="mb-3 flex items-center justify-between">
         <p className="text-xs font-medium text-graphite">Reference <span className="num">{index + 1}</span></p>
         <button

@@ -200,7 +200,7 @@ function UsersPanel() {
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-3">
                       <span aria-hidden="true" className="contents">
-                        <Monogram size={32}>{monogramOf([u.firstName, u.lastName].filter(Boolean).join(" ") || u.username)}</Monogram>
+                        <Monogram size={32} className="rounded-full">{monogramOf([u.firstName, u.lastName].filter(Boolean).join(" ") || u.username)}</Monogram>
                       </span>
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-ink">{[u.firstName, u.lastName].filter(Boolean).join(" ") || u.username}</p>
@@ -263,8 +263,8 @@ function UsersPanel() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="dlg-ghost rounded-full">Cancel</AlertDialogCancel>
-            <AlertDialogAction className="dlg-cta rounded-full" onClick={() => void confirmDisable()}>Disable</AlertDialogAction>
+            <AlertDialogCancel className="dlg-ghost">Cancel</AlertDialogCancel>
+            <AlertDialogAction className="dlg-cta" onClick={() => void confirmDisable()}>Disable</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -278,9 +278,9 @@ function UsersPanel() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="dlg-ghost rounded-full">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="dlg-ghost">Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="rounded-full border border-[var(--bad)]/30 bg-white text-[var(--bad)] hover:bg-[var(--bad-bg)]"
+              className="border border-[var(--bad)]/30 bg-white text-[var(--bad)] hover:bg-[var(--bad-bg)]"
               onClick={() => void confirmHardDelete()}
             >
               Delete forever
@@ -514,7 +514,7 @@ function AuditPanel() {
           {rows === null && <div className="p-2"><SkeletonRows rows={6} rowClassName="h-11" /></div>}
           {rows?.length === 0 && <EmptyState icon={ScrollText} tone="plum" title="No audit events match." compact />}
           {rows?.map((r) => (
-            <div key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[12px] px-3 py-2.5 transition-colors hover:bg-fog/60">
+            <div key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-none px-3 py-2.5 transition-colors hover:bg-fog/60">
               <span className="num w-24 shrink-0 text-xs text-pebble" title={formatDateTime(r.timestamp)}>
                 {timeAgo(r.timestamp)}
               </span>
@@ -643,7 +643,7 @@ function MessagingPanel({ kind }: { kind: "sms" | "email" }) {
         </div>
         <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {tiles.map(([label, value]) => (
-            <div key={label} className="rounded-[12px] bg-fog p-3">
+            <div key={label} className="rounded-none bg-fog p-3">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-stone">{label}</p>
               <p className="num mt-1 text-[28px] font-semibold leading-none text-ink">{value ?? "—"}</p>
             </div>
@@ -744,7 +744,7 @@ export default function Settings() {
                 type="button"
                 onClick={() => navigate("settings", { tab: t.key })}
                 aria-current={tab === t.key ? "page" : undefined}
-                className={`focus-ring inline-flex h-11 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-full px-4 text-sm transition-colors ${
+                className={`focus-ring inline-flex h-11 shrink-0 items-center gap-2.5 whitespace-nowrap px-4 text-sm transition-colors ${
                   tab === t.key ? "chip-ink" : "text-stone hover:bg-fog hover:text-ink"
                 }`}
               >

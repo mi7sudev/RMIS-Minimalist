@@ -207,7 +207,7 @@ export default function FormDialog({
                 )}
 
                 {f.type === "switch" && (
-                  <div className="flex min-h-[44px] items-center justify-between rounded-[12px] bg-fog px-3">
+                  <div className="flex min-h-[44px] items-center justify-between rounded-none bg-fog px-3">
                     <span className="text-xs font-medium text-graphite">
                       {label}
                       {f.required && <span className="text-dusty-rose"> *</span>}
@@ -217,7 +217,7 @@ export default function FormDialog({
                 )}
 
                 {f.type === "checkbox" && (
-                  <label className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-[12px] bg-fog px-3">
+                  <label className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-none bg-fog px-3">
                     <Checkbox checked={value === true} onCheckedChange={(v) => set(f.key, v === true)} disabled={disabled} />
                     <span className="text-xs font-medium text-graphite">{label}</span>
                   </label>

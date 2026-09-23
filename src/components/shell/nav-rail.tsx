@@ -166,7 +166,7 @@ export function NavRail({ view }: { view: string }) {
             aria-label="Go to my workspace"
           >
             <span
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] text-base font-semibold text-[#2a1608]"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-none text-base font-semibold text-[#2a1608]"
               style={{
                 background: "linear-gradient(145deg, #f9a468 0%, #ef8340 100%)",
                 boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 6px rgba(246,146,81,0.4)",
@@ -203,7 +203,7 @@ export function NavRail({ view }: { view: string }) {
                     <button
                       onClick={() => navigate(item.view)}
                       aria-current={active ? "page" : undefined}
-                      className={`group relative flex min-h-[44px] w-full items-center gap-3 rounded-full text-sm transition-all duration-150 ${
+                      className={`group relative flex min-h-[44px] w-full items-center gap-3 text-sm transition-all duration-150 ${
                         expanded ? "px-3.5" : "justify-center px-0"
                       } ${
                         active
@@ -214,7 +214,7 @@ export function NavRail({ view }: { view: string }) {
                       {/* Ember active indicator */}
                       <span
                         aria-hidden="true"
-                        className={`absolute -left-2.5 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full transition-opacity duration-200 ${
+                        className={`absolute -left-2.5 top-1/2 h-5 w-[3px] -translate-y-1/2 transition-opacity duration-200 ${
                           active ? "opacity-100" : "opacity-0"
                         }`}
                         style={{
@@ -257,7 +257,7 @@ export function NavRail({ view }: { view: string }) {
         <div className="shrink-0 space-y-1 p-2.5" style={{ borderTop: "1px solid var(--rail-border)" }}>
           <button
             onClick={toggleExpanded}
-            className={`flex min-h-[44px] w-full items-center gap-3 rounded-full text-sm text-[var(--rail-text)] hover:bg-[var(--rail-hover-bg)] hover:text-white ${
+            className={`flex min-h-[44px] w-full items-center gap-3 text-sm text-[var(--rail-text)] hover:bg-[var(--rail-hover-bg)] hover:text-white ${
               expanded ? "px-3.5" : "justify-center px-0"
             }`}
             aria-label={expanded ? "Collapse navigation" : "Expand navigation"}
@@ -273,7 +273,7 @@ export function NavRail({ view }: { view: string }) {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className={`flex min-h-[44px] w-full items-center gap-3 rounded-full text-left hover:bg-[var(--rail-hover-bg)] ${
+                className={`flex min-h-[44px] w-full items-center gap-3 text-left hover:bg-[var(--rail-hover-bg)] ${
                   expanded ? "px-2" : "justify-center px-0"
                 }`}
                 aria-label="Account menu"

@@ -102,18 +102,18 @@ export function NotificationCenter() {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
-          className="relative grid h-11 w-11 place-items-center rounded-full text-stone hover:bg-fog hover:text-ink"
+          className="relative grid h-11 w-11 place-items-center text-stone hover:bg-fog hover:text-ink"
           aria-label={`Notifications${total > 0 ? ` (${total} new)` : ""}`}
         >
           <Bell className="h-[18px] w-[18px]" aria-hidden="true" />
           {total > 0 && (
-            <span className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-ink px-1 text-[10px] font-medium text-white">
+            <span className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center bg-ink px-1 text-[10px] font-medium text-white">
               {total > 99 ? "99+" : total}
             </span>
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[340px] rounded-[20px] p-0">
+      <PopoverContent align="end" className="w-[340px] rounded-none p-0">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <p className="text-sm font-medium text-ink">Notifications</p>
           <span className="dlg-pill bg-fog px-2.5 py-0.5 text-[11px] font-medium text-graphite">
@@ -140,7 +140,7 @@ export function NotificationCenter() {
                         setOpen(false);
                         r.go();
                       }}
-                      className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-[12px] px-3 text-left hover:bg-fog"
+                      className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-none px-3 text-left hover:bg-fog"
                     >
                       <span className="text-sm text-stone">
                         <span className="num font-medium text-ink">{r.count}</span>{" "}

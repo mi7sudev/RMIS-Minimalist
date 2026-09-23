@@ -91,7 +91,7 @@ function PipelineSpark({ byStatus }: { byStatus: { status: string; count: number
   const total = buckets.reduce((sum, b) => sum + b.count, 0);
   if (total === 0) return null;
   return (
-    <span className="flex h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-fog" aria-hidden>
+    <span className="flex h-1.5 w-16 shrink-0 overflow-hidden bg-fog" aria-hidden>
       {buckets.map((b) =>
         b.count > 0 ? (
           <span
@@ -198,11 +198,11 @@ export default function CommandCenter() {
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
             <SkeletonRows rows={2} rowClassName="h-6 w-40" />
-            <SkeletonRows rows={5} rowClassName="h-[72px] rounded-[12px]" />
-            <SkeletonRows rows={5} rowClassName="h-[64px] rounded-[12px]" />
+            <SkeletonRows rows={5} rowClassName="h-[72px] rounded-none" />
+            <SkeletonRows rows={5} rowClassName="h-[64px] rounded-none" />
           </div>
           <div>
-            <Skeleton className="h-72 w-full rounded-[24px]" />
+            <Skeleton className="h-72 w-full rounded-none" />
           </div>
         </div>
       </div>
@@ -281,7 +281,7 @@ export default function CommandCenter() {
                   action={
                     <button
                       type="button"
-                      className="dlg-cta inline-flex min-h-[44px] items-center gap-2 rounded-full px-5 text-sm"
+                      className="dlg-cta inline-flex min-h-[44px] items-center gap-2 px-5 text-sm"
                       onClick={() => navigate("recruitment")}
                     >
                       Open recruitment
@@ -349,7 +349,7 @@ export default function CommandCenter() {
                     onClick={() => navigate("candidate", { id: String(r.applicant.id) })}
                   >
                     <span aria-hidden="true" className="contents">
-                      <Monogram size={28}>{initialsOf(fullName(r.applicant))}</Monogram>
+                      <Monogram size={28} className="rounded-full">{initialsOf(fullName(r.applicant))}</Monogram>
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-ink">{fullName(r.applicant)}</p>
@@ -392,14 +392,14 @@ export default function CommandCenter() {
             </dl>
             <button
               type="button"
-              className="dlg-ghost mt-4 inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-full px-4 text-sm"
+              className="dlg-ghost mt-4 inline-flex min-h-[44px] w-full items-center justify-center gap-2 px-4 text-sm"
               onClick={() => navigate("analytics")}
             >
               <ChartColumn className="h-4 w-4" aria-hidden />
               Open Analytics
             </button>
           </div>
-          <div className="space-y-2.5 rounded-[12px] bg-fog p-4">
+          <div className="space-y-2.5 rounded-none bg-fog p-4">
             {(
               [
                 [CalendarClock, stats.needsAttention.deadlinesThisWeek, "posting deadline(s) within 7 days", "warn"],

@@ -101,7 +101,7 @@ function LedgerRow({ label, value, num = false }: { label: string; value: string
 
 function EntityCard({ title, lines }: { title: string; lines: string[] }) {
   return (
-    <div className="rounded-[12px] bg-fog p-4">
+    <div className="rounded-none bg-fog p-4">
       <p className="text-sm text-ink">{title}</p>
       {lines.filter(Boolean).length > 0 && <p className="num mt-1 text-xs text-stone">{lines.filter(Boolean).join(" · ")}</p>}
     </div>
@@ -140,7 +140,7 @@ function MonogramAvatar({ name, size = 36, warm = false }: { name: string; size?
     .join("");
   return (
     <span aria-hidden="true">
-      <Monogram size={size} warm={warm}>{initials || "?"}</Monogram>
+      <Monogram size={size} warm={warm} className="rounded-full">{initials || "?"}</Monogram>
     </span>
   );
 }
@@ -238,7 +238,7 @@ export default function CandidateDetail() {
         <div className="dlg-card p-6">
           <div className="skel h-9 w-9 rounded-full" />
           <div className="mt-3 flex items-center gap-4">
-            <div className="skel h-12 w-12 rounded-[12px]" />
+            <div className="skel h-12 w-12 rounded-none" />
             <div className="min-w-0 flex-1 space-y-2">
               <div className="skel h-7 w-1/3" />
               <div className="skel h-4 w-1/2" />
@@ -267,7 +267,7 @@ export default function CandidateDetail() {
           type="button"
           aria-label="Back to candidates"
           onClick={() => navigate("candidates")}
-          className="focus-ring -ml-2 mb-3 inline-flex h-9 w-9 items-center justify-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink"
+          className="focus-ring -ml-2 mb-3 inline-flex h-9 w-9 items-center justify-center text-stone transition-colors hover:bg-fog hover:text-ink"
         >
           <ChevronLeft className="h-5 w-5" aria-hidden />
         </button>
@@ -316,7 +316,7 @@ export default function CandidateDetail() {
 
       {/* Contact */}
       <SectionCard title="Contact" icon={Mail} chipTone="slate" description="Personal details on record.">
-        <div className="rounded-[12px] bg-fog p-4">
+        <div className="rounded-none bg-fog p-4">
           <LedgerRow label="Email" value={detail.emailAddress ?? ""} />
           <LedgerRow label="Mobile" value={detail.mobileNumber ?? ""} num />
           <LedgerRow label="Contact number" value={detail.contactNumber ?? ""} num />
@@ -450,7 +450,7 @@ export default function CandidateDetail() {
         ) : (
           <div className="space-y-3">
             {detail.documents.map((doc) => (
-              <div key={doc.id} className="flex flex-wrap items-center gap-3 rounded-[12px] bg-fog p-4">
+              <div key={doc.id} className="flex flex-wrap items-center gap-3 rounded-none bg-fog p-4">
                 <IconChip icon={FileText} tone="slate" size={32} iconSize={14} />
                 <div className="min-w-0 flex-1">
                   <a
@@ -483,7 +483,7 @@ export default function CandidateDetail() {
               <button
                 key={app.id}
                 type="button"
-                className="group/row relative flex w-full items-center gap-3 rounded-[12px] py-3 pr-2 text-left transition-colors hover:bg-fog/60 focus-ring"
+                className="group/row relative flex w-full items-center gap-3 rounded-none py-3 pr-2 text-left transition-colors hover:bg-fog/60 focus-ring"
                 onClick={() => navigate("evaluator-review", { id: String(app.id) })}
                 aria-label={`Open review workspace for ${app.positionTitle || app.jobTitle}`}
               >

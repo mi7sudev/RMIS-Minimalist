@@ -81,7 +81,7 @@ function MqrFailure({ mqr, onGoProfile }: { mqr: MqrResults; onGoProfile: () => 
   ];
   return (
     <div className="space-y-4">
-      <div className="rounded-[12px] bg-dusty-rose/10 border border-dusty-rose/30 p-4">
+      <div className="rounded-none bg-dusty-rose/10 border border-dusty-rose/30 p-4">
         <p className="text-sm font-medium text-ink">Requirements Not Met</p>
         <p className="text-sm text-stone mt-1">
           Your credentials do not satisfy every minimum qualification for this position. Nothing was submitted.
@@ -89,7 +89,7 @@ function MqrFailure({ mqr, onGoProfile }: { mqr: MqrResults; onGoProfile: () => 
       </div>
       <ul className="space-y-2">
         {dims.map(([label, verdict]) => (
-          <li key={label} className="flex items-start gap-3 rounded-[12px] bg-fog p-3">
+          <li key={label} className="flex items-start gap-3 rounded-none bg-fog p-3">
             <span className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-medium ${verdict === MQR_MEETS ? "bg-ink text-white" : "bg-dusty-rose/20 text-dusty-rose"}`}>
               {verdict === MQR_MEETS ? "✓" : "✕"}
             </span>
@@ -287,11 +287,11 @@ export function ApplyDialogs({
               </DialogDescription>
             </DialogHeader>
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-[12px] bg-fog p-3">
+              <div className="rounded-none bg-fog p-3">
                 <p className="text-xs text-pebble">Item No.</p>
                 <p className="text-ink">{job.position?.itemNumber || "—"}</p>
               </div>
-              <div className="rounded-[12px] bg-fog p-3">
+              <div className="rounded-none bg-fog p-3">
                 <p className="text-xs text-pebble">Deadline</p>
                 <p className={`text-ink ${dl.overdue ? "text-dusty-rose" : ""}`}>{dl.label}</p>
               </div>
@@ -349,7 +349,7 @@ export function ApplyDialogs({
               <div className="mt-4">
                 {ftProgress > 0 && (
                   <div className="mb-4">
-                    <div className="h-1.5 w-full rounded-full bg-fog overflow-hidden">
+                    <div className="h-1.5 w-full bg-fog overflow-hidden">
                       <div className="h-full bg-tangerine transition-all" style={{ width: `${ftProgress}%` }} />
                     </div>
                     <p className="mt-2 text-xs text-pebble">
@@ -358,14 +358,14 @@ export function ApplyDialogs({
                   </div>
                 )}
                 {ftError && (
-                  <div className="mb-4 rounded-[12px] border border-dusty-rose/30 bg-dusty-rose/10 p-3">
+                  <div className="mb-4 rounded-none border border-dusty-rose/30 bg-dusty-rose/10 p-3">
                     <p className="text-sm text-ink">{ftError.message}</p>
                     {ftError.fileName && <p className="mt-0.5 text-xs text-pebble">{ftError.fileName}</p>}
                   </div>
                 )}
                 <button
                   onClick={() => fileRef.current?.click()}
-                  className="flex min-h-[140px] w-full flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-divider bg-white p-6 text-center transition-colors hover:bg-fog"
+                  className="flex min-h-[140px] w-full flex-col items-center justify-center gap-2 rounded-none border border-dashed border-divider bg-white p-6 text-center transition-colors hover:bg-fog"
                 >
                   <span className="text-sm font-medium text-ink">Upload PDS — CS Form 212</span>
                   <span className="text-xs text-pebble">XLSX, PDF or DOCX · up to 10 MB</span>
@@ -405,13 +405,13 @@ export function ApplyDialogs({
                     <span className="dlg-pill bg-fog px-3 py-1 text-xs text-graphite">{ftSummary.replaced} replaced</span>
                   )}
                 </div>
-                <div className="rounded-[12px] bg-fog p-4">
+                <div className="rounded-none bg-fog p-4">
                   <p className="mb-3 text-sm font-medium text-ink">Completion requirements</p>
                   <Checklist requirements={ftRequirements ?? []} />
                 </div>
                 {canSubmit ? (
                   <div className="space-y-4">
-                    <label className="flex cursor-pointer items-start gap-3 rounded-[12px] bg-fog p-4">
+                    <label className="flex cursor-pointer items-start gap-3 rounded-none bg-fog p-4">
                       <Checkbox checked={certified} onCheckedChange={(v) => setCertified(v === true)} className="mt-0.5" />
                       <span className="text-xs leading-relaxed text-graphite">
                         I certify that the information extracted from my PDS is true and correct, in compliance with civil-service requirements. False statements may result in disqualification.
@@ -427,7 +427,7 @@ export function ApplyDialogs({
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-3 rounded-[12px] border border-dashed border-divider p-4">
+                  <div className="space-y-3 rounded-none border border-dashed border-divider p-4">
                     <p className="text-sm text-stone">Your profile still misses some requirements after extraction. Your data is saved — complete the missing sections to continue.</p>
                     <div className="flex gap-3">
                       <button onClick={() => { navigate("profile"); onClose(); }} className="dlg-cta flex-1 px-6 py-2.5 text-sm min-h-[44px]">

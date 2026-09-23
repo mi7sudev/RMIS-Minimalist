@@ -33,13 +33,13 @@ export function MobileNav({ view }: { view: string }) {
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
         <button
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-white hover:bg-white/10"
+          className="grid h-11 w-11 shrink-0 place-items-center text-white hover:bg-white/10"
           aria-label="Open navigation menu"
         >
           <Menu className="h-5 w-5" aria-hidden="true" />
         </button>
       </SheetTrigger>
-      <SheetContent side="left" className="w-[300px] rounded-r-[24px] bg-white p-0 sm:w-[340px]">
+      <SheetContent side="left" className="w-[300px] rounded-none bg-white p-0 sm:w-[340px]">
         <SheetTitle className="sr-only">Navigation</SheetTitle>
         <SheetDescription className="sr-only">Workspace sections and account</SheetDescription>
         <div className="flex h-full flex-col">
@@ -49,7 +49,7 @@ export function MobileNav({ view }: { view: string }) {
               onClick={() => go(ROLE_HOME[user.role])}
               className="flex min-h-[44px] items-center gap-3"
             >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] bg-ink text-base font-medium text-white">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-none bg-ink text-base font-medium text-white">
                 M
               </span>
               <span className="text-sm font-medium text-ink">MIRDC Recruitment</span>
@@ -71,7 +71,7 @@ export function MobileNav({ view }: { view: string }) {
                         <button
                           onClick={() => go(item.view)}
                           aria-current={active ? "page" : undefined}
-                          className={`flex min-h-[44px] w-full items-center gap-3 rounded-full px-3.5 text-sm ${
+                          className={`flex min-h-[44px] w-full items-center gap-3 px-3.5 text-sm ${
                             active ? "bg-ink text-white" : "text-stone hover:bg-fog hover:text-ink"
                           }`}
                         >

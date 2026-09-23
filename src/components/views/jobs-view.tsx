@@ -122,7 +122,7 @@ function RichOrPlain({ html, text }: { html?: string | null; text?: string | nul
 }
 
 function Skeleton({ className }: { className?: string }) {
-  return <div className={`animate-pulse rounded-[12px] bg-fog ${className ?? ""}`} />;
+  return <div className={`animate-pulse rounded-none bg-fog ${className ?? ""}`} />;
 }
 
 function ErrorCard({ message, onRetry }: { message: string; onRetry: () => void }) {
@@ -172,7 +172,7 @@ function QuickView({
       )}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {facts.map(([label, value]) => (
-          <div key={label} className="rounded-[12px] bg-fog p-3">
+          <div key={label} className="rounded-none bg-fog p-3">
             <p className="text-xs text-pebble">{label}</p>
             <p className="mt-0.5 truncate text-sm text-ink" title={value}>
               {value}
@@ -222,7 +222,7 @@ function JobCard({
             on every top-ranked job-board design */}
         <span
           aria-hidden="true"
-          className="hidden h-12 w-12 shrink-0 place-items-center rounded-[12px] bg-fog font-display text-lg leading-none text-ink sm:grid"
+          className="hidden h-12 w-12 shrink-0 place-items-center rounded-none bg-fog font-display text-lg leading-none text-ink sm:grid"
         >
           M
         </span>
@@ -255,7 +255,7 @@ function JobCard({
           onClick={() => onToggle(job.id)}
           aria-label={expanded ? "Collapse quick view" : "Expand quick view"}
           aria-expanded={expanded}
-          className="dlg-ghost grid h-10 w-10 shrink-0 place-items-center rounded-full text-ink"
+          className="dlg-ghost grid h-10 w-10 shrink-0 place-items-center text-ink"
         >
           {expanded ? (
             <Minus className="h-4 w-4" aria-hidden="true" />
@@ -323,9 +323,9 @@ function SummaryCard({
               Closes <span className="num">{formatDate(job.deadlineDate)}</span>
             </span>
           </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-fog" role="presentation">
+          <div className="mt-2 h-1.5 overflow-hidden bg-fog" role="presentation">
             <div
-              className={`h-full rounded-full transition-[width] duration-500 ${
+              className={`h-full transition-[width] duration-500 ${
                 dl.overdue ? "bg-[var(--bad)]" : dl.closingSoon ? "bg-[var(--warn)]" : "bg-ink"
               }`}
               style={{ width: `${deadlineProgress(job)}%` }}
@@ -337,7 +337,7 @@ function SummaryCard({
       <div className="mt-5">
         {applied ? (
           <div className="space-y-3">
-            <div className="flex items-center gap-3 rounded-[12px] bg-fog p-3">
+            <div className="flex items-center gap-3 rounded-none bg-fog p-3">
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-ink text-sm text-white">
                 ✓
               </span>
@@ -352,7 +352,7 @@ function SummaryCard({
                   Cancel Application
                 </button>
               </AlertDialogTrigger>
-              <AlertDialogContent className="dlg-card-plain rounded-[24px]">
+              <AlertDialogContent className="dlg-card-plain rounded-none">
                 <AlertDialogHeader>
                   <AlertDialogTitle className="font-display text-2xl text-carbon">
                     Cancel this application?
@@ -363,12 +363,12 @@ function SummaryCard({
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                  <AlertDialogCancel className="dlg-ghost min-h-[44px] rounded-full px-6 text-sm">
+                  <AlertDialogCancel className="dlg-ghost min-h-[44px] px-6 text-sm">
                     Keep application
                   </AlertDialogCancel>
                   <AlertDialogAction
                     onClick={onCancel}
-                    className="min-h-[44px] rounded-full border border-dusty-rose/30 bg-dusty-rose/10 px-6 text-sm font-medium text-dusty-rose hover:bg-dusty-rose/20"
+                    className="min-h-[44px] border border-dusty-rose/30 bg-dusty-rose/10 px-6 text-sm font-medium text-dusty-rose hover:bg-dusty-rose/20"
                   >
                     Cancel application
                   </AlertDialogAction>
@@ -449,7 +449,7 @@ function DetailBody({ job }: { job: JobWire }) {
 
         <div>
           <h2 className="text-lg font-medium text-ink">Minimum Qualification Requirements</h2>
-          <div className="mt-3 overflow-hidden rounded-[12px] border border-border">
+          <div className="mt-3 overflow-hidden rounded-none border border-border">
             {visibleMqr.length > 0 ? (
               visibleMqr.map(([label, value], i) => (
                 <div
@@ -502,7 +502,7 @@ function DetailBody({ job }: { job: JobWire }) {
           <h2 className="text-lg font-medium text-ink">Position Details</h2>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
             {vitals.map(([label, value]) => (
-              <div key={label} className="rounded-[12px] bg-fog p-3">
+              <div key={label} className="rounded-none bg-fog p-3">
                 <p className="text-xs text-pebble">{label}</p>
                 <p className="mt-0.5 truncate text-sm text-ink" title={value}>
                   {value}
@@ -511,18 +511,18 @@ function DetailBody({ job }: { job: JobWire }) {
             ))}
           </div>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-[12px] bg-fog p-3">
+            <div className="rounded-none bg-fog p-3">
               <p className="text-xs text-pebble">Published</p>
               <p className="mt-0.5 text-sm text-ink">{formatDate(job.publishDate ?? job.publishedAt)}</p>
             </div>
-            <div className="rounded-[12px] bg-fog p-3">
+            <div className="rounded-none bg-fog p-3">
               <p className="text-xs text-pebble">Deadline</p>
               <p className={`mt-0.5 text-sm ${dl.overdue ? "text-dusty-rose" : "text-ink"}`}>
                 {formatDate(job.deadlineDate)}
                 {job.deadlineDate ? ` — ${dl.label}` : ""}
               </p>
             </div>
-            <div className="rounded-[12px] bg-fog p-3">
+            <div className="rounded-none bg-fog p-3">
               <p className="text-xs text-pebble">Processing</p>
               <p className="mt-0.5 text-sm text-ink">{formatDate(job.processingDate)}</p>
             </div>
@@ -758,7 +758,7 @@ export default function JobsView() {
         {facets.map(([code, count]) => (
           <label
             key={code}
-            className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-[10px] px-2 hover:bg-fog"
+            className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-none px-2 hover:bg-fog"
           >
             <Checkbox
               checked={divisionFilter.includes(code)}
@@ -856,8 +856,8 @@ export default function JobsView() {
                   aria-current={p === current ? "page" : undefined}
                   className={
                     p === current
-                      ? "grid h-11 min-w-11 place-items-center rounded-full bg-ink px-3 text-sm font-medium text-white"
-                      : "grid h-11 min-w-11 place-items-center rounded-full px-3 text-sm text-stone hover:bg-fog hover:text-ink"
+                      ? "grid h-11 min-w-11 place-items-center bg-ink px-3 text-sm font-medium text-white"
+                      : "grid h-11 min-w-11 place-items-center px-3 text-sm text-stone hover:bg-fog hover:text-ink"
                   }
                 >
                   {p}
@@ -898,7 +898,7 @@ export default function JobsView() {
                     <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
                     Filters
                     {activeFilterCount > 0 && (
-                      <span className="grid h-5 min-w-5 place-items-center rounded-full bg-ink px-1.5 text-[11px] font-medium text-white">
+                      <span className="grid h-5 min-w-5 place-items-center bg-ink px-1.5 text-[11px] font-medium text-white">
                         {activeFilterCount}
                       </span>
                     )}
@@ -935,7 +935,7 @@ export default function JobsView() {
                 <SelectTrigger className="dlg-input min-h-[44px] w-[170px]" aria-label="Sort results">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="rounded-[12px]">
+                <SelectContent className="rounded-none">
                   <SelectItem value="newest">Newest</SelectItem>
                   <SelectItem value="deadline">Deadline</SelectItem>
                   <SelectItem value="salary">Salary desc</SelectItem>
@@ -953,7 +953,7 @@ export default function JobsView() {
                   <button
                     onClick={() => changeQuery("")}
                     aria-label="Clear search filter"
-                    className="focus-ring -mr-1 grid h-5 w-5 place-items-center rounded-full text-stone hover:bg-fog hover:text-ink"
+                    className="focus-ring -mr-1 grid h-5 w-5 place-items-center text-stone hover:bg-fog hover:text-ink"
                   >
                     <X className="h-3 w-3" aria-hidden="true" />
                   </button>
@@ -968,7 +968,7 @@ export default function JobsView() {
                   <button
                     onClick={() => toggleDivision(code)}
                     aria-label={`Remove ${divisionShort(code)} filter`}
-                    className="focus-ring -mr-1 grid h-5 w-5 place-items-center rounded-full text-stone hover:bg-fog hover:text-ink"
+                    className="focus-ring -mr-1 grid h-5 w-5 place-items-center text-stone hover:bg-fog hover:text-ink"
                   >
                     <X className="h-3 w-3" aria-hidden="true" />
                   </button>

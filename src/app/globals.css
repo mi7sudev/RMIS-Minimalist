@@ -4,9 +4,12 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ============================================================================
-   RMIS × "INK & EMBER" — Premium Enterprise theme (Wave 3).
+   RMIS × "INK & EMBER" — Premium Enterprise theme (Wave 3, sharp edition).
    Depth-first: layered elevation, gradient mesh ambience, tinted icon chips,
    dark premium rail, glass surfaces, gradient CTA. Business logic untouched.
+   RADII: sharp-corner enterprise system (IBM Carbon grade) — every container,
+   control, chip and surface has zero corner radius. rounded-full is reserved
+   exclusively for identity avatars, status/dot indicators and decorative orbs.
    ========================================================================== */
 
 :root {
@@ -85,7 +88,7 @@
   --sidebar-accent-foreground: #181825;
   --sidebar-border: #ececec;
   --sidebar-ring: #181825;
-  --radius: 0.75rem;
+  --radius: 0rem;
 }
 
 @theme inline {
@@ -156,13 +159,22 @@
   --color-viz-4: var(--viz-4);
   --color-viz-5: var(--viz-5);
 
-  /* Radii */
-  --radius-dialog-card: 24px;
-  --radius-dialog-small: 8px;
-  --radius-dialog-badge: 100px;
-  --radius-dialog-button: 28px;
-  --radius-dialog-overlay: 32px;
-  --radius-dialog-inner: 12px;
+  /* Radii — sharp enterprise: collapse the Tailwind corner scale to zero so
+     every rounded-* container/control system-wide renders with crisp 90° edges. */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
+  --radius-dialog-card: 0px;
+  --radius-dialog-small: 0px;
+  --radius-dialog-badge: 0px;
+  --radius-dialog-button: 0px;
+  --radius-dialog-overlay: 0px;
+  --radius-dialog-inner: 0px;
 
   /* Elevation system — layered, Stripe/Linear-grade depth */
   --shadow-e1: 0 1px 2px rgba(24, 24, 37, 0.05), 0 1px 3px rgba(24, 24, 37, 0.04);
@@ -266,7 +278,7 @@
 .dlg-card {
   position: relative;
   background: linear-gradient(180deg, #ffffff 0%, #fdfdfc 100%);
-  border-radius: 24px;
+  border-radius: 0px;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.9),
     0 1px 2px rgba(24, 24, 37, 0.05),
@@ -274,7 +286,7 @@
 }
 .dlg-card-plain {
   background: linear-gradient(180deg, #ffffff 0%, #fdfdfc 100%);
-  border-radius: 24px;
+  border-radius: 0px;
 }
 
 /* Hover-lift card utility (opt-in) */
@@ -310,7 +322,7 @@
   position: relative;
   background: linear-gradient(180deg, #f9a468 0%, #f69251 48%, #ee7f38 100%);
   color: #20120a;
-  border-radius: 28px;
+  border-radius: 0px;
   font-weight: 600;
   box-shadow: var(--shadow-cta);
   transition: filter 160ms ease, transform 160ms ease, box-shadow 160ms ease;
@@ -327,7 +339,7 @@
 .dlg-ghost {
   background: rgba(255, 255, 255, 0.85);
   color: #000000;
-  border-radius: 28px;
+  border-radius: 0px;
   font-weight: 500;
   border: 1px solid rgba(24, 24, 37, 0.09);
   box-shadow: 0 1px 2px rgba(24, 24, 37, 0.04);
@@ -337,8 +349,9 @@
   background: #ffffff;
   box-shadow: 0 2px 6px rgba(24, 24, 37, 0.07);
 }
+/* Sharp tag/counter treatment (was a pill; now a crisp enterprise tag) */
 .dlg-pill {
-  border-radius: 100px;
+  border-radius: 0px;
 }
 .dlg-input {
   border-radius: 0px;
@@ -371,7 +384,7 @@
   place-items: center;
   flex: none;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 1px 2px rgba(24, 24, 37, 0.06);
-  border-radius: 12px;
+  border-radius: 0px;
 }
 .chip-amber {
   background: linear-gradient(135deg, #fff2e6, #ffdfc7);
@@ -408,7 +421,7 @@
   display: inline-grid;
   place-items: center;
   flex: none;
-  border-radius: 12px;
+  border-radius: 0px;
   background: linear-gradient(145deg, #2e2e42 0%, #1b1b29 100%);
   color: #f4efe9;
   font-weight: 600;
@@ -441,7 +454,7 @@
   position: relative;
   overflow: hidden;
   background: #ececef;
-  border-radius: 12px;
+  border-radius: 0px;
 }
 .skel::after {
   content: "";
@@ -464,7 +477,7 @@
   gap: 6px;
   height: 24px;
   padding: 0 10px;
-  border-radius: 100px;
+  border-radius: 0px;
   font-size: 12px;
   font-weight: 500;
   line-height: 1;
@@ -545,7 +558,7 @@
   background: #ffffff !important;
   color: #181825 !important;
   border: 1px solid rgba(24, 24, 37, 0.08) !important;
-  border-radius: 16px !important;
+  border-radius: 0px !important;
   box-shadow: 0 4px 10px rgba(24, 24, 37, 0.06), 0 16px 44px -12px rgba(24, 24, 37, 0.22) !important;
   font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif !important;
 }

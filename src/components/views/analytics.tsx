@@ -252,7 +252,7 @@ export default function Analytics() {
                   <button
                     key={f.stage}
                     type="button"
-                    className={`focus-ring w-full rounded-[12px] px-3 py-3 text-left transition-colors min-h-[44px] ${
+                    className={`focus-ring w-full rounded-none px-3 py-3 text-left transition-colors min-h-[44px] ${
                       active ? "bg-fog ring-1 ring-ink/20" : "hover:bg-fog/60"
                     }`}
                     onClick={() => setDrill(drill === f.stage ? "All" : f.stage)}
@@ -264,9 +264,9 @@ export default function Analytics() {
                       <span className="num text-sm font-medium text-ink">{f.count}</span>
                     </div>
                     <div className="mt-2 flex items-center gap-2.5">
-                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-fog shadow-[inset_0_1px_2px_rgba(24,24,37,0.08)]">
+                      <div className="h-1.5 flex-1 overflow-hidden bg-fog shadow-[inset_0_1px_2px_rgba(24,24,37,0.08)]">
                         <div
-                          className="h-full rounded-full"
+                          className="h-full"
                           style={{ width: `${Math.min(100, f.pct)}%`, background: STAGE_BAR[f.stage] }}
                         />
                       </div>
@@ -424,11 +424,11 @@ export default function Analytics() {
                 <button
                   key={r.id}
                   type="button"
-                  className="flex min-h-[44px] w-full items-center gap-3 rounded-[12px] p-3 text-left transition-colors hover:bg-fog/60 focus-ring"
+                  className="flex min-h-[44px] w-full items-center gap-3 rounded-none p-3 text-left transition-colors hover:bg-fog/60 focus-ring"
                   onClick={() => navigate("candidate", { id: String(r.applicantId) })}
                 >
                   <span aria-hidden="true" className="contents">
-                    <Monogram size={32}>{monogramOf(fullName(r.applicant))}</Monogram>
+                    <Monogram size={32} className="rounded-full">{monogramOf(fullName(r.applicant))}</Monogram>
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-ink">{fullName(r.applicant)}</p>
@@ -457,7 +457,7 @@ export default function Analytics() {
               {audit.map((a) => (
                 <div
                   key={a.id}
-                  className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[12px] px-3 py-2.5 transition-colors hover:bg-fog/60"
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-none px-3 py-2.5 transition-colors hover:bg-fog/60"
                 >
                   <span
                     className={`${pillClass("neutral")} shrink-0 uppercase tracking-[0.06em]`}

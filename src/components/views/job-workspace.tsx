@@ -198,7 +198,7 @@ export default function JobWorkspace() {
     return (
       <div className="space-y-6">
         <Skeleton className="h-10 w-2/3" />
-        <Skeleton className="h-64 w-full rounded-[24px]" />
+        <Skeleton className="h-64 w-full rounded-none" />
       </div>
     );
   }
@@ -221,7 +221,7 @@ export default function JobWorkspace() {
             type="button"
             aria-label="Back to jobs"
             title="Back to jobs"
-            className="focus-ring -ml-2 mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink"
+            className="focus-ring -ml-2 mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center text-stone transition-colors hover:bg-fog hover:text-ink"
             onClick={() => navigate("recruitment")}
           >
             <ChevronLeft className="h-5 w-5" aria-hidden />
@@ -395,11 +395,11 @@ export default function JobWorkspace() {
                 <button
                   key={app.id}
                   type="button"
-                  className="dlg-card-plain lift min-h-[44px] w-full rounded-[12px] border border-[#ececec] p-4 flex items-center gap-3 text-left transition-shadow duration-200 hover:shadow-dialog-subtle focus-ring"
+                  className="dlg-card-plain lift min-h-[44px] w-full rounded-none border border-[#ececec] p-4 flex items-center gap-3 text-left transition-shadow duration-200 hover:shadow-dialog-subtle focus-ring"
                   onClick={() => navigate("candidate", { id: String(app.applicantId) })}
                 >
                   <span aria-hidden="true" className="contents">
-                    <Monogram size={36}>{monogramOf(fullName(app.applicant))}</Monogram>
+                    <Monogram size={36} className="rounded-full">{monogramOf(fullName(app.applicant))}</Monogram>
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-ink truncate">{fullName(app.applicant)}</p>
@@ -434,7 +434,7 @@ export default function JobWorkspace() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="rounded-full border border-[var(--bad)]/30 bg-white text-[var(--bad)] hover:bg-[var(--bad-bg)]"
+              className="border border-[var(--bad)]/30 bg-white text-[var(--bad)] hover:bg-[var(--bad-bg)]"
               onClick={(e) => {
                 e.preventDefault();
                 void deleteJob();

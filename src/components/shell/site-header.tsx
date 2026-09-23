@@ -1,7 +1,7 @@
 "use client";
 
 // ============================================================================
-// RMIS — Floating public pill header (spec §7.1): white rounded-[32px] pill,
+// RMIS — Floating public header (spec §7.1): sharp white glass bar,
 // brand mark left; Positions link + sign-in affordance + orange CTA right.
 // Used by the public landing and the anonymous jobs board (PublicShell).
 // Presentation pass: Dialog shadow token, 64px pill height, hover-underline
@@ -18,7 +18,7 @@ export function SiteHeader() {
   return (
     <header className="sticky top-4 z-40 px-4 sm:px-6">
       <div
-        className="glass mx-auto flex h-16 w-full max-w-[1200px] items-center justify-between gap-3 rounded-[32px] border border-white/60 px-4 shadow-e2 sm:px-6"
+        className="glass mx-auto flex h-16 w-full max-w-[1200px] items-center justify-between gap-3 rounded-none border border-white/60 px-4 shadow-e2 sm:px-6"
       >
         {/* Brand */}
         <button
@@ -27,7 +27,7 @@ export function SiteHeader() {
           aria-label="MIRDC Recruitment home"
         >
           <span
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-[10px] text-base font-semibold text-[#2a1608]"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-none text-base font-semibold text-[#2a1608]"
             style={{
               background: "linear-gradient(145deg, #f9a468 0%, #ef8340 100%)",
               boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 6px rgba(246,146,81,0.4)",
@@ -62,7 +62,7 @@ export function SiteHeader() {
             <>
               <button
                 onClick={() => navigate("signin")}
-                className="hidden min-h-[44px] items-center rounded-full px-3 text-sm text-stone underline-offset-4 transition-colors hover:text-ink hover:underline sm:inline-flex"
+                className="hidden min-h-[44px] items-center px-3 text-sm text-stone underline-offset-4 transition-colors hover:text-ink hover:underline sm:inline-flex"
               >
                 Sign in
               </button>

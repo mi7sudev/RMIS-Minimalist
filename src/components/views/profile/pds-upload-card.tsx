@@ -192,9 +192,9 @@ export default function PdsUploadCard({
       {/* Phase progress — thin bar, ember gradient fill (sanctioned progress gradient) */}
       {busy && (
         <div className="mb-4">
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-fog">
+          <div className="h-1.5 w-full overflow-hidden bg-fog">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-[#f69251] to-[#ef8340] motion-safe:transition-[width] duration-500"
+              className="h-full bg-gradient-to-r from-[#f69251] to-[#ef8340] motion-safe:transition-[width] duration-500"
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -205,7 +205,7 @@ export default function PdsUploadCard({
       )}
 
       {error && (
-        <div className="mb-4 rounded-[12px] border border-[var(--bad)]/30 bg-white p-4">
+        <div className="mb-4 rounded-none border border-[var(--bad)]/30 bg-white p-4">
           <p className="text-sm text-ink">{error.message}</p>
           <p className="mt-0.5 text-xs text-stone">{error.fileName}</p>
           <button
@@ -220,7 +220,7 @@ export default function PdsUploadCard({
 
       {/* Extraction result — quiet rows with tabular counts */}
       {!busy && applyRows.length > 0 && (
-        <div className="mb-4 rounded-[12px] bg-fog p-4">
+        <div className="mb-4 rounded-none bg-fog p-4">
           <p className="text-xs font-medium text-graphite">Extraction applied to your profile</p>
           <dl className="mt-2 divide-y divide-border">
             {applyRows.map(([label, count]) => (
@@ -235,7 +235,7 @@ export default function PdsUploadCard({
 
       {locked ? (
         /* One-extraction lock (§7.5) — the only way back is a full clear. */
-        <div className="flex flex-col gap-3 rounded-[12px] bg-fog p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 rounded-none bg-fog p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
             <IconChip icon={Lock} tone="ink" size={36} iconSize={16} className="mt-0.5" />
             <div>
@@ -249,7 +249,7 @@ export default function PdsUploadCard({
             type="button"
             onClick={() => setClearOpen(true)}
             disabled={clearing}
-            className="min-h-[44px] w-fit shrink-0 rounded-full border border-[var(--bad)]/30 bg-white px-5 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
+            className="min-h-[44px] w-fit shrink-0 border border-[var(--bad)]/30 bg-white px-5 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
           >
             {clearing ? "Clearing…" : "Clear Forms & Re-upload"}
           </button>
@@ -272,7 +272,7 @@ export default function PdsUploadCard({
               if (f && !busy) void runPipeline(f);
             }}
             className={cn(
-              "focus-ring flex min-h-[140px] w-full flex-col items-center justify-center gap-2.5 rounded-[12px] border border-dashed border-[#dcdcdc] bg-white p-6 text-center transition-all duration-200 hover:bg-fog disabled:opacity-60",
+              "focus-ring flex min-h-[140px] w-full flex-col items-center justify-center gap-2.5 rounded-none border border-dashed border-[#dcdcdc] bg-white p-6 text-center transition-all duration-200 hover:bg-fog disabled:opacity-60",
               dragOver &&
                 "border-ink bg-fog ring-2 ring-[#f69251]/30 bg-[radial-gradient(460px_200px_at_50%_10%,rgba(246,146,81,0.09),transparent_70%)]"
             )}
@@ -312,7 +312,7 @@ export default function PdsUploadCard({
                 void clearProfile();
               }}
               disabled={clearing}
-              className="min-h-[44px] rounded-full border border-[var(--bad)]/30 bg-white px-5 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
+              className="min-h-[44px] border border-[var(--bad)]/30 bg-white px-5 py-2.5 text-sm font-medium text-[var(--bad)] transition-colors hover:bg-fog disabled:opacity-50"
             >
               {clearing ? "Clearing…" : "Clear Everything"}
             </AlertDialogAction>
