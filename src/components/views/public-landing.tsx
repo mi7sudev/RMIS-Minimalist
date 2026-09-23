@@ -353,7 +353,7 @@ export default function PublicLanding() {
             aria-hidden="true"
             className="pointer-events-none absolute inset-0 bg-[radial-gradient(760px_440px_at_82%_10%,rgba(246,146,81,0.08),transparent_64%),radial-gradient(560px_400px_at_6%_0%,rgba(201,123,132,0.05),transparent_60%)]"
           />
-          <div className="relative mx-auto w-full max-w-[1200px] px-4 pb-14 pt-20 sm:px-6 sm:pb-20 sm:pt-24 lg:pt-28">
+          <div className="relative mx-auto w-full max-w-[1600px] px-4 pb-14 pt-20 sm:px-6 sm:pb-20 sm:pt-24 lg:px-8 lg:pt-28">
             <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-12 lg:gap-10">
               <div className="animate-in fade-in slide-in-from-bottom-2 text-center duration-300 lg:col-span-7 lg:text-left">
                 <span className="dlg-pill inline-flex items-center gap-2 bg-white/85 py-1.5 pl-2 pr-4 text-xs font-medium text-graphite shadow-e1 ring-1 ring-black/[0.05] backdrop-blur">
@@ -394,7 +394,7 @@ export default function PublicLanding() {
         </section>
 
         {/* Stats band — live snapshot */}
-        <section className="mx-auto w-full max-w-[1200px] px-4 sm:px-6">
+        <section className="mx-auto w-full max-w-[1600px] px-4 sm:px-6 lg:px-8">
           <div className="dlg-card px-5 py-8 sm:px-7">
             {jobs === null && error === null ? (
               <div className="grid grid-cols-2 gap-x-6 gap-y-8 lg:grid-cols-4 lg:gap-x-0 lg:gap-y-0 lg:divide-x lg:divide-black/[0.06]">
@@ -431,7 +431,7 @@ export default function PublicLanding() {
         {/* Positions grid */}
         <section
           id="positions-grid"
-          className="mx-auto w-full max-w-[1200px] scroll-mt-28 px-4 pt-16 sm:px-6 sm:pt-20"
+          className="mx-auto w-full max-w-[1600px] scroll-mt-28 px-4 pt-16 sm:px-6 sm:pt-20 lg:px-8"
         >
           <div className="mb-8 flex items-start gap-4 sm:gap-5">
             <IconChip icon={Briefcase} tone="amber" size={44} />
@@ -483,7 +483,7 @@ export default function PublicLanding() {
         </section>
 
         {/* Value band — why apply here */}
-        <section className="mx-auto w-full max-w-[1200px] px-4 pt-16 sm:px-6 sm:pt-20">
+        <section className="mx-auto w-full max-w-[1600px] px-4 pt-16 sm:px-6 sm:pt-20 lg:px-8">
           <div className="mb-8 flex items-start gap-4 sm:gap-5">
             <IconChip icon={Sparkles} tone="plum" size={44} />
             <div className="max-w-2xl">
@@ -510,7 +510,7 @@ export default function PublicLanding() {
         {/* How to apply */}
         <section
           id="how-to-apply"
-          className="mx-auto w-full max-w-[1200px] scroll-mt-28 px-4 py-16 sm:px-6 sm:py-20"
+          className="mx-auto w-full max-w-[1600px] scroll-mt-28 px-4 py-16 sm:px-6 sm:py-20 lg:px-8"
         >
           <div className="dlg-card p-6 sm:p-10">
             <div className="flex items-start gap-4 sm:gap-5">
@@ -572,7 +572,7 @@ export default function PublicLanding() {
         </section>
 
         {/* Footer CTA band — sanctioned dark moment */}
-        <section className="mx-auto w-full max-w-[1200px] px-4 pb-16 pt-2 sm:px-6 sm:pb-20">
+        <section className="mx-auto w-full max-w-[1600px] px-4 pb-16 pt-2 sm:px-6 sm:pb-20 lg:px-8">
           <div className="relative overflow-hidden rounded-none bg-[linear-gradient(135deg,#1b1b28_0%,#14141d_100%)] px-6 py-12 shadow-e4 sm:px-12 sm:py-14">
             {/* Ember radials (decorative) */}
             <div

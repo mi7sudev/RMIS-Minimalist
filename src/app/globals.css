@@ -301,9 +301,10 @@
     0 16px 40px -12px rgba(24, 24, 37, 0.18);
 }
 
-/* Glass surface — sticky headers / overlays on mesh */
+/* Glass surface — full-width sticky top bar on mesh. High-opacity frost so
+   scrolled content stays clearly separated (no see-through overlap). */
 .glass {
-  background: rgba(247, 247, 247, 0.72);
+  background: rgba(247, 247, 247, 0.9);
   backdrop-filter: blur(14px) saturate(1.4);
   -webkit-backdrop-filter: blur(14px) saturate(1.4);
 }

@@ -5,9 +5,9 @@
 // password, demo account chips, welcome toast → session refresh → role home.
 // Wave-3 "Ink & Ember" pass: lg+ split screen with a dark brand panel (ember
 // glow, "M" watermark, glass trust rows) on the left and the upgraded form
-// card on the right; below lg the panel collapses to a compact dark strip.
-// Demo chips are tinted selectable pills. All handlers, API calls, and copy
-// are preserved exactly.
+// card on the right. Rendered inside PublicShell (sticky header + footer),
+// so the root flexes to fill the viewport between them. All handlers, API
+// calls, and copy are preserved exactly.
 // ============================================================================
 
 import { useState } from "react";
@@ -82,22 +82,6 @@ function AuthBrandPanel() {
   );
 }
 
-/** Compact dark brand strip — below lg only. */
-function MobileBrandStrip() {
-  return (
-    <div className="relative overflow-hidden bg-[linear-gradient(180deg,#1b1b28_0%,#14141d_100%)] px-4 py-4 lg:hidden">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -top-20 left-1/2 h-44 w-44 -translate-x-1/2 rounded-full bg-[rgba(246,146,81,0.16)] blur-2xl"
-      />
-      <div className="relative z-10 flex items-center justify-center gap-2.5">
-        <Monogram warm size={28}>M</Monogram>
-        <span className="text-sm font-semibold text-white">MIRDC Recruitment</span>
-      </div>
-    </div>
-  );
-}
-
 export default function SignInView() {
   const { refresh } = useSession();
   const [identifier, setIdentifier] = useState("");
@@ -131,12 +115,11 @@ export default function SignInView() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row">
+    <div className="flex w-full flex-1 flex-col lg:flex-row">
       <AuthBrandPanel />
-      <MobileBrandStrip />
 
       {/* Form column */}
-      <div className="flex flex-1 items-center justify-center px-4 py-12 sm:px-6">
+      <div className="flex flex-1 items-center justify-center px-4 py-10 sm:px-6 sm:py-12">
         <div className="w-full max-w-md animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="dlg-card-plain shadow-e3 ring-1 ring-black/[0.06] p-6 sm:p-8 lg:p-10">
             {/* Card header — mobile/tablet only; the lg+ brand panel carries brand + heading */}

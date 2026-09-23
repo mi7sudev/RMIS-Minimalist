@@ -677,7 +677,7 @@ export default function JobsView() {
     const detail = jobs?.find((j) => j.id === detailId) ?? null;
 
     return (
-      <div className="mx-auto w-full max-w-[1200px] px-4 py-2 sm:px-6">
+      <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
         <button
           onClick={() => navigate("jobs")}
           className="mb-5 flex min-h-[44px] items-center gap-2 text-sm text-stone hover:text-ink"
@@ -879,7 +879,7 @@ export default function JobsView() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1200px] px-4 py-2 sm:px-6">
+    <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
       <div className="mb-5 max-w-2xl">
         <h1 className="text-heading-lg">Positions</h1>
         <p className="mt-2 text-sm leading-relaxed text-stone">
@@ -889,7 +889,7 @@ export default function JobsView() {
 
       <div className="items-start lg:flex lg:gap-6">
         {/* Search rail — sticky on desktop, collapsible on mobile */}
-        <aside className="mb-4 w-full lg:sticky lg:top-6 lg:mb-0 lg:w-72 lg:shrink-0">
+        <aside className="mb-4 w-full lg:sticky lg:top-20 lg:mb-0 lg:w-72 lg:shrink-0">
           <div className="lg:hidden">
             <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
               <CollapsibleTrigger asChild>

@@ -82,7 +82,9 @@ export function PublicShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
-      <main className="w-full flex-1">{children}</main>
+      {/* flex-col so full-bleed children (auth split-screen) can flex-1 to the
+          viewport between the sticky header and the sticky footer. */}
+      <main className="flex w-full flex-1 flex-col">{children}</main>
       <Footer />
     </div>
   );

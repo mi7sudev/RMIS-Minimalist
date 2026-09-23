@@ -538,3 +538,25 @@ Stage Summary:
 - The whole system now uses a zero-radius "sharp enterprise" surface language (IBM Carbon grade): cards, dialogs, buttons, tags, chips, counters, nav, progress bars all crisp; circles are reserved strictly for identity avatars, functional dots/verdict marks, and decorative ambience.
 - Achieved via token-level override (single source of truth) + ~60 targeted class edits — zero business-logic, handler, payload, or state-machine changes; all navigation/flows re-verified in-browser across the four roles and three viewports.
 - Evidence: audit-shots/w6/01-landing … 17-signup.
+
+---
+Task ID: 3
+Agent: Z.ai Code (main orchestrator)
+Task: User feedback round — add header to login page, header nav rework (remove Sign up, orange Sign in), wide-screen margin fix, header-content overlap fix
+
+Work Log:
+- Diagnosed missing header on /#/signin and /#/signup: both views rendered bare (no shell) in page.tsx Router.
+- Rewrote src/components/shell/site-header.tsx: replaced floating "sticky top-4" glass CARD with a full-width sticky top-0 enterprise bar (hairline bottom border border-black/[0.07], shadow-e1). This kills the reported content-under-header overlap: no more side gaps through which page content pokes, and the bar reads as a solid anchored system bar.
+- Header nav per user spec: REMOVED the "Sign up" button; "Sign in" is now the single orange dlg-cta. CTA hidden while already on the signin view (no dead control); on signup/landing/jobs it shows. Signed-in users still get the orange "Dashboard" CTA. Brand wordmark hidden below sm (monogram only) + whitespace-nowrap CTAs so the 375px bar stays on one line.
+- Strengthened .glass token (0.72 → 0.9 alpha) in globals.css so scrolled content never bleeds through the sticky bar.
+- page.tsx: wrapped SignInView and SignUpView in PublicShell (sticky header + sticky footer, consistent with all other public pages); widened LoadingShell container.
+- app-shell.tsx PublicShell: main is now flex flex-col so auth split-screen children flex-1 between header and footer (sticky-footer rule preserved).
+- signin-view.tsx / signup-view.tsx: roots changed min-h-screen → w-full flex-1; removed the duplicate MobileBrandStrip (header already carries the brand lockup on mobile — dedup pass).
+- Wide-screen fix: all public containers max-w-[1200px] → max-w-[1600px] + lg:px-8 gutters (public-landing.tsx x6, jobs-view.tsx x2, site-header) to match the workspace shell grid; no more huge side margins at 1920px.
+- Header-content spacing: jobs-view list + detail containers py-2 → py-6 sm:py-8; sticky filter rail lg:top-6 → lg:top-20 (clears the 64px sticky bar).
+- Verified with agent-browser at 1920x1080 and 375x812: landing, signin, signup, jobs list/quick-view/detail, admin login golden path (testadmin → Command Center toast + redirect), sticky footer, scroll behavior; bun lint clean; dev.log healthy (only a historical boot-time EADDRINUSE line).
+
+Stage Summary:
+- Auth pages now carry the full public chrome; header is a sharp full-width enterprise bar with Positions + orange Sign in (Sign up removed as requested).
+- System-wide 1600px content grid eliminates the wide-screen margin complaint; overlap between header and page content is structurally impossible (top-0 anchored, opaque-frost bar, proper section padding).
+- No business logic, API contracts, routes, or state machines touched — presentation layer only (RMIS-FLOW-SPECIFICATION.md intact).

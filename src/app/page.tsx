@@ -48,7 +48,7 @@ function useMounted() {
 function LoadingShell() {
   return (
     <div className="min-h-screen flex flex-col bg-fog" aria-busy="true" aria-label="Loading">
-      <div className="flex-1 max-w-[1200px] w-full mx-auto px-4 sm:px-6 py-16">
+      <div className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="dlg-card p-8 space-y-6 animate-pulse">
           <div className="h-10 w-2/3 bg-fog rounded-lg" />
           <div className="h-4 w-1/2 bg-fog rounded-lg" />
@@ -76,8 +76,21 @@ function Router() {
 
   // ── Anonymous ────────────────────────────────────────────────────────────
   if (!user) {
-    if (view === "signin") return <SignInView />;
-    if (view === "signup") return <SignUpView />;
+    // Auth views live inside the public shell so they carry the same sticky
+    // header (brand + Positions + orange Sign-in CTA) and footer as every
+    // other public page — previously they rendered bare with no chrome.
+    if (view === "signin")
+      return (
+        <PublicShell>
+          <SignInView />
+        </PublicShell>
+      );
+    if (view === "signup")
+      return (
+        <PublicShell>
+          <SignUpView />
+        </PublicShell>
+      );
     if (view === "jobs") return <PublicShell><JobsView /></PublicShell>;
     return <PublicLanding />;
   }
