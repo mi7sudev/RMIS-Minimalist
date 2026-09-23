@@ -7,7 +7,7 @@ export function Footer() {
   const year = new Date().getFullYear();
   return (
     <footer className="mt-auto border-t border-border/70">
-      <div className="mx-auto flex w-full max-w-[1200px] flex-col items-center justify-between gap-1.5 px-4 py-6 text-center text-xs text-pebble sm:flex-row sm:gap-3 sm:px-6 sm:text-left">
+      <div className="mx-auto flex w-full max-w-[1600px] flex-col items-center justify-between gap-1.5 px-4 py-6 text-center text-xs text-pebble sm:flex-row sm:gap-3 sm:px-6 sm:text-left lg:px-8">
         <p className="flex items-center gap-2">
           <span
             aria-hidden="true"

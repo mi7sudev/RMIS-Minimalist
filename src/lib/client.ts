@@ -104,6 +104,34 @@ export function timeAgo(d: string | Date | null | undefined): string {
   return formatDate(date);
 }
 
+/**
+ * Long-form relative age for application dates, e.g. "3 days ago",
+ * "last week", "2 weeks ago", "last month" — used on kanban cards
+ * ("Applied {appliedAgo(date)}").
+ */
+export function appliedAgo(d: string | Date | null | undefined): string {
+  if (!d) return "";
+  const date = typeof d === "string" ? new Date(d) : d;
+  if (Number.isNaN(date.getTime())) return "";
+  const mins = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hrs / 24);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  if (days < 14) return "last week";
+  if (days < 28) return `${Math.floor(days / 7)} weeks ago`;
+  if (days < 31) return "last week";
+  const months = Math.floor(days / 30);
+  if (months === 1) return "last month";
+  if (months < 12) return `${months} months ago`;
+  const years = Math.floor(days / 365);
+  if (years <= 1) return "last year";
+  return `${years} years ago`;
+}
+
 export function daysUntil(d: string | Date | null | undefined): number | null {
   if (!d) return null;
   const date = typeof d === "string" ? new Date(d) : d;

@@ -472,3 +472,24 @@ Stage Summary:
 - Theme: "Ink & Ember" premium enterprise grade — depth, tinted chips, gradient moments, dark rail — at roughly the bar of Linear/Intercom/Workday landings/dashboards.
 - Zero business-logic changes: handlers, payloads, endpoints, validation, copy contracts byte-identical (agents diffed line-by-line); lint + tsc clean; dev.log clean.
 - Evidence: audit-shots/w3/10-33.
+
+---
+Task ID: W4 (wave 4, orchestrator)
+Agent: Z.ai Code (main orchestrator)
+Task: Owner feedback — (1) left/right margins too big on wide screens; (2) kanban must look EXACTLY like the provided reference image (pastel avatar, name, match-% badge, position + department + relative applied date, divider, credential tags).
+
+Work Log:
+- Width fix: workspace main container (app-shell.tsx), workspace-header.tsx and footer.tsx widened max-w-[1200px] → max-w-[1600px] with lg:px-8 so all workspace views use the extra width and headers/footers stay aligned. Public landing/marketing pages intentionally keep the 1200px reading measure.
+- lib/client.ts: added `appliedAgo()` long-form relative formatter ("3 days ago", "last week", "2 weeks ago", "last month"…) matching the reference wording.
+- /api/evaluator/queue route: added display-only `tags: string[]` per row, built from the FROZEN application snapshots (education degree/course + eligibility titles) — read-only enrichment, no business logic touched.
+- NEW src/components/ui/kanban.tsx shared primitives: KanbanColumn (light bordered column with header INSIDE: stage dot + sentence-case label + bare count; body scrolls, columns stretch equal height), KanbanAvatar (flat pastel circle, deterministic 8-color palette per name), MatchBadge (pct = met/required: 100% green, partial amber, 0% red, hidden when nothing required), KanbanTags (max 3 gray rounded-md chips + "+N"), StageDot/STAGE_DOT_CLASS (reference palette: Applied #3d7ef0 blue, Under Review #c47f17 amber, Shortlisted #2e9e5b green, Rejected #d0454f red, Neutral gray), KANBAN_CARD + KANBAN_DIVIDER.
+- review-queue.tsx rebuilt: kanban is now EXACTLY 4 pipeline columns (Applied/Under Review/Shortlisted/Rejected) like the reference — the extra "Applicants" roster column was removed from the board (roster remains available in Candidates view); roster fetch/state removed. Cards: avatar + name + MatchBadge; rows "Building2 icon + position" and "MapPin + place · Clock + Applied {appliedAgo}" on single shrink/truncate lines; divider + tags; hover-reveal profile button in footer row (max-lg always visible); card click opens ReviewWorkspace (unchanged). List-mode stage tabs now use StageDot (same colors as board). Skeleton columns 5→4.
+- candidates.tsx kanban rebuilt on the same primitives (4 columns; card → candidate detail, aria-labels preserved); local QueueRow extended with match/job.position/tags; CandidateModal mini-pipeline dots now use STAGE_DOT_CLASS.
+- job-workspace.tsx pipeline tab rebuilt on the same primitives (cards → evaluator-review navigation unchanged).
+- Demo data: added 2 dev-DB applications following the seed pattern (applicant 1 + snapshots) so all 4 stages are visible: Juan Dela Cruz → Electronics Technician "Applied" (3 days ago), → Supervising SRS "Rejected" (2 weeks ago).
+- Verification (agent-browser): 1920px — margins fixed, 4-column board matches reference (dots, counts, badges, one-line meta, tags, equal-height columns); card click opens review workspace with dossier + decision rail (flow intact); List mode + stage tabs work; hover lift + profile reveal verified; admin Candidates kanban ✓; job pipeline kanban ✓; 390px mobile — KPIs stack, board scrolls horizontally; fresh browser session: 0 console/page errors; lint clean; tsc clean in src/; dev.log clean (all API 200s).
+
+Stage Summary:
+- Kanban surfaces (evaluator review queue, admin candidates, job pipeline) now pixel-match the owner's approved reference design; wide-screen margins fixed across the signed-in workspace.
+- Zero handler/payload/state-machine changes: same endpoints, same opens/decisions, same navigation targets; only display enrichment (tags) added server-side and presentation rewritten.
+- The Applicants roster column was removed from the evaluator kanban to honor "exactly like this" (4 columns); roster data remains reachable via the admin/evaluator Candidates registry.

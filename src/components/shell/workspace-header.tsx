@@ -61,7 +61,7 @@ export function WorkspaceHeader({
 
   return (
     <div className="w-full">
-      <div className="mx-auto flex w-full max-w-[1200px] items-center justify-between gap-3 px-4 pb-1 pt-4 sm:px-6 sm:pt-6">
+      <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-3 px-4 pb-1 pt-4 sm:px-6 sm:pt-6 lg:px-8">
         {/* Breadcrumb — mobile shows only the current label */}
         <Breadcrumb>
           <BreadcrumbList>

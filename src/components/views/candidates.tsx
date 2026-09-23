@@ -7,16 +7,16 @@
 // mode over the evaluator queue. 20 s silent poll + focus refresh.
 // Enterprise polish pass: PageHeader, KpiCard row, single-card filter toolbar,
 // table-card rows with hover quick-view, EmptyState, skeleton loading.
-// Wave-3 premium pass: slate search IconChip, gradient .monogram avatars,
-// IconChip kanban column headers with lg tint cards, .lift cards, arrow
-// translate-x quick action, shadow-e4 quick-view modal. Handlers byte-identical.
+// Reference-board pass: kanban rebuilt on the shared ui/kanban primitives —
+// dot+label+count columns, pastel avatars, match badge, position / applied
+// relative date rows and credential tags. Handlers byte-identical.
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
-  AlertTriangle, ArrowUpRight, Inbox, KeyRound, LayoutGrid, List, Mail, Phone,
-  RefreshCw, ScanSearch, Search, Star, UserCheck, Users, XCircle, type LucideIcon,
+  AlertTriangle, ArrowUpRight, Building2, Clock, KeyRound, LayoutGrid, List, Mail, MapPin,
+  Phone, RefreshCw, Search, UserCheck, Users,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -27,12 +27,14 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import {
-  EmptyState, IconChip, KpiCard, Monogram, PageHeader, SkeletonKpis, SkeletonRows,
-  type ChipTone,
+  EmptyState, IconChip, KpiCard, PageHeader, SkeletonKpis, SkeletonRows,
 } from "@/components/ui/shell";
-import { apiFetch, formatDate, fullName, humanize } from "@/lib/client";
+import {
+  KanbanAvatar, KanbanColumn, KanbanTags, KANBAN_CARD, KANBAN_DIVIDER, MatchBadge, STAGE_DOT_CLASS,
+} from "@/components/ui/kanban";
+import { apiFetch, appliedAgo, formatDate, fullName, humanize } from "@/lib/client";
 import { PIPELINE_STAGES, isRejectedStatus, stageForStatus, type StageKey } from "@/lib/status";
-import { dotClass, variantForCompletion, type StatusVariant } from "@/lib/status-ui";
+import { variantForCompletion } from "@/lib/status-ui";
 import { navigate, useHashRoute } from "@/lib/router";
 import { StatusPill } from "@/components/views/review-workspace";
 import { ghostBtn, ctaBtn } from "@/components/views/recruitment";
@@ -74,91 +76,20 @@ type QueueRow = {
   dateApplied: string;
   applicantId: number;
   applicant: { id: number; firstName: string | null; lastName: string | null; emailAddress: string | null };
-  job: { id: number; title: string };
+  job: { id: number; title: string; position: { positionTitle: string; placeOfAssignment: string | null } | null };
+  match: { verdict: string; metCount: number; requiredCount: number };
+  tags: string[];
 };
 
 const PAGE_SIZE = 25;
 
-/** Stage → stage-dot variant. */
-const STAGE_DOT: Record<StageKey, StatusVariant> = {
-  "Applied": "info",
-  "Under Review": "warn",
-  "Shortlisted": "ok",
-  "Rejected": "bad",
-};
-
-/** Stage → IconChip tone (wave-3 semantic mapping). */
-const STAGE_TONE: Record<StageKey, ChipTone> = {
-  "Applied": "plum",
-  "Under Review": "gold",
-  "Shortlisted": "emerald",
-  "Rejected": "rose",
-};
-
-/** Stage → column icon. */
-const STAGE_ICON: Record<StageKey, LucideIcon> = {
-  "Applied": Inbox,
-  "Under Review": ScanSearch,
-  "Shortlisted": Star,
-  "Rejected": XCircle,
-};
-
-/** Kanban card: resting elevation + hover-lift (wave-3). */
-const cardCls =
-  "rounded-[12px] border border-black/[0.07] bg-white shadow-e1 lift duration-200 hover:border-ink/15";
-
 const iconBtn =
   "focus-ring inline-flex h-9 w-9 items-center justify-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink";
-
-/** Gradient monogram avatar (wave-3) with initials derived from the name. */
-function MonogramAvatar({ name, size = 36, warm = false }: { name: string; size?: number; warm?: boolean }) {
-  const initials = name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
-  return (
-    <span aria-hidden="true">
-      <Monogram size={size} warm={warm}>{initials || "?"}</Monogram>
-    </span>
-  );
-}
 
 function s(v: unknown): string {
   if (v === null || v === undefined) return "";
   const t = String(v).trim();
   return t;
-}
-
-function KanbanColumn({
-  label,
-  icon: Icon,
-  tone,
-  count,
-  children,
-}: {
-  label: string;
-  icon: LucideIcon;
-  tone: ChipTone;
-  count: number;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="w-[260px] min-w-[260px] shrink-0 snap-start lg:w-auto lg:min-w-0">
-      <div className="flex items-center justify-between gap-2 px-1 pb-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <IconChip icon={Icon} tone={tone} size={28} iconSize={13} />
-          <h2 className="truncate text-[11px] font-semibold uppercase tracking-[0.1em] text-ink">{label}</h2>
-        </div>
-        <span className="status-pill status-neutral num shrink-0">{count}</span>
-      </div>
-      {/* Subtle column tint on lg so the white cards pop (mesh shows through). */}
-      <div className="lg:rounded-[16px] lg:border lg:border-black/[0.06] lg:bg-white/60 lg:p-2.5">
-        <div className="max-h-[calc(100vh-430px)] min-h-[220px] space-y-3 overflow-y-auto scroll-thin">{children}</div>
-      </div>
-    </div>
-  );
 }
 
 // ── Quick-view modal ────────────────────────────────────────────────────────
@@ -208,7 +139,7 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
         ) : (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <MonogramAvatar name={fullName(detail)} size={40} warm />
+              <KanbanAvatar name={fullName(detail)} size={40} />
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-ink">{fullName(detail)}</p>
                 <p className="num text-xs text-pebble">#{detail.id}</p>
@@ -249,7 +180,7 @@ function CandidateModal({ id, onClose }: { id: number | null; onClose: () => voi
                   <div key={stage} className="flex flex-1 items-center gap-2">
                     <div className="flex items-center gap-1.5">
                       <span
-                        className={`stage-dot ${countBy(stage) > 0 ? dotClass(STAGE_DOT[stage]) : "dot-neutral"}`}
+                        className={`stage-dot ${countBy(stage) > 0 ? STAGE_DOT_CLASS[stage] : "dot-neutral"}`}
                         aria-hidden
                       />
                       <span className="text-xs text-stone">{["Submitted", "Review", "Shortlisted"][i]}</span>
@@ -549,7 +480,7 @@ export default function Candidates() {
                         <tr key={r.id} className="group/row border-b border-border transition-colors last:border-0 hover:bg-fog/60">
                           <td className="px-5 py-3">
                             <div className="flex items-center gap-3">
-                              <MonogramAvatar name={name} size={28} />
+                              <KanbanAvatar name={name} size={28} />
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-medium text-ink">{name}</p>
                                 <p className="num truncate text-xs text-stone">
@@ -618,35 +549,57 @@ export default function Candidates() {
           )}
         </div>
       ) : (
-        /* Kanban */
-        <div className="flex snap-x snap-proximity gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible lg:pb-0">
+        /* Kanban — reference board: bordered columns with dot + label + count headers */
+        <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible lg:pb-0">
           {PIPELINE_STAGES.map((stage) => {
             const cards = kanban[stage];
             return (
-              <KanbanColumn key={stage} label={stage} icon={STAGE_ICON[stage]} tone={STAGE_TONE[stage]} count={cards.length}>
+              <KanbanColumn key={stage} label={stage} stage={stage} count={cards.length}>
                 {cards.length === 0 ? (
-                  <EmptyState icon={STAGE_ICON[stage]} tone={STAGE_TONE[stage]} title="No candidates" description="Nothing in this stage right now." compact />
+                  <p className="px-1 py-3 text-xs text-pebble">Nothing in this stage right now.</p>
                 ) : (
-                  cards.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      className={cardCls + " focus-ring w-full cursor-pointer p-4 text-left"}
-                      onClick={() => navigate("candidate", { id: String(c.applicantId) })}
-                    >
-                      <div className="flex items-start gap-2.5">
-                        <MonogramAvatar name={fullName(c.applicant)} />
-                        <div className="min-w-0 flex-1">
-                          <p className="min-w-0 truncate text-sm font-medium text-ink">{fullName(c.applicant)}</p>
-                          <p className="num mt-0.5 text-xs text-pebble">Applied {formatDate(c.dateApplied)}</p>
+                  cards.map((c) => {
+                    const position = c.job.position?.positionTitle || c.job.title;
+                    const place = c.job.position?.placeOfAssignment ?? null;
+                    const name = fullName(c.applicant);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        className={KANBAN_CARD + " focus-ring w-full cursor-pointer p-4 text-left"}
+                        onClick={() => navigate("candidate", { id: String(c.applicantId) })}
+                        aria-label={`Open ${name}'s candidate profile`}
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <KanbanAvatar name={name} />
+                          <div className="min-w-0 flex-1">
+                            <p className="min-w-0 truncate text-sm font-semibold text-ink">{name}</p>
+                            <p className="mt-1.5 flex items-center gap-1.5 text-xs text-stone">
+                              <Building2 className="h-3.5 w-3.5 shrink-0 text-pebble" aria-hidden />
+                              <span className="min-w-0 flex-1 truncate">{humanize(position)}</span>
+                            </p>
+                            <p className="mt-1 flex items-center gap-1.5 text-xs text-stone">
+                              {place && (
+                                <>
+                                  <MapPin className="h-3.5 w-3.5 shrink-0 text-pebble" aria-hidden />
+                                  <span className="min-w-0 truncate">{place}</span>
+                                  <span className="shrink-0 text-pebble" aria-hidden>·</span>
+                                </>
+                              )}
+                              <Clock className="h-3.5 w-3.5 shrink-0 text-pebble" aria-hidden />
+                              <span className="shrink-0 whitespace-nowrap text-pebble">Applied {appliedAgo(c.dateApplied)}</span>
+                            </p>
+                          </div>
+                          <MatchBadge metCount={c.match?.metCount ?? 0} requiredCount={c.match?.requiredCount ?? 0} />
                         </div>
-                      </div>
-                      <p className="mt-1 truncate text-xs text-stone">{humanize(c.job.title)}</p>
-                      <div className="mt-2.5">
-                        <StatusPill status={c.status} />
-                      </div>
-                    </button>
-                  ))
+                        {(c.tags ?? []).length > 0 && (
+                          <div className={KANBAN_DIVIDER}>
+                            <KanbanTags tags={c.tags ?? []} />
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })
                 )}
               </KanbanColumn>
             );

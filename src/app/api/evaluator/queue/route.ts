@@ -66,6 +66,13 @@ export const GET = handleApi(async (req: Request) => {
       eligibilities: safeJsonParse<SnapshotShape["eligibilities"]>(app.snapshotEligibilities, []),
     };
     const report = buildRequirementsReport(snapshot, position ?? {});
+    // Display-only credential tags (frozen snapshot — never live data).
+    const tags = [
+      ...snapshot.educations
+        .map((e) => [e.degree, e.course, e.specifyOthers].filter(Boolean).join(" ").trim())
+        .filter(Boolean),
+      ...snapshot.eligibilities.map((e) => (e.title || "").trim()).filter(Boolean),
+    ];
     return {
       id: app.id,
       status: app.status,
@@ -83,6 +90,7 @@ export const GET = handleApi(async (req: Request) => {
           : null,
       },
       match: { verdict: report.verdict, metCount: report.metCount, requiredCount: report.requiredCount },
+      tags,
     };
   });
 

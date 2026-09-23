@@ -1,0 +1,606 @@
+     1→"use client";
+     2→
+     3→// ============================================================================
+     4→// RMIS — Evaluator review queue (spec §7.8). Kanban (default) and List modes
+     5→// over /api/evaluator/queue + the applicant roster (people with zero
+     6→// applications). 15 s silent poll + focus refresh + manual refresh.
+     7→// "Qualified only" lens, stage tabs (list), bulk regret letters with confirm.
+     8→// Card / row review actions open the ReviewWorkspace in a Dialog.
+     9→// Enterprise polish pass: PageHeader toolbar, stage-dot kanban columns with
+    10→// scroll-thin bodies, StatusPill/VerdictPill footers, table-card list with
+    11→// hover quick actions, skeleton loading. Handlers unchanged.
+    12→// Wave-3 premium pass: stage KpiCards, IconChip column headers with lg tint
+    13→// cards, gradient .monogram avatars, .lift kanban cards, shadow-e4 modal.
+    14→// Handlers byte-identical.
+    15→// ============================================================================
+    16→
+    17→import { useCallback, useEffect, useMemo, useState } from "react";
+    18→import { toast } from "sonner";
+    19→import {
+    20→  AlertTriangle, ArrowUpRight, Inbox, LayoutGrid, List, MailX, RefreshCw, ScanSearch,
+    21→  Star, UserRound, Users, XCircle, type LucideIcon,
+    22→} from "lucide-react";
+    23→import { Switch } from "@/components/ui/switch";
+    24→import {
+    25→  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+    26→} from "@/components/ui/dialog";
+    27→import {
+    28→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    29→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    30→} from "@/components/ui/alert-dialog";
+    31→import {
+    32→  EmptyState, IconChip, KpiCard, Monogram, PageHeader, SkeletonKanban, SkeletonKpis,
+    33→  SkeletonRows, type ChipTone,
+    34→} from "@/components/ui/shell";
+    35→import { apiFetch, formatDate, fullName, humanize } from "@/lib/client";
+    36→import { PIPELINE_STAGES, stageForStatus, type StageKey } from "@/lib/status";
+    37→import { dotClass, variantForCompletion, type StatusVariant } from "@/lib/status-ui";
+    38→import { navigate } from "@/lib/router";
+    39→import { ReviewWorkspace, StatusPill, VerdictPill } from "@/components/views/review-workspace";
+    40→
+    41→// ── Wire shapes ─────────────────────────────────────────────────────────────
+    42→
+    43→type QueueRow = {
+    44→  id: number;
+    45→  status: string;
+    46→  stage: StageKey;
+    47→  reason: string | null;
+    48→  dateApplied: string;
+    49→  applicantId: number;
+    50→  jobId: number;
+    51→  applicant: {
+    52→    id: number;
+    53→    firstName: string | null;
+    54→    lastName: string | null;
+    55→    emailAddress: string | null;
+    56→    contactNumber: string | null;
+    57→    gender: string | null;
+    58→    isProfileComplete: boolean;
+    59→  };
+    60→  job: {
+    61→    id: number;
+    62→    title: string;
+    63→    position: { positionTitle: string; placeOfAssignment: string | null } | null;
+    64→  };
+    65→  match: { verdict: string; metCount: number; requiredCount: number };
+    66→};
+    67→
+    68→type RosterRow = {
+    69→  id: number;
+    70→  firstName: string | null;
+    71→  lastName: string | null;
+    72→  emailAddress: string | null;
+    73→  mobileNumber: string | null;
+    74→  gender: string | null;
+    75→  isProfileComplete: boolean;
+    76→  hasAccount: boolean;
+    77→  applicationCount: number;
+    78→};
+    79→
+    80→type RegretSummary = {
+    81→  total: number;
+    82→  sent: number;
+    83→  alreadySent: number;
+    84→  shortlisted: number;
+    85→  failed: number;
+    86→  notFound: number;
+    87→};
+    88→
+    89→// ── Small shared visuals ────────────────────────────────────────────────────
+    90→
+    91→const ghostBtn =
+    92→  "dlg-ghost inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+    93→
+    94→const iconBtn =
+    95→  "focus-ring inline-flex h-9 w-9 items-center justify-center rounded-full text-stone transition-colors hover:bg-fog hover:text-ink";
+    96→
+    97→/** Kanban card: resting elevation + hover-lift (wave-3). */
+    98→const cardCls =
+    99→  "rounded-[12px] border border-black/[0.07] bg-white shadow-e1 lift duration-200 hover:border-ink/15";
+   100→
+   101→/** Stage → stage-dot variant (Applicants column is neutral). */
+   102→const STAGE_DOT: Record<StageKey, StatusVariant> = {
+   103→  "Applied": "info",
+   104→  "Under Review": "warn",
+   105→  "Shortlisted": "ok",
+   106→  "Rejected": "bad",
+   107→};
+   108→
+   109→/** Stage → IconChip tone (wave-3 semantic mapping). */
+   110→const STAGE_TONE: Record<StageKey | "Applicants", ChipTone> = {
+   111→  "Applicants": "slate",
+   112→  "Applied": "plum",
+   113→  "Under Review": "gold",
+   114→  "Shortlisted": "emerald",
+   115→  "Rejected": "rose",
+   116→};
+   117→
+   118→/** Stage → column icon. */
+   119→const STAGE_ICON: Record<StageKey | "Applicants", LucideIcon> = {
+   120→  "Applicants": Users,
+   121→  "Applied": Inbox,
+   122→  "Under Review": ScanSearch,
+   123→  "Shortlisted": Star,
+   124→  "Rejected": XCircle,
+   125→};
+   126→
+   127→/** Gradient monogram avatar (wave-3) with initials derived from the name. */
+   128→function MonogramAvatar({ name, size = 36, warm = false }: { name: string; size?: number; warm?: boolean }) {
+   129→  const initials = name
+   130→    .split(/\s+/)
+   131→    .filter(Boolean)
+   132→    .slice(0, 2)
+   133→    .map((w) => w[0]?.toUpperCase() ?? "")
+   134→    .join("");
+   135→  return (
+   136→    <span aria-hidden="true">
+   137→      <Monogram size={size} warm={warm}>{initials || "?"}</Monogram>
+   138→    </span>
+   139→  );
+   140→}
+   141→
+   142→function useFocusRefresh(fn: () => void) {
+   143→  useEffect(() => {
+   144→    const onFocus = () => fn();
+   145→    window.addEventListener("focus", onFocus);
+   146→    document.addEventListener("visibilitychange", onFocus);
+   147→    return () => {
+   148→      window.removeEventListener("focus", onFocus);
+   149→      document.removeEventListener("visibilitychange", onFocus);
+   150→    };
+   151→  }, [fn]);
+   152→}
+   153→
+   154→function KanbanColumn({
+   155→  label,
+   156→  icon: Icon,
+   157→  tone,
+   158→  count,
+   159→  children,
+   160→}: {
+   161→  label: string;
+   162→  icon: LucideIcon;
+   163→  tone: ChipTone;
+   164→  count: number;
+   165→  children: React.ReactNode;
+   166→}) {
+   167→  return (
+   168→    <div className="w-[260px] min-w-[260px] shrink-0 snap-start lg:w-auto lg:min-w-0">
+   169→      <div className="flex items-center justify-between gap-2 px-1 pb-2">
+   170→        <div className="flex min-w-0 items-center gap-2">
+   171→          <IconChip icon={Icon} tone={tone} size={28} iconSize={13} />
+   172→          <h2 className="truncate text-[11px] font-semibold uppercase tracking-[0.1em] text-ink">{label}</h2>
+   173→        </div>
+   174→        <span className="status-pill status-neutral num shrink-0">{count}</span>
+   175→      </div>
+   176→      {/* Subtle column tint on lg so the white cards pop (mesh shows through). */}
+   177→      <div className="lg:rounded-[16px] lg:border lg:border-black/[0.06] lg:bg-white/60 lg:p-2.5">
+   178→        <div className="max-h-[calc(100vh-430px)] min-h-[220px] space-y-3 overflow-y-auto scroll-thin">{children}</div>
+   179→      </div>
+   180→    </div>
+   181→  );
+   182→}
+   183→
+   184→// ── Component ───────────────────────────────────────────────────────────────
+   185→
+   186→export default function ReviewQueue() {
+   187→  const [queue, setQueue] = useState<QueueRow[] | null>(null);
+   188→  const [roster, setRoster] = useState<RosterRow[] | null>(null);
+   189→  const [error, setError] = useState<string | null>(null);
+   190→  const [qualifiedOnly, setQualifiedOnly] = useState(false);
+   191→  const [mode, setMode] = useState<"kanban" | "list">("kanban");
+   192→  const [listStage, setListStage] = useState<"All" | StageKey>("All");
+   193→  const [selectedId, setSelectedId] = useState<number | null>(null);
+   194→  const [regretOpen, setRegretOpen] = useState(false);
+   195→  const [regretBusy, setRegretBusy] = useState(false);
+   196→  const [spin, setSpin] = useState(false);
+   197→
+   198→  const load = useCallback(async (silent = false) => {
+   199→    if (!silent) setError(null);
+   200→    try {
+   201→      const [q, r] = await Promise.all([
+   202→        apiFetch<{ data: QueueRow[] }>("/api/evaluator/queue?pageSize=100"),
+   203→        apiFetch<{ data: RosterRow[] }>("/api/admin/applicants?pageSize=100"),
+   204→      ]);
+   205→      setQueue(q.data);
+   206→      setRoster(r.data);
+   207→      if (!silent) setError(null);
+   208→    } catch (e) {
+   209→      if (!silent) setError(e instanceof Error ? e.message : "Failed to load the review queue");
+   210→    }
+   211→  }, []);
+   212→
+   213→  useEffect(() => {
+   214→    void load();
+   215→  }, [load]);
+   216→
+   217→  // 15 s silent poll + refetch-on-focus (spec §13).
+   218→  useEffect(() => {
+   219→    const id = setInterval(() => {
+   220→      if (!document.hidden) void load(true);
+   221→    }, 15_000);
+   222→    return () => clearInterval(id);
+   223→  }, [load]);
+   224→  useFocusRefresh(() => void load(true));
+   225→
+   226→  const manualRefresh = useCallback(() => {
+   227→    setSpin(true);
+   228→    void load(true).finally(() => setTimeout(() => setSpin(false), 500));
+   229→  }, [load]);
+   230→
+   231→  const applications = useMemo(() => queue ?? [], [queue]);
+   232→  const filtered = useMemo(
+   233→    () => (qualifiedOnly ? applications.filter((r) => r.match?.verdict === "ALL_MET") : applications),
+   234→    [applications, qualifiedOnly]
+   235→  );
+   236→  const listRows = useMemo(
+   237→    () => (listStage === "All" ? filtered : filtered.filter((r) => stageForStatus(r.status) === listStage)),
+   238→    [filtered, listStage]
+   239→  );
+   240→  const rejectedIds = useMemo(
+   241→    () => filtered.filter((r) => stageForStatus(r.status) === "Rejected").map((r) => r.id),
+   242→    [filtered]
+   243→  );
+   244→
+   245→  const kanbanColumns = useMemo(() => {
+   246→    const map: Record<StageKey, QueueRow[]> = { "Applied": [], "Under Review": [], "Shortlisted": [], "Rejected": [] };
+   247→    for (const r of filtered) map[stageForStatus(r.status)].push(r);
+   248→    return map;
+   249→  }, [filtered]);
+   250→
+   251→  const rosterCards = useMemo(() => (roster ?? []).filter((r) => r.applicationCount === 0), [roster]);
+   252→
+   253→  const sendRegrets = async () => {
+   254→    setRegretBusy(true);
+   255→    try {
+   256→      const res = await apiFetch<{ summary: RegretSummary }>("/api/evaluator/applications/regrets", {
+   257→        method: "POST",
+   258→        body: { applicationIds: rejectedIds },
+   259→      });
+   260→      const s = res.summary;
+   261→      const parts = [
+   262→        `${s.sent} sent`,
+   263→        `${s.alreadySent} already sent`,
+   264→        s.shortlisted ? `${s.shortlisted} shortlisted skipped` : "",
+   265→        s.failed ? `${s.failed} failed` : "",
+   266→        s.notFound ? `${s.notFound} not found` : "",
+   267→      ].filter(Boolean);
+   268→      if (s.sent > 0) {
+   269→        toast.success(`Regret letters: ${s.sent} sent`, { description: parts.join(" · ") });
+   270→      } else {
+   271→        toast.info("No new regret letters sent", { description: parts.join(" · ") });
+   272→      }
+   273→      setRegretOpen(false);
+   274→      await load(true);
+   275→    } catch (e) {
+   276→      toast.error(e instanceof Error ? e.message : "Failed to send regret letters");
+   277→    } finally {
+   278→      setRegretBusy(false);
+   279→    }
+   280→  };
+   281→
+   282→  return (
+   283→    <div className="space-y-6">
+   284→      {/* Header + toolbar */}
+   285→      <PageHeader
+   286→        title="Review Queue"
+   287→        description="Screen applications, verify minimum qualifications, and advance candidates through the pipeline."
+   288→        actions={
+   289→          <>
+   290→            <span className="status-pill status-neutral num">
+   291→              {filtered.length} application{filtered.length === 1 ? "" : "s"}
+   292→            </span>
+   293→            <label className="focus-ring inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-full border border-border bg-white px-3.5 text-sm text-stone transition-colors hover:border-ink/10">
+   294→              <Switch checked={qualifiedOnly} onCheckedChange={setQualifiedOnly} aria-label="Qualified only" />
+   295→              Qualified only
+   296→            </label>
+   297→            <div className="flex items-center gap-1 rounded-full bg-fog p-1" role="group" aria-label="View mode">
+   298→              <button
+   299→                type="button"
+   300→                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${mode === "kanban" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
+   301→                onClick={() => setMode("kanban")}
+   302→                aria-pressed={mode === "kanban"}
+   303→              >
+   304→                <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
+   305→                Kanban
+   306→              </button>
+   307→              <button
+   308→                type="button"
+   309→                className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors ${mode === "list" ? "bg-ink text-white" : "text-stone hover:text-ink"}`}
+   310→                onClick={() => setMode("list")}
+   311→                aria-pressed={mode === "list"}
+   312→              >
+   313→                <List className="h-3.5 w-3.5" aria-hidden />
+   314→                List
+   315→              </button>
+   316→            </div>
+   317→            <button type="button" className={ghostBtn} onClick={manualRefresh}>
+   318→              <RefreshCw className={`h-4 w-4 ${spin ? "animate-spin" : ""}`} aria-hidden />
+   319→              Refresh
+   320→            </button>
+   321→          </>
+   322→        }
+   323→      />
+   324→
+   325→      {/* Stage tabs (list mode only) */}
+   326→      {mode === "list" && (
+   327→        <div className="flex flex-wrap items-center gap-2">
+   328→          {(["All", ...PIPELINE_STAGES] as const).map((s) => {
+   329→            const count = s === "All" ? filtered.length : filtered.filter((r) => stageForStatus(r.status) === s).length;
+   330→            const active = listStage === s;
+   331→            return (
+   332→              <button
+   333→                key={s}
+   334→                type="button"
+   335→                className={`inline-flex min-h-[36px] items-center gap-2 rounded-full px-3.5 text-xs font-medium transition-colors ${active ? "bg-ink text-white" : "dlg-ghost"}`}
+   336→                onClick={() => setListStage(s)}
+   337→                aria-pressed={active}
+   338→              >
+   339→                {s !== "All" && <span className={dotClass(STAGE_DOT[s])} aria-hidden />}
+   340→                {s}
+   341→                <span className={`num rounded-full px-1.5 ${active ? "bg-white/20" : "bg-fog"}`}>{count}</span>
+   342→              </button>
+   343→            );
+   344→          })}
+   345→          {listStage === "Rejected" && rejectedIds.length > 0 && (
+   346→            <button
+   347→              type="button"
+   348→              className={ghostBtn + " border-[var(--bad)]/30 text-[var(--bad)]"}
+   349→              onClick={() => setRegretOpen(true)}
+   350→            >
+   351→              <MailX className="h-4 w-4" aria-hidden />
+   352→              Send regret letters ({rejectedIds.length})
+   353→            </button>
+   354→          )}
+   355→        </div>
+   356→      )}
+   357→
+   358→      {/* Error */}
+   359→      {error && (
+   360→        <div className="dlg-card p-8">
+   361→          <EmptyState
+   362→            icon={AlertTriangle}
+   363→            tone="rose"
+   364→            title="Couldn't load the review queue"
+   365→            description={error}
+   366→            action={
+   367→              <button type="button" className={ghostBtn} onClick={() => void load()}>
+   368→                Retry
+   369→              </button>
+   370→            }
+   371→          />
+   372→        </div>
+   373→      )}
+   374→
+   375→      {/* Loading skeleton */}
+   376→      {!error && (queue === null || roster === null) && (
+   377→        <>
+   378→          <SkeletonKpis count={4} />
+   379→          {mode === "kanban" ? <SkeletonKanban columns={5} /> : <SkeletonRows rows={8} rowClassName="h-16" />}
+   380→        </>
+   381→      )}
+   382→
+   383→      {/* Stage KPIs (wave-3) */}
+   384→      {!error && queue !== null && roster !== null && (
+   385→        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+   386→          <KpiCard label="Applied" value={kanbanColumns["Applied"].length} icon={Inbox} tone="info" hint="awaiting start" />
+   387→          <KpiCard label="Under Review" value={kanbanColumns["Under Review"].length} icon={ScanSearch} tone="warn" hint="being screened" />
+   388→          <KpiCard label="Shortlisted" value={kanbanColumns["Shortlisted"].length} icon={Star} tone="ok" hint="advancing" />
+   389→          <KpiCard label="Rejected" value={kanbanColumns["Rejected"].length} icon={XCircle} tone="bad" hint="not qualified" />
+   390→        </div>
+   391→      )}
+   392→
+   393→      {/* Kanban */}
+   394→      {!error && queue !== null && roster !== null && mode === "kanban" && (
+   395→        <div className="flex snap-x snap-proximity gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-5 lg:overflow-visible lg:pb-0">
+   396→          {/* Applicants column (roster) */}
+   397→          <KanbanColumn label="Applicants" icon={STAGE_ICON["Applicants"]} tone={STAGE_TONE["Applicants"]} count={rosterCards.length}>
+   398→            {rosterCards.length === 0 ? (
+   399→              <EmptyState icon={Users} tone="slate" title="No applicants" description="Registered applicants waiting to apply appear here." compact />
+   400→            ) : (
+   401→              rosterCards.map((r) => (
+   402→                <button
+   403→                  key={r.id}
+   404→                  type="button"
+   405→                  className={cardCls + " focus-ring w-full cursor-pointer p-4 text-left"}
+   406→                  onClick={() => navigate("candidate", { id: String(r.id) })}
+   407→                >
+   408→                  <div className="flex items-start gap-2.5">
+   409→                    <MonogramAvatar name={fullName(r)} />
+   410→                    <div className="min-w-0 flex-1">
+   411→                      <p className="min-w-0 truncate text-sm font-medium text-ink">{fullName(r)}</p>
+   412→                      <p className="mt-0.5 truncate text-xs text-stone">{r.emailAddress || "No email on record"}</p>
+   413→                    </div>
+   414→                  </div>
+   415→                  <div className="mt-2.5">
+   416→                    <StatusPill
+   417→                      status={r.isProfileComplete ? "Profile complete" : "Profile incomplete"}
+   418→                      variant={variantForCompletion(r.isProfileComplete)}
+   419→                    />
+   420→                  </div>
+   421→                </button>
+   422→              ))
+   423→            )}
+   424→          </KanbanColumn>
+   425→
+   426→          {/* Pipeline columns */}
+   427→          {PIPELINE_STAGES.map((stage) => {
+   428→            const rows = kanbanColumns[stage];
+   429→            return (
+   430→              <KanbanColumn key={stage} label={stage} icon={STAGE_ICON[stage]} tone={STAGE_TONE[stage]} count={rows.length}>
+   431→                {rows.length === 0 ? (
+   432→                  <EmptyState icon={STAGE_ICON[stage]} tone={STAGE_TONE[stage]} title="No applications" description="Nothing in this stage right now." compact />
+   433→                ) : (
+   434→                  rows.map((row) => {
+   435→                    const position = row.job.position?.positionTitle || row.job.title;
+   436→                    const place = row.job.position?.placeOfAssignment ?? null;
+   437→                    return (
+   438→                      <div
+   439→                        key={row.id}
+   440→                        role="button"
+   441→                        tabIndex={0}
+   442→                        className={cardCls + " focus-ring cursor-pointer p-4"}
+   443→                        onClick={() => setSelectedId(row.id)}
+   444→                        onKeyDown={(e) => e.key === "Enter" && setSelectedId(row.id)}
+   445→                        aria-label={`Review application from ${fullName(row.applicant)}`}
+   446→                      >
+   447→                        <div className="flex items-start gap-2.5">
+   448→                          <MonogramAvatar name={fullName(row.applicant)} />
+   449→                          <p className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{fullName(row.applicant)}</p>
+   450→                          <button
+   451→                            type="button"
+   452→                            className={iconBtn + " -mr-1.5 -mt-1 h-8 w-8 shrink-0"}
+   453→                            aria-label={`Open ${fullName(row.applicant)}'s profile`}
+   454→                            onClick={(e) => {
+   455→                              e.stopPropagation();
+   456→                              navigate("candidate", { id: String(row.applicantId) });
+   457→                            }}
+   458→                          >
+   459→                            <UserRound className="h-4 w-4" aria-hidden />
+   460→                          </button>
+   461→                        </div>
+   462→                        <p className="num mt-0.5 whitespace-nowrap text-xs text-pebble">Applied {formatDate(row.dateApplied)}</p>
+   463→                        <p className="mt-1 truncate text-xs text-stone">
+   464→                          {[humanize(position), place].filter(Boolean).join(" · ")}
+   465→                        </p>
+   466→                        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+   467→                          <StatusPill status={row.status} />
+   468→                          <VerdictPill verdict={row.match?.verdict} />
+   469→                        </div>
+   470→                      </div>
+   471→                    );
+   472→                  })
+   473→                )}
+   474→              </KanbanColumn>
+   475→            );
+   476→          })}
+   477→        </div>
+   478→      )}
+   479→
+   480→      {/* List */}
+   481→      {!error && queue !== null && roster !== null && mode === "list" && (
+   482→        <div className="space-y-3">
+   483→          {listRows.length === 0 ? (
+   484→            <div className="dlg-card py-6">
+   485→              <EmptyState
+   486→                icon={Inbox}
+   487→                title="No applications in the queue"
+   488→                description={listStage === "All" ? "Applications appear here once candidates apply." : `No applications in the ${listStage} stage yet.`}
+   489→              />
+   490→            </div>
+   491→          ) : (
+   492→            <div className="dlg-card overflow-hidden">
+   493→              <div className="overflow-x-auto scroll-thin">
+   494→                <table className="w-full min-w-[760px] border-collapse text-sm">
+   495→                  <thead>
+   496→                    <tr className="border-b border-border text-left">
+   497→                      <th scope="col" className="px-5 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Candidate</th>
+   498→                      <th scope="col" className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Position</th>
+   499→                      <th scope="col" className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Applied</th>
+   500→                      <th scope="col" className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Status</th>
+   501→                      <th scope="col" className="px-4 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Verdict</th>
+   502→                      <th scope="col" className="px-4 py-3"><span className="sr-only">Open</span></th>
+   503→                    </tr>
+   504→                  </thead>
+   505→                  <tbody>
+   506→                    {listRows.map((row) => {
+   507→                      const decided = stageForStatus(row.status) === "Shortlisted" || stageForStatus(row.status) === "Rejected";
+   508→                      const position = row.job.position?.positionTitle || row.job.title;
+   509→                      const place = row.job.position?.placeOfAssignment ?? null;
+   510→                      const name = fullName(row.applicant);
+   511→                      return (
+   512→                        <tr key={row.id} className="group/row border-b border-border transition-colors last:border-0 hover:bg-fog/60">
+   513→                          <td className="px-5 py-3">
+   514→                            <div className="flex items-center gap-3">
+   515→                              <MonogramAvatar name={name} />
+   516→                              <div className="min-w-0">
+   517→                                <p className="truncate text-sm font-medium text-ink">{name}</p>
+   518→                                <p className="truncate text-xs text-stone">{row.applicant.emailAddress || "No email on record"}</p>
+   519→                              </div>
+   520→                            </div>
+   521→                          </td>
+   522→                          <td className="max-w-[220px] px-4 py-3">
+   523→                            <p className="truncate text-[13px] text-ink">{humanize(position)}</p>
+   524→                            <p className="truncate text-xs text-stone">{place || "—"}</p>
+   525→                          </td>
+   526→                          <td className="num whitespace-nowrap px-4 py-3 text-[13px] text-stone">{formatDate(row.dateApplied)}</td>
+   527→                          <td className="px-4 py-3"><StatusPill status={row.status} /></td>
+   528→                          <td className="px-4 py-3"><VerdictPill verdict={row.match?.verdict} /></td>
+   529→                          <td className="px-4 py-3 text-right">
+   530→                            <div className="flex items-center justify-end gap-1.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100 max-lg:opacity-100">
+   531→                              <button
+   532→                                type="button"
+   533→                                className={iconBtn}
+   534→                                aria-label={decided ? `View decision for ${name}` : `Review application from ${name}`}
+   535→                                title={decided ? "View decision" : "Review"}
+   536→                                onClick={() => setSelectedId(row.id)}
+   537→                              >
+   538→                                <ArrowUpRight className="h-4 w-4" aria-hidden />
+   539→                              </button>
+   540→                              <button
+   541→                                type="button"
+   542→                                className={iconBtn}
+   543→                                aria-label={`Open ${name}'s profile`}
+   544→                                title="Open profile"
+   545→                                onClick={() => navigate("candidate", { id: String(row.applicantId) })}
+   546→                              >
+   547→                                <UserRound className="h-4 w-4" aria-hidden />
+   548→                              </button>
+   549→                            </div>
+   550→                          </td>
+   551→                        </tr>
+   552→                      );
+   553→                    })}
+   554→                  </tbody>
+   555→                </table>
+   556→              </div>
+   557→            </div>
+   558→          )}
+   559→        </div>
+   560→      )}
+   561→
+   562→      {/* Review modal */}
+   563→      <Dialog open={selectedId !== null} onOpenChange={(v) => !v && setSelectedId(null)}>
+   564→        <DialogContent className="shadow-e4 sm:max-w-6xl w-[min(96vw,1152px)] max-h-[92vh] overflow-y-auto scroll-thin">
+   565→          <DialogHeader className="sr-only">
+   566→            <DialogTitle>Review application</DialogTitle>
+   567→            <DialogDescription>Applicant dossier and decision rail</DialogDescription>
+   568→          </DialogHeader>
+   569→          {selectedId !== null && (
+   570→            <ReviewWorkspace
+   571→              applicationId={selectedId}
+   572→              onClose={() => setSelectedId(null)}
+   573→              onDecided={() => void load(true)}
+   574→            />
+   575→          )}
+   576→        </DialogContent>
+   577→      </Dialog>
+   578→
+   579→      {/* Bulk regret confirm */}
+   580→      <AlertDialog open={regretOpen} onOpenChange={setRegretOpen}>
+   581→        <AlertDialogContent>
+   582→          <AlertDialogHeader>
+   583→            <AlertDialogTitle>Send {rejectedIds.length} regret letter{rejectedIds.length === 1 ? "" : "s"}?</AlertDialogTitle>
+   584→            <AlertDialogDescription>
+   585→              Formal regret emails will be sent to every rejected-stage application currently filtered. Shortlisted
+   586→              applications are hard-skipped, and applicants who already received a letter are not emailed again.
+   587→            </AlertDialogDescription>
+   588→          </AlertDialogHeader>
+   589→          <AlertDialogFooter>
+   590→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   591→            <AlertDialogAction
+   592→              className="border border-[var(--bad)]/30 bg-[var(--bad-bg)] text-[var(--bad)] hover:bg-[var(--bad-bg)]/80"
+   593→              onClick={(e) => {
+   594→                e.preventDefault();
+   595→                void sendRegrets();
+   596→              }}
+   597→            >
+   598→              {regretBusy ? "Sending…" : "Send letters"}
+   599→            </AlertDialogAction>
+   600→          </AlertDialogFooter>
+   601→        </AlertDialogContent>
+   602→      </AlertDialog>
+   603→    </div>
+   604→  );
+   605→}
+   606→

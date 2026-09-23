@@ -63,7 +63,7 @@ export function AppShell({
 
           <WorkspaceHeader view={view} params={params} />
 
-          <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-6 sm:px-6 sm:py-8">
+          <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
             {/* Keyed by view so each navigation replays the subtle mount
                 transition (tw-animate-css) — one place for every workspace view. */}
             <div key={view} className="animate-in fade-in slide-in-from-bottom-2 duration-300">

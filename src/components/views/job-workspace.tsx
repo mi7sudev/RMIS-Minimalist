@@ -10,17 +10,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
-  AlertTriangle, ChevronLeft, ClipboardList, FileText, Hourglass,
-  Inbox, KanbanSquare, Pencil, RefreshCw, Star, Trash2, UserX,
+  AlertTriangle, Building2, ChevronLeft, ClipboardList, Clock, FileText,
+  KanbanSquare, MapPin, Pencil, RefreshCw, Trash2,
 } from "lucide-react";
 import { IconChip, Monogram, SectionCard, StatusPill } from "@/components/ui/shell";
+import {
+  KanbanAvatar, KanbanColumn, KanbanTags, KANBAN_CARD, KANBAN_DIVIDER, MatchBadge,
+} from "@/components/ui/kanban";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { apiFetch, deadlineState, formatCurrency, formatDate, fullName, humanize } from "@/lib/client";
+import { apiFetch, appliedAgo, deadlineState, formatCurrency, formatDate, fullName, humanize } from "@/lib/client";
 import { PIPELINE_STAGES, stageForStatus, getStatusMeta, type StageKey } from "@/lib/status";
 import { navigate, useHashRoute, type JobWire, type ApplicantMini } from "@/lib/router";
 import { dotClass, variantForJobStatus, variantForStatus, type StatusVariant } from "@/lib/status-ui";
@@ -34,34 +37,20 @@ type QueueRow = {
   dateApplied: string;
   applicantId: number;
   applicant: ApplicantMini;
-  job: { id: number; title: string };
+  job: { id: number; title: string; position: { positionTitle: string; placeOfAssignment: string | null } | null };
   match: { verdict: string; metCount: number; requiredCount: number };
+  tags: string[];
 };
 
 const TABS = ["overview", "pipeline", "candidates"] as const;
 type TabKey = (typeof TABS)[number];
 
-/** Stage → functional color variant (matches the analytics funnel bars). */
+/** Functional color variant (matches the analytics funnel bars + overview dots). */
 const STAGE_VARIANT: Record<StageKey, StatusVariant> = {
   "Applied": "info",
   "Under Review": "warn",
   "Shortlisted": "ok",
   "Rejected": "bad",
-};
-
-/** Kanban column chips: tone-matched to the stage + a tiny stage glyph. */
-const STAGE_CHIP: Record<StageKey, "slate" | "gold" | "emerald" | "rose"> = {
-  "Applied": "slate",
-  "Under Review": "gold",
-  "Shortlisted": "emerald",
-  "Rejected": "rose",
-};
-
-const STAGE_ICON: Record<StageKey, typeof Inbox> = {
-  "Applied": Inbox,
-  "Under Review": Hourglass,
-  "Shortlisted": Star,
-  "Rejected": UserX,
 };
 
 /** First-letter monogram text ("?" when empty). */
@@ -335,46 +324,60 @@ export default function JobWorkspace() {
           </div>
         </TabsContent>
 
-        {/* Pipeline */}
+        {/* Pipeline — reference board: bordered columns with dot + label + count headers */}
         <TabsContent value="pipeline" className="mt-4">
-          <div className="flex gap-4 overflow-x-auto pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible">
+          <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible lg:pb-0">
             {PIPELINE_STAGES.map((stage) => {
               const rows = pipeline[stage];
               return (
-                <div key={stage} className="w-[240px] shrink-0 lg:w-auto lg:min-w-0">
-                  <div className="flex items-center justify-between px-1 pb-2">
-                    <h2 className="flex items-center gap-2 text-sm font-medium text-ink">
-                      <IconChip icon={STAGE_ICON[stage]} tone={STAGE_CHIP[stage]} size={28} iconSize={14} />
-                      <span className={`stage-dot ${dotClass(STAGE_VARIANT[stage])}`} aria-hidden />
-                      {stage}
-                    </h2>
-                    <span className="num rounded-full bg-fog px-2.5 py-1 text-xs font-medium text-stone">{rows.length}</span>
-                  </div>
-                  <div className="space-y-2">
-                    {rows.length === 0 ? (
-                      <p className="text-xs text-pebble px-1 py-3">No applications in this stage.</p>
-                    ) : (
-                      rows.map((app) => (
+                <KanbanColumn key={stage} label={stage} stage={stage} count={rows.length}>
+                  {rows.length === 0 ? (
+                    <p className="px-1 py-3 text-xs text-pebble">No applications in this stage.</p>
+                  ) : (
+                    rows.map((app) => {
+                      const position = app.job.position?.positionTitle || app.job.title;
+                      const place = app.job.position?.placeOfAssignment ?? null;
+                      const name = fullName(app.applicant);
+                      return (
                         <button
                           key={app.id}
                           type="button"
-                          className="dlg-card-plain lift w-full rounded-[12px] border border-[#ececec] p-3 text-left transition-shadow duration-200 hover:shadow-dialog-subtle focus-ring min-h-[44px]"
+                          className={KANBAN_CARD + " focus-ring w-full cursor-pointer p-4 text-left"}
                           onClick={() => navigate("evaluator-review", { id: String(app.id) })}
+                          aria-label={`Review application from ${name}`}
                         >
-                          <span className="flex items-center gap-2.5">
-                            <span aria-hidden="true" className="contents">
-                              <Monogram size={32}>{monogramOf(fullName(app.applicant))}</Monogram>
-                            </span>
-                            <p className="text-sm font-medium text-ink truncate">{fullName(app.applicant)}</p>
-                          </span>
-                          <p className="text-xs text-stone mt-1">
-                            Applied {formatDate(app.dateApplied)} · {getStatusMeta(app.status).label}
-                          </p>
+                          <div className="flex items-start gap-2.5">
+                            <KanbanAvatar name={name} />
+                            <div className="min-w-0 flex-1">
+                              <p className="min-w-0 truncate text-sm font-semibold text-ink">{name}</p>
+                              <p className="mt-1.5 flex items-center gap-1.5 text-xs text-stone">
+                                <Building2 className="h-3.5 w-3.5 shrink-0 text-pebble" aria-hidden />
+                                <span className="min-w-0 flex-1 truncate">{humanize(position)}</span>
+                              </p>
+                              <p className="mt-1 flex items-center gap-1.5 text-xs text-stone">
+                                {place && (
+                                  <>
+                                    <MapPin className="h-3.5 w-3.5 shrink-0 text-pebble" aria-hidden />
+                                    <span className="min-w-0 truncate">{place}</span>
+                                    <span className="shrink-0 text-pebble" aria-hidden>·</span>
+                                  </>
+                                )}
+                                <Clock className="h-3.5 w-3.5 shrink-0 text-pebble" aria-hidden />
+                                <span className="shrink-0 whitespace-nowrap text-pebble">Applied {appliedAgo(app.dateApplied)}</span>
+                              </p>
+                            </div>
+                            <MatchBadge metCount={app.match?.metCount ?? 0} requiredCount={app.match?.requiredCount ?? 0} />
+                          </div>
+                          {(app.tags ?? []).length > 0 && (
+                            <div className={KANBAN_DIVIDER}>
+                              <KanbanTags tags={app.tags ?? []} />
+                            </div>
+                          )}
                         </button>
-                      ))
-                    )}
-                  </div>
-                </div>
+                      );
+                    })
+                  )}
+                </KanbanColumn>
               );
             })}
           </div>
