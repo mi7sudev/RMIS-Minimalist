@@ -657,3 +657,28 @@ Stage Summary:
 - System is now overflow-free and proportioned across 320/375/768/1024/1280/1440/2560 for anonymous + all three roles, including overlays (popovers, dialogs, sheets) and dynamic states.
 - Two systemic primitive fixes (SectionCard min-w-0; PageHeader xl stacking) prevent whole defect classes rather than per-view patches.
 - Evidence: audit-shots/resp/{01-15,f01-f10,d01-d04,audit-run1-3.log}; next step: two-axis code-review since a24102f.
+
+---
+Task ID: R2 (two-axis code review per owner's skill, orchestrator)
+Agent: Z.ai Code (main orchestrator)
+Task: Run the code-review skill on the responsive wave — Standards axis + Spec axis via parallel sub-agents, aggregate side by side.
+
+Work Log:
+- Fixed point pinned: a24102f (session start). Diff: git diff a24102f...HEAD -- src worklog.md (14 files, +179/-40); commit list: f298b03 only. Fixed point resolves; diff non-empty.
+- Spec source: no issue tracker in repo (docs/agents/issue-tracker.md absent — owner would need /setup-matt-pocock-skills for tracker integration). Spec used verbatim: owner directive "make sure that the system is fully responsive on any aspect ratio like mobile view or tablets etc" + constitutional constraints from RMIS-FLOW-SPECIFICATION.md (presentation-only; gutter contract; sharp edges; 44px targets; orange policy; sticky-footer rule).
+- Standards sources: no CODING_STANDARDS.md/CONTRIBUTING.md; used WAVE-3-PREMIUM-CONTRACT.md + globals.css radius-system header + full Fowler smell baseline (pasted into sub-agent brief).
+- Both sub-agents ran in parallel (isolated contexts) and reported <400 words each.
+
+Standards findings (verbatim summary):
+- [reported as hard] "Malformed Tailwind candidates" w-in(...)/grid-cols-inmax(...) in mobile-nav/notifications-panel/applicant-home → ORCHESTRATOR VERIFICATION: FALSE POSITIVE. Grep of src shows every string correctly bracketed (w-[min(300px,85vw)], w-[min(340px,calc(100vw-2rem))], lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]); live-browser measurements (popover 288px in 320vw; sheet 272px=85vw) prove the min()/minmax() utilities compiled and evaluated — malformed classes could not produce those computed widths. (The "applicant-home corruption predates the wave" claim is also false — file had no such string pre-diff.)
+- [judgement] Copy changes (settings "Mock mode" pill split; applicant-home <sm "Awaiting decision") — sanctioned by orchestrator in-worklog as layout-motivated display copy; WAVE-3 copy-contract clause concerns API/state copy, not decorative labels. Owner may veto; revert path is one class/label edit each.
+- [smells, recorded as follow-ups, intentionally not refactored in this wave] Duplicated Code: kanban container string hand-copied in review-queue/candidates/job-workspace (extraction candidate: KanbanBoard primitive beside SkeletonKanban in ui/shell.tsx); Feature Envy: jobs-view shellPad/session-aware sticky offsets encode shell internals (follow-up: shell-provided container variant/offset token); Mysterious Name: shellPad → could be publicShellGutters; trivial: settings isMock computed twice.
+
+Spec findings (verbatim summary + orchestrator disposition):
+- (a) coverage gap: signin/signup/landing WERE in the 75-combo sweep (anon suite) — evidenced; candidate-detail + evaluator-review page were NOT → CLOSED by supplementary sweep R2 (candidate?id=1,2 as ADMIN+EVALUATOR and evaluator-review, x{320,375,768,1024,2560}: all PAGE=ok OV=0; screenshot f11-candidate-320 clean). recruitment was already in the main sweep (OV=0; its 640px table scrolls inside overflow-x-auto by design).
+- (b) scope creep disclosed: useSession() read in jobs-view (needed for correct shell padding/sticky offsets; session-gated rendering is loading-safe — page.tsx renders LoadingShell until session resolves); SkeletonKanban default 5→4 (sole call site passes 4); PageHeader xl-stacking is global below 1280 (intended: kills the title-truncation class of bugs).
+- (c) watch items accepted: session-expiry mid-view re-parents JobsView PublicShell↔AppShell in one render (consistent, full chrome swap — matches spec §13 auth model); command-center KPI ~228px at exactly 1280 (acceptable); review-workspace history rows can clip pills at extreme squeeze (flex-wrap added; pills are nowrap by design).
+
+Stage Summary:
+- Two-axis review complete. Standards: 1 reported hard violation DISPROVEN with code+runtime evidence; 2 sanctioned copy edits documented; 3 smell follow-ups filed (KanbanBoard extraction, shell sticky-offset token, shellPad rename). Spec: no missing requirements after supplementary sweep; disclosed scope items justified; 3 accepted watch items.
+- Aggregate coverage now: 75-combo main sweep + 25-combo supplementary sweep = 100 role×view×viewport combinations, all PAGE=ok OV=0, plus 6 dynamic-state checks (popover/modal/sheet/dossier) and 11 evidence screenshots.
