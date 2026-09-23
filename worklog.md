@@ -733,3 +733,22 @@ Stage Summary:
 - Applicant dashboard + profile page now fully responsive on phones (320/375/390), tablets, desktop, ultrawide. Commit 24e9c5a.
 - Review verdict: Standards = 10 judgement-call findings (7 duplication, 1 dead code, 1 speculative generality, 1 long function), none blocking. Spec = high fidelity, 0 wrong implementations, 2 missing features (interview assessment scorecard route/UI, admin positions master CRUD API), 3 partials (android SMS provider, PDS embedded-photo extraction stub, snapshot_attachment column dropped).
 - docs/agents/issue-tracker.md missing — user informed re /setup-matt-pocock-skills.
+---
+Task ID: 7
+Agent: Z.ai Code (main orchestrator)
+Task: Profile page redesign per user reference screenshot (sharp-corner adaptation, compact forms) + harness hardening + admin-view overflow fixes
+
+Work Log:
+- User provided reference screenshot: header with circular % ring, meta line, completion banner, compact PDS row, horizontal pill stepper, collapsible form groups. Adapted to system: sharp corners, ink/emerald/slate chips, ember progress gradient, .dlg-cta for Mark Complete/Save.
+- Rebuilt profile-view.tsx: CompletionRing (SVG donut, butt caps), meta line, banner w/ Mark Complete, PDS row, pill stepper (all breakpoints, replaces rail), single-column content.
+- pds-upload-card.tsx: compact Collapsible row; pipeline/lock/clear preserved inside.
+- personal-info-section.tsx: CollapsibleGroup x4 (icons, done/total, chevron); gap-3 grids; placeholders.
+- shell.tsx SectionCard title -> font-display text-lg; form-dialog gap-3.
+- HARNESS BUG: resp-audit.sh set cookies after initial load; hash-only opens never reload -> session provider stayed anonymous -> prior sweeps measured the public landing for ALL authed roles (false OV=0). Fixed with ?boot=N full-load URLs + AUTH canary in eval.
+- True failures surfaced and fixed: settings nav min-w-0 (OV 286/231), command-center main col min-w-0 (OV=51), analytics donut legend minmax(0,1fr) (OV=61).
+- Final sweep run6: 75/75 OV=0, all 60 authed checks verified AUTH=authed. lint+tsc clean. Commit b7b4a55.
+
+Stage Summary:
+- Profile page now matches the reference look with system-native styling; verified 320/375/1440 visually + interactions.
+- Audit harness now trustworthy (auth canary); three latent admin-view min-content overflows fixed.
+- Known false-negatives in earlier runs (run2/run3 authed rows) superseded by run5/6 methodology.
