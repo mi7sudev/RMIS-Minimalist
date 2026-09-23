@@ -1,0 +1,554 @@
+diff --git a/src/components/shell/mobile-nav.tsx b/src/components/shell/mobile-nav.tsx
+index 9293bf5..e0e4572 100755
+--- a/src/components/shell/mobile-nav.tsx
++++ b/src/components/shell/mobile-nav.tsx
+@@ -39,7 +39,7 @@ export function MobileNav({ view }: { view: string }) {
+           <Menu className="h-5 w-5" aria-hidden="true" />
+         </button>
+       </SheetTrigger>
+-      <SheetContent side="left" className="w-[300px] rounded-none bg-white p-0 sm:w-[340px]">
++      <SheetContent side="left" className="w-in(300px,85vw)] rounded-none bg-white p-0 sm:w-[340px]">
+         <SheetTitle className="sr-only">Navigation</SheetTitle>
+         <SheetDescription className="sr-only">Workspace sections and account</SheetDescription>
+         <div className="flex h-full flex-col">
+diff --git a/src/components/shell/notifications-panel.tsx b/src/components/shell/notifications-panel.tsx
+index 247ecb9..8b4fba1 100755
+--- a/src/components/shell/notifications-panel.tsx
++++ b/src/components/shell/notifications-panel.tsx
+@@ -113,7 +113,9 @@ export function NotificationCenter() {
+           )}
+         </button>
+       </PopoverTrigger>
+-      <PopoverContent align="end" className="w-[340px] rounded-none p-0">
++      {/* min(340px, 100vw-2rem): the popover must never exceed a 320px phone
++          viewport (Radix can reposition but cannot shrink a fixed width). */}
++      <PopoverContent align="end" className="w-in(340px,calc(100vw-2rem))] rounded-none p-0">
+         <div className="flex items-center justify-between border-b border-border px-4 py-3">
+           <p className="text-sm font-medium text-ink">Notifications</p>
+           <span className="dlg-pill bg-fog px-2.5 py-0.5 text-[11px] font-medium text-graphite">
+diff --git a/src/components/ui/shell.tsx b/src/components/ui/shell.tsx
+index 80d6c8d..a129f76 100755
+--- a/src/components/ui/shell.tsx
++++ b/src/components/ui/shell.tsx
+@@ -27,9 +27,11 @@ export function PageHeader({
+   className?: string;
+ }) {
+   return (
++    // Stacks below xl so wide action clusters (filters, toggles, refresh) can
++    // never squeeze the title into a truncated stub on tablet widths.
+     <div
+       className={cn(
+-        "flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between animate-in fade-in slide-in-from-bottom-2 duration-300",
++        "flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between animate-in fade-in slide-in-from-bottom-2 duration-300",
+         className
+       )}
+     >
+@@ -256,10 +258,13 @@ export function SectionCard({
+   className?: string;
+   bodyClassName?: string;
+ }) {
++  // min-w-0: as a CSS-grid child the card must be allowed to shrink below the
++  // min-content floor of its nowrap description, or the grid track blows out
++  // and the card overflows its viewport (observed at 320–1279px).
+   return (
+-    <section className={cn("dlg-card p-6", className)} aria-label={title}>
++    <section className={cn("dlg-card min-w-0 p-6", className)} aria-label={title}>
+       {title || actions ? (
+-        <div className="mb-5 flex items-start justify-between gap-3">
++        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+           <div className="flex min-w-0 items-center gap-3">
+             {Icon ? (
+               <IconChip
+@@ -274,7 +279,7 @@ export function SectionCard({
+               {description ? <p className="truncate text-xs text-stone">{description}</p> : null}
+             </div>
+           </div>
+-          {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
++          {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+         </div>
+       ) : null}
+       <div className={bodyClassName}>{children}</div>
+@@ -318,9 +323,9 @@ export function SkeletonRows({
+   );
+ }
+ 
+-export function SkeletonKanban({ columns = 5, className }: { columns?: number; className?: string }) {
++export function SkeletonKanban({ columns = 4, className }: { columns?: number; className?: string }) {
+   return (
+-    <div className={cn("grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5", className)} aria-hidden="true">
++    <div className={cn("grid grid-cols-2 gap-4 xl:grid-cols-4", className)} aria-hidden="true">
+       {Array.from({ length: columns }).map((_, i) => (
+         <div key={i} className="space-y-3">
+           <div className="skel h-8 w-full" />
+diff --git a/src/components/views/analytics.tsx b/src/components/views/analytics.tsx
+index eeaedda..0a17e6d 100755
+--- a/src/components/views/analytics.tsx
++++ b/src/components/views/analytics.tsx
+@@ -393,7 +393,7 @@ export default function Analytics() {
+           actions={
+             <>
+               <Select value={drill} onValueChange={(v) => setDrill(v as Drill)}>
+-                <SelectTrigger className="dlg-input min-h-[44px] w-[170px]" aria-label="Stage drill filter">
++                <SelectTrigger className="dlg-input min-h-[44px] w-full sm:w-[170px]" aria-label="Stage drill filter">
+                   <SelectValue />
+                 </SelectTrigger>
+                 <SelectContent>
+@@ -406,7 +406,7 @@ export default function Analytics() {
+                 </SelectContent>
+               </Select>
+               <Select value={cycle} onValueChange={setCycle}>
+-                <SelectTrigger className="dlg-input min-h-[44px] w-[140px]" aria-label="Recruitment cycle">
++                <SelectTrigger className="dlg-input min-h-[44px] w-full sm:w-[140px]" aria-label="Recruitment cycle">
+                   <SelectValue placeholder="All time" />
+                 </SelectTrigger>
+                 <SelectContent>
+diff --git a/src/components/views/applicant-home.tsx b/src/components/views/applicant-home.tsx
+index afc0212..aba53b4 100755
+--- a/src/components/views/applicant-home.tsx
++++ b/src/components/views/applicant-home.tsx
+@@ -114,7 +114,7 @@ function JourneyTimeline({ status }: { status: string }) {
+   const stage = stageForStatus(status);
+   const decided = stage === "Shortlisted" || stage === "Rejected";
+ 
+-  const steps: { label: string; state: CheckpointState }[] = [
++  const steps: { label: string; short?: string; state: CheckpointState }[] = [
+     { label: "Submitted", state: "done" },
+     {
+       label: "Review",
+@@ -123,6 +123,9 @@ function JourneyTimeline({ status }: { status: string }) {
+     {
+       label:
+         stage === "Shortlisted" ? "Shortlisted" : stage === "Rejected" ? "Not Shortlisted" : "Awaiting the shortlist decision",
++      // Responsive copy swap (3-d, presentation-only): the full label wraps to 4+ lines
++      // inside a 3-up timeline at 320px; "Shortlisted"/"Not Shortlisted" stay verbatim.
++      short: stage === "Shortlisted" || stage === "Rejected" ? undefined : "Awaiting decision",
+       state: stage === "Shortlisted" ? "done" : stage === "Rejected" ? "failed" : "pending",
+     },
+   ];
+@@ -154,7 +157,14 @@ function JourneyTimeline({ status }: { status: string }) {
+               />
+             </div>
+             <span className={cn("text-[10px] leading-tight", s.state === "current" ? "font-medium text-ink" : "text-stone")}>
+-              {s.label}
++              {s.short ? (
++                <>
++                  <span className="sm:hidden">{s.short}</span>
++                  <span className="hidden sm:inline">{s.label}</span>
++                </>
++              ) : (
++                s.label
++              )}
+             </span>
+           </div>
+         );
+@@ -570,8 +580,8 @@ export default function ApplicantHome() {
+         /* First-load skeletons — never stale data, never a blank pane. */
+         <div className="mt-6 space-y-10">
+           <SkeletonKpis count={3} className="grid-cols-1 sm:grid-cols-3 lg:grid-cols-3" />
+-          <div className="grid gap-10 lg:grid-cols-inmax(0,1fr)_400px] lg:items-start lg:gap-14">
+-            <SkeletonKpis count={4} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 [&>div]:h-44" />
++          <div className="grid gap-10 lg:grid-cols-inmax(0,1fr)_minmax(320px,400px)] lg:items-start lg:gap-10 xl:gap-14">
++            <SkeletonKpis count={4} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 [&>div]:h-44" />
+             <div className="space-y-4">
+               <SkeletonRows rows={1} rowClassName="h-44" />
+               <SkeletonRows rows={1} rowClassName="h-44" />
+@@ -579,7 +589,7 @@ export default function ApplicantHome() {
+           </div>
+         </div>
+       ) : (
+-        <div className="mt-6 grid animate-in fade-in slide-in-from-bottom-2 gap-10 duration-300 lg:grid-cols-inmax(0,1fr)_400px] lg:items-start lg:gap-14">
++        <div className="mt-6 grid animate-in fade-in slide-in-from-bottom-2 gap-10 duration-300 lg:grid-cols-inmax(0,1fr)_minmax(320px,400px)] lg:items-start lg:gap-10 xl:gap-14">
+           {/* LEFT — Open positions */}
+           <section className="lg:col-start-1 lg:row-start-1">
+             <div className="mb-4 flex items-center gap-3">
+@@ -613,7 +623,7 @@ export default function ApplicantHome() {
+                 />
+               </div>
+             ) : (
+-              <div className="grid gap-4 sm:grid-cols-2">
++              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                 {openJobs.map((j) => (
+                   <OpenJobCard key={j.id} job={j} />
+                 ))}
+diff --git a/src/components/views/candidates.tsx b/src/components/views/candidates.tsx
+index 2e2b1ad..c39401a 100755
+--- a/src/components/views/candidates.tsx
++++ b/src/components/views/candidates.tsx
+@@ -375,7 +375,7 @@ export default function Candidates() {
+       {!error && (rows === null ? (
+         <SkeletonKpis count={4} />
+       ) : (
+-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
++        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+           <KpiCard label="Total on file" value={total} icon={UsersRound} tone="info" hint="all registered candidates" />
+           <KpiCard label="Showing" value={`${start}–${end}`} icon={List} tone="neutral" hint={`of ${total}`} />
+           <KpiCard label="Complete profiles" value={completeOnPage} icon={UserCheck} tone="ok" hint="on this page" />
+@@ -550,7 +550,7 @@ export default function Candidates() {
+         </div>
+       ) : (
+         /* Kanban — reference board: bordered columns with dot + label + count headers */
+-        <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible lg:pb-0">
++        <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-2 xl:grid-cols-4 lg:overflow-visible lg:pb-0">
+           {PIPELINE_STAGES.map((stage) => {
+             const cards = kanban[stage];
+             return (
+diff --git a/src/components/views/command-center.tsx b/src/components/views/command-center.tsx
+index 4e70619..ed9b12d 100755
+--- a/src/components/views/command-center.tsx
++++ b/src/components/views/command-center.tsx
+@@ -227,7 +227,7 @@ export default function CommandCenter() {
+                 <span className="num">{attentionTotal}</span> item{attentionTotal === 1 ? "" : "s"} across the board
+               </span>
+             </div>
+-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
++            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+               <KpiCard
+                 label="Awaiting review"
+                 value={stats.pendingReview}
+diff --git a/src/components/views/job-workspace.tsx b/src/components/views/job-workspace.tsx
+index ab36201..a518291 100755
+--- a/src/components/views/job-workspace.tsx
++++ b/src/components/views/job-workspace.tsx
+@@ -215,7 +215,7 @@ export default function JobWorkspace() {
+   return (
+     <div className="space-y-6">
+       {/* Header — PageHeader pattern with back affordance */}
+-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
++      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+         <div className="flex min-w-0 items-start gap-1.5">
+           <button
+             type="button"
+@@ -326,7 +326,7 @@ export default function JobWorkspace() {
+ 
+         {/* Pipeline — reference board: bordered columns with dot + label + count headers */}
+         <TabsContent value="pipeline" className="mt-4">
+-          <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible lg:pb-0">
++          <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-2 xl:grid-cols-4 lg:overflow-visible lg:pb-0">
+             {PIPELINE_STAGES.map((stage) => {
+               const rows = pipeline[stage];
+               return (
+diff --git a/src/components/views/jobs-view.tsx b/src/components/views/jobs-view.tsx
+index 6e5ade4..749ef18 100755
+--- a/src/components/views/jobs-view.tsx
++++ b/src/components/views/jobs-view.tsx
+@@ -23,6 +23,7 @@ import {
+ } from "lucide-react";
+ import { toast } from "sonner";
+ import { useApplyFlow } from "@/components/apply/apply-dialogs";
++import { useSession } from "@/components/session-provider";
+ import { Checkbox } from "@/components/ui/checkbox";
+ import {
+   AlertDialog,
+@@ -538,6 +539,17 @@ function DetailBody({ job }: { job: JobWire }) {
+ export default function JobsView() {
+   const route = useHashRoute();
+   const detailParam = route.params.job ?? null;
++  const { user } = useSession();
++
++  // Shell contract (responsive fix 3-a): PublicShell's <main> is a bare flex
++  // column (no padding), so the anonymous board paints its own 1600px container
++  // + gutters + vertical rhythm. AppShell's <main> already carries the exact
++  // same container (px-4 py-6 sm:px-6 sm:py-8 lg:px-8), so signed-in views must
++  // not repeat it (double gutters ~128px at lg) — a plain w-full wrapper keeps
++  // identical spacing since AppShell main provides the same py.
++  const shellPad = user
++    ? "w-full"
++    : "mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8";
+ 
+   const [jobs, setJobs] = useState<JobWire[] | null>(null);
+   const [error, setError] = useState<string | null>(null);
+@@ -677,7 +689,7 @@ export default function JobsView() {
+     const detail = jobs?.find((j) => j.id === detailId) ?? null;
+ 
+     return (
+-      <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
++      <div className={shellPad}>
+         <button
+           onClick={() => navigate("jobs")}
+           className="mb-5 flex min-h-[44px] items-center gap-2 text-sm text-stone hover:text-ink"
+@@ -715,7 +727,9 @@ export default function JobsView() {
+         ) : (
+           <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[1fr_340px]">
+             <DetailBody job={detail} />
+-            <aside className="xl:sticky xl:top-6">
++            {/* Session-aware sticky offset: the public SiteHeader is sticky
++                h-16, the signed-in shell has no sticky chrome at xl. */}
++            <aside className={`xl:sticky ${user ? "xl:top-6" : "xl:top-20"}`}>
+               <SummaryCard
+                 job={detail}
+                 onApply={applyTo}
+@@ -835,7 +849,10 @@ export default function JobsView() {
+         </div>
+ 
+         {totalPages > 1 && (
+-          <nav className="mt-6 flex items-center justify-center gap-1.5" aria-label="Pagination">
++          <nav
++            className="mt-6 flex flex-wrap items-center justify-center gap-1 sm:gap-1.5"
++            aria-label="Pagination"
++          >
+             <button
+               onClick={() => setPage((p) => Math.max(1, p - 1))}
+               disabled={current === 1}
+@@ -879,7 +896,7 @@ export default function JobsView() {
+   }
+ 
+   return (
+-    <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
++    <div className={shellPad}>
+       <div className="mb-5 max-w-2xl">
+         <h1 className="text-heading-lg">Positions</h1>
+         <p className="mt-2 text-sm leading-relaxed text-stone">
+@@ -889,7 +906,9 @@ export default function JobsView() {
+ 
+       <div className="items-start lg:flex lg:gap-6">
+         {/* Search rail — sticky on desktop, collapsible on mobile */}
+-        <aside className="mb-4 w-full lg:sticky lg:top-20 lg:mb-0 lg:w-72 lg:shrink-0">
++        <aside
++          className={`mb-4 w-full lg:sticky ${user ? "lg:top-6" : "lg:top-20"} lg:mb-0 lg:w-72 lg:shrink-0`}
++        >
+           <div className="lg:hidden">
+             <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
+               <CollapsibleTrigger asChild>
+@@ -932,7 +951,10 @@ export default function JobsView() {
+                   setPage(1);
+                 }}
+               >
+-                <SelectTrigger className="dlg-input min-h-[44px] w-[170px]" aria-label="Sort results">
++                <SelectTrigger
++                  className="dlg-input min-h-[44px] w-[140px] sm:w-[170px]"
++                  aria-label="Sort results"
++                >
+                   <SelectValue />
+                 </SelectTrigger>
+                 <SelectContent className="rounded-none">
+diff --git a/src/components/views/profile-view.tsx b/src/components/views/profile-view.tsx
+index 4bc117b..699e42b 100755
+--- a/src/components/views/profile-view.tsx
++++ b/src/components/views/profile-view.tsx
+@@ -311,7 +311,7 @@ export default function ProfileView() {
+         </div>
+ 
+         {/* Desktop step rail — sticky card with tonal chips + ember progress */}
+-        <nav className="hidden self-start lg:sticky lg:top-24 lg:block" aria-label="Profile sections">
++        <nav className="hidden self-start lg:sticky lg:top-6 lg:block" aria-label="Profile sections">
+           <div className="dlg-card p-4">
+             <div className="mb-3 flex items-center gap-3 px-1 pt-1">
+               <IconChip icon={UserRound} tone="slate" size={38} iconSize={17} />
+diff --git a/src/components/views/review-queue.tsx b/src/components/views/review-queue.tsx
+index 22e6e85..7946fcc 100755
+--- a/src/components/views/review-queue.tsx
++++ b/src/components/views/review-queue.tsx
+@@ -287,7 +287,7 @@ export default function ReviewQueue() {
+ 
+       {/* Stage KPIs (wave-3) */}
+       {!error && queue !== null && (
+-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
++        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+           <KpiCard label="Applied" value={kanbanColumns["Applied"].length} icon={Inbox} tone="info" hint="awaiting start" />
+           <KpiCard label="Under Review" value={kanbanColumns["Under Review"].length} icon={ScanSearch} tone="warn" hint="being screened" />
+           <KpiCard label="Shortlisted" value={kanbanColumns["Shortlisted"].length} icon={Star} tone="ok" hint="advancing" />
+@@ -297,7 +297,7 @@ export default function ReviewQueue() {
+ 
+       {/* Kanban — reference board: 4 pipeline columns, dot + label + count headers */}
+       {!error && queue !== null && mode === "kanban" && (
+-        <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-4 lg:overflow-visible lg:pb-0">
++        <div className="flex snap-x snap-proximity items-stretch gap-4 overflow-x-auto scroll-thin pb-2 lg:grid lg:grid-cols-2 xl:grid-cols-4 lg:overflow-visible lg:pb-0">
+           {PIPELINE_STAGES.map((stage) => {
+             const rows = kanbanColumns[stage];
+             return (
+diff --git a/src/components/views/review-workspace.tsx b/src/components/views/review-workspace.tsx
+index 31a0bb4..f60fdd1 100755
+--- a/src/components/views/review-workspace.tsx
++++ b/src/components/views/review-workspace.tsx
+@@ -545,7 +545,7 @@ function NoticeFormDialog({
+               />
+             </div>
+           )}
+-          <div className="grid grid-cols-2 gap-3">
++          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+             <div className="space-y-1.5">
+               <Label htmlFor="notice-date" className="text-xs text-stone">
+                 Date *
+@@ -750,9 +750,9 @@ function DirectEmailCard({
+             emails.map((m) => {
+               const atts = parseAttachments(m.attachments);
+               return (
+-                <div key={m.id} className="flex items-center justify-between gap-2 text-xs">
++                <div key={m.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                   <span className="truncate text-ink">{m.subject || "(no subject)"}</span>
+-                  <span className="flex shrink-0 items-center gap-2 text-pebble">
++                  <span className="flex shrink items-center gap-2 text-pebble">
+                     {atts.length > 0 && <span className="num">{atts.length} att.</span>}
+                     <span className="num">{timeAgo(m.createdAt)}</span>
+                     <span className={pillClass(emailStatusVariant(m.status))}>{m.status}</span>
+@@ -912,7 +912,7 @@ export function ReviewWorkspace({
+ 
+   if (!payload) {
+     return (
+-      <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
++      <div className="grid gap-6 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_380px]">
+         <div className="dlg-card space-y-5 p-6">
+           <div className="space-y-2.5">
+             <Skeleton className="h-7 w-1/2" />
+@@ -946,7 +946,7 @@ export function ReviewWorkspace({
+   const place = payload.job.position?.placeOfAssignment ?? null;
+ 
+   return (
+-    <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
++    <div className="grid gap-6 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_380px]">
+       {/* ── LEFT: frozen dossier ── */}
+       <div className="dlg-card space-y-4 p-6">
+         <div className="flex flex-wrap items-start justify-between gap-3">
+@@ -1154,9 +1154,9 @@ export function ReviewWorkspace({
+               <p className="text-xs text-pebble">No notices sent yet.</p>
+             ) : (
+               notices.map((n) => (
+-                <div key={n.id} className="flex items-center justify-between gap-2 text-xs">
++                <div key={n.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                   <span className="truncate text-ink">{noticeLabel[n.type] ?? n.type}</span>
+-                  <span className="flex shrink-0 items-center gap-2 text-pebble">
++                  <span className="flex shrink items-center gap-2 text-pebble">
+                     <span className="num">{formatDateTime(n.sentAt)}</span>
+                     <span className={pillClass(n.status === "sent" || n.status === "mock" ? "neutral" : "bad")}>{n.status}</span>
+                   </span>
+diff --git a/src/components/views/settings.tsx b/src/components/views/settings.tsx
+index 0964d78..fd02418 100755
+--- a/src/components/views/settings.tsx
++++ b/src/components/views/settings.tsx
+@@ -343,7 +343,7 @@ function CreateUserDialog({ open, onOpenChange, onCreated }: { open: boolean; on
+               </SelectContent>
+             </Select>
+           </div>
+-          <div className="grid grid-cols-2 gap-3">
++          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+             <div><Label className={labelCls()}>First name</Label><Input className="dlg-input min-h-[44px]" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></div>
+             <div><Label className={labelCls()}>Last name</Label><Input className="dlg-input min-h-[44px]" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></div>
+           </div>
+@@ -392,7 +392,7 @@ function EditUserDialog({ user, onOpenChange, onSaved }: { user: UserRow; onOpen
+           <DialogDescription className="text-sm text-stone">{user.email}</DialogDescription>
+         </DialogHeader>
+         <div className="space-y-3">
+-          <div className="grid grid-cols-2 gap-3">
++          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+             <div><Label className={labelCls()}>First name</Label><Input className="dlg-input min-h-[44px]" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></div>
+             <div><Label className={labelCls()}>Last name</Label><Input className="dlg-input min-h-[44px]" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></div>
+           </div>
+@@ -634,9 +634,12 @@ function MessagingPanel({ kind }: { kind: "sms" | "email" }) {
+           <div>
+             <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-stone">Active provider</p>
+             <p className="num mt-1 text-xl font-medium text-ink">{humanize(data?.provider ?? "…")}</p>
++            {data?.provider === "mock" ? (
++              <p className="mt-1 text-xs text-stone">Messages are logged only.</p>
++            ) : null}
+           </div>
+           {data?.provider === "mock" ? (
+-            <StatusPill status="Mock mode — messages are logged only" variant="neutral" />
++            <StatusPill status="Mock mode" variant="neutral" />
+           ) : (
+             <StatusPill status={data?.configured ? "Configured" : "Not configured"} variant={data?.configured ? "ok" : "warn"} />
+           )}
+diff --git a/worklog.md b/worklog.md
+index 7e6e16d..1acf0a8 100755
+--- a/worklog.md
++++ b/worklog.md
+@@ -560,3 +560,100 @@ Stage Summary:
+ - Auth pages now carry the full public chrome; header is a sharp full-width enterprise bar with Positions + orange Sign in (Sign up removed as requested).
+ - System-wide 1600px content grid eliminates the wide-screen margin complaint; overlap between header and page content is structurally impossible (top-0 anchored, opaque-frost bar, proper section padding).
+ - No business logic, API contracts, routes, or state machines touched — presentation layer only (RMIS-FLOW-SPECIFICATION.md intact).
++
++---
++Task ID: 3-d
++Agent: frontend-styling-expert
++Task: Responsive fixes — applicant-home split/positions grid/journey label, profile-view sticky rail
++
++Work Log:
++- Read worklog.md (last ~150 lines) for design-system contract (sharp edges, orange only on .dlg-cta, 44px targets, max-w-[1600px] px-4 sm:px-6 lg:px-8 gutters) and confirmed ui/shell.tsx SectionCard/PageHeader changes stay untouched.
++- applicant-home.tsx main content split (was the confirmed 1024px crush: left column ~248px while positions grid ran 2-up): `lg:grid-cols-inmax(0,1fr)_400px] lg:gap-14` → `lg:grid-cols-inmax(0,1fr)_minmax(320px,400px)] lg:gap-10 xl:gap-14` so the rail flexes 320→400px and the left column keeps usable width at 1024–1279.
++- applicant-home.tsx open-positions grid: `grid gap-4 sm:grid-cols-2` → `grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2` (2-up on full-width tablet portrait, 1-up beside the rail at 1024–1279, 2-up again ≥1280). Ends the ~116px card crush / vertical letter-wrap.
++- JourneyTimeline (320px fix, allowed copy swap): added optional `short` field to the local steps render array; the pending third checkpoint now renders `<span className="sm:hidden">Awaiting decision</span><span className="hidden sm:inline">Awaiting the shortlist decision</span>` inside the existing typography span (both variants inherit identical text-[10px] leading-tight + color, visually identical). "Shortlisted"/"Not Shortlisted"/"Submitted"/"Review" left verbatim; no handler/state/key changes (`key` still derives from the string label).
++- KPI rows audited: the sm:grid-cols-3 summary row and skeleton KPI row sit FULL-WIDTH above the split → left as-is per contract. In-split crush rule applied by extension to the two skeleton mirrors so first-load skeletons match the fixed layout: skeleton split container got the same `minmax(320px,400px) lg:gap-10 xl:gap-14`, and the 4-up skeleton KPI row inside the left column `sm:grid-cols-2 lg:grid-cols-2` → `sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2` (mirrors the real positions grid behavior; presentation-only).
++- profile-view.tsx (~line 314): desktop step rail `lg:sticky lg:top-24` → `lg:sticky lg:top-6`, matching the six other rails (applicant-home rail already uses lg:top-6); rail now actually sticks instead of floating 96px down. Split container `lg:grid-cols-[16rem_minmax(0,1fr)]` audited — healthy.
++- profile/* spot-check (awards, documents, education, eligibility, personal-info, training, work-experience, form-dialog, pds-upload-card, save-hint): grep for w-/min-w-/max-w- ≥300px and fixed grid tracks — only `sm:grid-cols-inmax(0,220px)_minmax(0,1fr)]` (documents-section) which is <300px with a minmax(0,1fr) fallback → healthy, no changes.
++- VERIFY: `bunx tsc --noEmit` — zero errors outside the known pre-existing examples//skills//mini-services/ set; `bun run lint` — clean (exit 0). No agent-browser used; dev server untouched.
++
++Stage Summary:
++- Applicant home no longer crushes at 1024–1279: rail flexes 320–400px, positions cards drop to 1-up beside the rail (2-up at <1024 and ≥1280), gaps tighten at lg and restore at xl; first-load skeletons mirror the new layout.
++- Journey timeline third checkpoint uses the sanctioned short mobile label ("Awaiting decision" / full label sm+) with identical styling; other labels untouched.
++- Profile step rail sticks at lg:top-6 like every other rail. Zero logic/handler/fetch/state/routing/aria changes — classNames + the one allowed copy swap only.
++
++---
++Task ID: 3-b
++Agent: frontend-styling-expert
++Task: Responsive fixes — analytics (drill-down selects), settings (dialog grids, mock-mode pill), command-center (tablet band)
++
++Work Log:
++- Read worklog.md tail + re-confirmed ui/shell.tsx already carries the systemic fix (SectionCard root `min-w-0`, header row `flex-wrap`, PageHeader xl stacking) — not re-touched; KpiCard/SectionCard grepped for fixed widths (none).
++- analytics.tsx (Drill-down SectionCard `actions`): SelectTrigger "Stage drill filter" `w-[170px]` → `w-full sm:w-[170px]` and "Recruitment cycle" `w-[140px]` → `w-full sm:w-[140px]` — both selects stack full-width inside the wrapping SectionCard header on phones; `dlg-input min-h-[44px]`, aria-labels, onValueChange untouched.
++- settings.tsx: Create User + Edit User dialogs' name rows `grid grid-cols-2 gap-3` → `grid grid-cols-1 gap-3 sm:grid-cols-2` (both instances, ~L346 and ~L395; First/Last name inputs now stack 1-col at 320px).
++- settings.tsx (notification channels provider row): mock StatusPill label shortened "Mock mode — messages are logged only" → "Mock mode" (the one allowed copy change; kills the ~260px nowrap overflow at 320px). Meaning preserved via a conditional muted line in the same row's text block: `<p className="mt-1 text-xs text-stone">Messages are logged only.</p>` — rendered only when provider === "mock" so it never contradicts a configured real provider. Nothing else in the row changed.
++- command-center.tsx audit at the 1024px tablet band (content ≈704px beside 256px rail → main-grid cols ≈219px):
++  - KPI row `grid gap-4 sm:grid-cols-2 lg:grid-cols-4` → `xl:grid-cols-4` (4-up inside the lg:col-span-2 area was ≈103px/card at 1024px — crushed; now 2-up at lg, 4-up from 1280px).
++  - Main grid KEPT `lg:grid-cols-3` (4a condition not met): no child has a fixed width ≥300px — only fixed widths are the w-16 PipelineSpark, 28/36px chips and icon glyphs; every row/card uses flex-wrap + min-w-0 + truncate, so stacking the split at xl was unnecessary. Loading skeleton mirrors the unchanged lg:grid-cols-3 (stays consistent).
++  - Sticky aside confirmed `self-start lg:sticky lg:top-6` — no drift, left as-is.
++- Verification: `bunx tsc --noEmit` — 0 errors in src/ and 0 in analytics/settings/command-center (exit 1 solely from pre-existing examples/, skills/, mini-services/ errors, known/OK); `bun run lint` exit 0, no findings.
++
++Stage Summary:
++- Phones: analytics drill-down selects go full-width stacked; both settings user-dialog name fields stack 1-col; the mock-mode provider row no longer overflows its card (short pill + wrapped muted explanation).
++- Tablet (1024–1279px): command-center KPIs read 2-up instead of four ~100px cards; main 2/3+aside split, sticky top-6, and all fixed-width checks verified healthy.
++- Presentation-only: zero handler/fetch/payload/state/routing/aria-label changes; no new rounded-*, no orange outside .dlg-cta, 44px touch targets and gutter contract untouched.
++
++---
++Task ID: 3-a
++Agent: frontend-styling-expert
++Task: Responsive fixes — jobs-view (double gutters, pagination wrap, session-aware sticky rail, sort select)
++
++Work Log:
++- Read worklog.md (last 150+ lines), app-shell.tsx (PublicShell main = bare `flex w-full flex-1 flex-col`; AppShell main = `mx-auto w-full max-w-[1600px] flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8`), page.tsx (JobsView renders inside PublicShell when anonymous, AppShell for applicant/evaluator/admin) and session-provider.tsx before coding.
++- DOUBLE GUTTERS: jobs-view previously painted its own `mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8` container in BOTH shells — inside AppShell that doubled the gutters (~128px combined at lg) on list AND detail views. Added `const { user } = useSession()` (new import from @/components/session-provider — import did not pre-exist) and a `shellPad` variable: signed-in → `"w-full"` (plain wrapper; AppShell main already supplies the identical px/py so vertical rhythm is byte-identical), anonymous → the full original container string, unchanged. Applied to both containers (detail-mode root at ~line 692 and list-mode root at ~line 894) via className={shellPad}; no conditional rendering logic changed. No flicker risk: page.tsx renders JobsView only after session loading resolves, so `user` is settled before mount.
++- PAGINATION: `<nav>` row gained `flex-wrap` (was unwrapped ~9 × 44px ≈ 444px, overflowing ≤414px phones) and gap tightened to `gap-1 sm:gap-1.5`; justify-center keeps wrapped rows centered; all buttons keep h-11/min-w-11 (44px touch targets), ellipsis spans stay non-interactive w-8.
++- FILTER RAIL STICKY: desktop rail aside is now session-aware — `lg:top-20` kept for anonymous (public SiteHeader is sticky h-16), `lg:top-6` when signed-in (nothing sticky at lg+ in AppShell, matches detail view's existing xl:top-6 precedent); implemented as template-merge `${user ? "lg:top-6" : "lg:top-20"}`.
++- SORT SELECT: SelectTrigger `w-[170px]` → `w-[140px] sm:w-[170px]`. Flex context inspected: outer row is flex-wrap justify-between (sort group can sit on its own wrapped line), inner group hides the "Sort" label below sm; 140px fits 320px viewports (px-4 leaves 288px; results text + 140px ≈ 222px worst case) and min-h-[44px] kept.
++- Presentation-only: zero handler/fetch/payload/state/routing/aria-label changes; no new rounded-*, no orange added, 44px targets intact everywhere, gutter contract string (`max-w-[1600px] px-4 sm:px-6 lg:px-8`) preserved verbatim for the public branch.
++
++Stage Summary:
++- JobsView now consumes exactly one gutter system in both shells: public keeps its own 1600px container (unchanged), signed-in inherits AppShell's container with no double padding at any viewport; pagination wraps on ≤414px instead of overflowing; the desktop filter rail reclaims 56px of viewport height when signed-in; the sort select can no longer overflow 320px phones.
++- Verification: `bunx tsc --noEmit` → zero errors in src/ (only pre-existing examples/ + skills/ errors remain); `bun run lint` clean. Dev server not restarted (hot reload).
++- Note for follow-up (out of scope, not changed): the detail view's summary rail uses a fixed `xl:sticky xl:top-6`, which for ANONYMOUS users can tuck under the sticky public SiteHeader (h-16) when scrolled — same session-aware treatment would be needed if confirmed.
++
++---
++Task ID: 3-c
++Agent: frontend-styling-expert
++Task: Responsive fixes — evaluator kanban breakpoints (lg 2-col), KPI grids xl, review-workspace dossier split + dialogs
++
++Work Log:
++- Kanban boards (review-queue.tsx:300, candidates.tsx:553, job-workspace.tsx:329): all three board containers changed `lg:grid lg:grid-cols-4` → `lg:grid lg:grid-cols-2 xl:grid-cols-4`, so 1024–1279px (256px rail leaves ~704px) renders a 2×2 grid of ~340px columns instead of ~164px crushed columns; full 4-up only at ≥1280. Snap-scroll flex row (`flex snap-x snap-proximity … overflow-x-auto scroll-thin pb-2 lg:overflow-visible lg:pb-0`) and equal-height stretching (`items-stretch`, KanbanColumn internals) kept byte-identical below lg.
++- KPI rows: review-queue.tsx:290 and candidates.tsx:378 stage/KPI grids `grid grid-cols-2 gap-4 lg:grid-cols-4` → `xl:grid-cols-4` (KpiCard's 34px numeral + hint crushed at ~164px on lg). job-workspace.tsx audited: no KPI/stat grid on `lg:grid-cols-*` (overview split is already `xl:grid-cols-[1fr_320px]`, mini pipeline is a dl list) — no change needed there.
++- ui/shell.tsx SkeletonKanban: `grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5` → `grid grid-cols-2 gap-4 xl:grid-cols-4` so loading skeletons mirror the real 4-column boards (2-up below xl). Default `columns` 5 → 4 to match the board. Call-site audit: SkeletonKanban has exactly ONE call site in src (review-queue.tsx:284) and it already passes `columns={4}` — nothing to align (candidates/job-workspace load with SkeletonKpis+SkeletonRows).
++- review-workspace.tsx: (a) dossier split — both occurrences of `grid gap-6 lg:grid-cols-[1fr_380px]` (line 915 `!payload` loading skeleton + line 949 loaded dossier) → `lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_380px]` so the decision rail doesn't eat the dossier at 1024 (~340px rail leaves ~340px+ for the dossier); (b) NoticeFormDialog date+time grid line 548 `grid grid-cols-2 gap-3` → `grid grid-cols-1 gap-3 sm:grid-cols-2` (inputs readable at 320px, side-by-side from sm); (c) notice history rows (1157/1159) and direct-email history rows (753/755): row +`flex-wrap`, timestamp+status pill cluster `shrink-0` → `shrink` so the cluster wraps under the label on phones instead of crowding the truncated label; (d) decision rail `lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto scroll-thin` left byte-identical.
++- PageHeader re-force check: review-queue/candidates/review-workspace use the shared PageHeader (xl-stacking already fixes "Review Qu…" truncation). job-workspace.tsx:218 hand-rolls the "PageHeader pattern" with `sm:flex-row sm:items-end sm:justify-between` — re-forced a row from 640px; aligned to `xl:flex-row xl:items-end xl:justify-between` (presentation-only; Refresh/Edit/Delete cluster now stacks under the title below xl, no handler/aria touched).
++- Contract: classNames only — zero handler/fetch/payload/state/routing/aria-label changes; no new rounded-* or colors introduced; 44px targets untouched.
++
++Stage Summary:
++- At 1024px evaluator boards now render 2×2 (~340px columns) with snap-scroll below lg, KPIs go 2-up until xl, skeletons mirror the real boards, and the review-workspace dossier keeps ~340px of rail-safe width at lg (380px restored at xl).
++- Only call-site delta found vs. task brief: SkeletonKanban has one call site (not two), already columns={4}; job-workspace has no lg KPI grid (nothing to change there beyond its kanban + header row).
++- Verification: `bunx tsc --noEmit` zero errors in src (only pre-existing examples/websocket + skills/* errors remain); `bun run lint` clean; dev server untouched (hot-reload).
++
++---
++Task ID: R1 (responsive wave, orchestrator)
++Agent: Z.ai Code (main orchestrator)
++Task: Owner directive — "make sure that the system is fully responsive on any aspect ratio like mobile view or tablets etc", then run the two-axis code-review skill on the changes.
++
++Work Log:
++- Static hazard scan (Explore agent) over all views/shell/apply/kanban: fixed widths, table wrappers, grid bases, calc heights, dialog widths, nowrap rows, sticky offsets, hidden-splits, charts, overflow-hidden clipping, min-w-0 coverage.
++- Live multi-viewport audit (agent-browser, sessions per role via API-issued JWT cookies): 4 roles x 15 views x {320,375,768,1024,2560}px = 75 combos, body-level overflow check + culprit extraction; screenshots of flagged combos (audit-shots/resp/01-15).
++- Confirmed defects: analytics funnel/status cards BLOW OUT their grid track (grid items refuse to shrink below min-content of nowrap SectionCard description -> card clipped at 320-1279px); review-queue/candidates/job-workspace kanban lg:grid-cols-4 = ~164px crushed columns at 1024; applicant-home fixed 400px rail + 2-up job cards = ~116px cards at 1024; PageHeader title truncates ("Review Qu...") when wide action clusters sit beside it from sm (640px); jobs-view double gutters (own 1600px container inside AppShell's identical main) at every viewport; notifications popover w-[340px] > 320px viewport; mobile-nav sheet w-[300px] at 320; analytics fixed-width drill-down selects; jobs pagination ~444px unwrapped; settings grid-cols-2 name fields + nowrap "Mock mode — messages are logged only" pill at 320; review-workspace dossier 380px rail at lg (300px dossier) + grid-cols-2 date/time inputs; sticky-offset drift (profile lg:top-24, jobs rail/session mismatch); jobs detail summary rail tucks under the public sticky header for anonymous users.
++- ORCHESTRATOR FIXES (shared primitives, own edits): ui/shell.tsx SectionCard root +min-w-0 (kills the grid-track blowout systemically), header row +flex-wrap, actions +flex-wrap; PageHeader row breakpoint sm: -> xl: (stacks below 1280 so action clusters can never squeeze the title); notifications-panel PopoverContent w-[340px] -> w-in(340px,calc(100vw-2rem))]; mobile-nav SheetContent w-[300px] -> w-in(300px,85vw)]; jobs-view detail aside xl:top-6 -> session-aware (public xl:top-20 under sticky header / signed-in xl:top-6).
++- PARALLEL FIX AGENTS (worklog sections 3-a..3-d with per-edit old->new strings): 3-a jobs-view (session-aware shellPad container kills double gutters; pagination flex-wrap; session-aware lg:top-20/6 filter rail; sort select 140->170); 3-b analytics (selects w-full sm:w-[170/140px]), settings (dialog grids grid-cols-1 sm:grid-cols-2 x2; mock pill label -> "Mock mode" + "Messages are logged only." description line), command-center (KPI lg:grid-cols-4 -> xl:grid-cols-4); 3-c review-queue/candidates/job-workspace kanban boards lg:grid-cols-2 xl:grid-cols-4 (2x2 at 1024-1279, 4-up at 1280+), SkeletonKanban mirrored, KPI rows lg->xl, review-workspace dossier split lg:[1fr_340px] xl:[1fr_380px], notice dialog date/time stack, history rows flex-wrap, job-workspace hand-rolled header row sm:->xl:; 3-d applicant-home split minmax(320px,400px) + gap-10/14, positions grid sm:2/lg:1/xl:2, journey third label responsive short variant "Awaiting decision" (<sm), skeleton mirrors, profile-view rail top-24 -> top-6.
++- ENVIRONMENT INCIDENTS: sandbox OOM (4GB) killed next-server repeatedly (dmesg: task=next-server killed, chrome sessions + dev server > RAM) -> audit rerun made memory-safe (single session alive, per-suite close, self-healing ensure_server with restart); agent-browser cookie timing (cookies set before fresh Chrome had a page context were lost; SPA caches anonymous session so hash-only nav never refetches) -> boot: open -> networkidle -> wait -> cookie set -> open -> full reload; screenshots re-verified as authenticated via h1 eval, not blindly trusted (two earlier "all OV=0" runs were error-page artifacts and were discarded).
++- POST-FIX VERIFICATION: full 75-combo audit with PAGE=ok canary -> all PAGE=ok OV=0; screenshots f01-f10 confirm analytics card fits w/ ellipsis @320/375, kanban 2x2 @1024 w/ full tag text, title untruncated @768/1024, applicant home 1-up cards @1024, settings/ops/profile clean; dynamic states: notifications popover 288px in 320vw, quick-view modal 288 contained, mobile nav sheet 272px (85vw), review dossier modal at 1024 well-proportioned (dossier + MQR rail), ov=0.
++- GATES: bun run lint clean; bunx tsc --noEmit zero errors in src (known examples/skills/mini-services errors pre-exist); dev server healthy; zero business-logic/API/payload/handler changes (presentation-only; the only copy changes: settings "Mock mode" pill split, applicant-home <sm journey label short variant).
++
++Stage Summary:
++- System is now overflow-free and proportioned across 320/375/768/1024/1280/1440/2560 for anonymous + all three roles, including overlays (popovers, dialogs, sheets) and dynamic states.
++- Two systemic primitive fixes (SectionCard min-w-0; PageHeader xl stacking) prevent whole defect classes rather than per-view patches.
++- Evidence: audit-shots/resp/{01-15,f01-f10,d01-d04,audit-run1-3.log}; next step: two-axis code-review since a24102f.
