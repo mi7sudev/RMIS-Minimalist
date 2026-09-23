@@ -590,8 +590,9 @@ export default function ApplicantHome() {
         </div>
       ) : (
         <div className="mt-6 grid animate-in fade-in slide-in-from-bottom-2 gap-10 duration-300 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)] lg:items-start lg:gap-10 xl:gap-14">
-          {/* LEFT — Open positions */}
-          <section className="lg:col-start-1 lg:row-start-1">
+          {/* LEFT — Open positions (min-w-0: grid item must be allowed to shrink
+              below the truncate/nowrap min-content of card titles) */}
+          <section className="min-w-0 lg:col-start-1 lg:row-start-1">
             <div className="mb-4 flex items-center gap-3">
               <h2 className="font-display text-xl text-ink">Open Positions</h2>
               <span className="status-pill status-neutral num">{openJobs.length}</span>
@@ -631,8 +632,9 @@ export default function ApplicantHome() {
             )}
           </section>
 
-          {/* RIGHT — Your applications (first on mobile, sticky rail on desktop) */}
-          <section className="order-first lg:order-none lg:sticky lg:top-6 lg:col-start-2 lg:row-start-1 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto scroll-thin">
+          {/* RIGHT — Your applications (first on mobile, sticky rail on desktop;
+              min-w-0 keeps the truncate+shrink-0 header row from widening the track) */}
+          <section className="order-first min-w-0 lg:order-none lg:sticky lg:top-6 lg:col-start-2 lg:row-start-1 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto scroll-thin">
             <div className="mb-4 flex items-center gap-3">
               <h2 className="font-display text-xl text-ink">Your Applications</h2>
               {sortedApps.length > 0 && (

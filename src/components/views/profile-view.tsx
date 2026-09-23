@@ -266,8 +266,10 @@ export default function ProfileView() {
 
       {/* ── Section navigation + content ───────────────────────────────────── */}
       <div className="mt-6 grid gap-6 lg:grid-cols-[16rem_minmax(0,1fr)] lg:items-start">
-        {/* Mobile stepper strip — tonal chips (ink active / emerald done / slate upcoming) */}
-        <div className="lg:hidden">
+        {/* Mobile stepper strip — tonal chips (ink active / emerald done / slate upcoming).
+            min-w-0 on this grid item: the chip scroller's own min-content (7 × 44px chips)
+            must not widen the auto track, or the whole page overflows at ≤344px viewports. */}
+        <div className="min-w-0 lg:hidden">
           <div className="flex gap-1.5 overflow-x-auto scroll-thin pb-1">
             {SECTIONS.map((s) => {
               const done = sectionDone[s.n - 1];
@@ -366,8 +368,10 @@ export default function ProfileView() {
           </div>
         </nav>
 
-        {/* Active section */}
-        <div>
+        {/* Active section — min-w-0: this div is the grid item; without it the
+            min-content floor of truncate/nowrap card headers widens the auto
+            track and every section overflows on phones (observed 320–478px) */}
+        <div className="min-w-0">
           {active === 1 && <PersonalInfoSection profile={profile} seed={seed} refreshSession={refresh} />}
           {active === 2 && (
             <EducationSection

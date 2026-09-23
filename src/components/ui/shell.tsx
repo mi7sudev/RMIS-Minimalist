@@ -276,7 +276,10 @@ export function SectionCard({
             ) : null}
             <div className="min-w-0">
               <h2 className="truncate text-[15px] font-semibold leading-6 text-ink">{title}</h2>
-              {description ? <p className="truncate text-xs text-stone">{description}</p> : null}
+              {/* Wraps below sm, truncates from sm up. Full-width nowrap (truncate
+                  everywhere) gave the card a huge min-content floor that blew out
+                  auto grid tracks on phones; wrapping text has none. */}
+              {description ? <p className="text-xs text-stone sm:truncate">{description}</p> : null}
             </div>
           </div>
           {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
