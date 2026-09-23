@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertTriangle, Building2, ChevronLeft, ClipboardList, Clock, FileText,
-  KanbanSquare, MapPin, Pencil, RefreshCw, Trash2,
+  MapPin, Pencil, RefreshCw, SquareKanban, Trash2,
 } from "lucide-react";
 import { IconChip, Monogram, SectionCard, StatusPill } from "@/components/ui/shell";
 import {
@@ -307,7 +307,7 @@ export default function JobWorkspace() {
               </SectionCard>
 
               {/* Mini pipeline */}
-              <SectionCard title="Pipeline" icon={KanbanSquare} chipTone="amber">
+              <SectionCard title="Pipeline" icon={SquareKanban} chipTone="amber">
                 <div className="space-y-1">
                   {PIPELINE_STAGES.map((stage) => (
                     <div key={stage} className="flex items-center justify-between gap-3 py-1.5">

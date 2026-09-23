@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Mail, Pencil, ScrollText, Search, Send, ShieldCheck, Trash2, Users } from "lucide-react";
+import { Mail, Pencil, ScrollText, Search, Send, ShieldCheck, Trash2, UsersRound } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -29,7 +29,7 @@ import { pillClass } from "@/lib/status-ui";
 import { ghostBtn, ctaBtn, iconBtn, iconBtnBad } from "@/components/views/recruitment";
 
 const TABS = [
-  { key: "users", label: "Users & Roles", icon: Users },
+  { key: "users", label: "Users & Roles", icon: UsersRound },
   { key: "audit", label: "Audit Log", icon: ShieldCheck },
   { key: "sms", label: "SMS Gateway", icon: Send },
   { key: "email", label: "Email Notices", icon: Mail },
@@ -147,7 +147,7 @@ function UsersPanel() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <IconChip icon={Users} tone="slate" size={36} iconSize={16} />
+        <IconChip icon={UsersRound} tone="slate" size={36} iconSize={16} />
         <div className="min-w-0 flex-1">
           <h2 className="text-[15px] font-semibold leading-6 text-ink">Users &amp; Roles</h2>
           <p className="text-xs text-stone">
@@ -191,7 +191,7 @@ function UsersPanel() {
               {rows?.length === 0 && (
                 <tr>
                   <td colSpan={4} className="p-6">
-                    <EmptyState icon={Users} tone="slate" title="No accounts match your filters." compact />
+                    <EmptyState icon={UsersRound} tone="slate" title="No accounts match your filters." compact />
                   </td>
                 </tr>
               )}

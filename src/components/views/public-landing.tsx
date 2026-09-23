@@ -423,14 +423,6 @@ export default function PublicLanding() {
                   <Stat icon={CalendarClock} tone="gold" label="Soonest deadline" value={metrics.soonest} />
                   <Stat icon={Banknote} tone="slate" label="Salary range" value={metrics.salary} />
                 </div>
-                <div className="mt-7 text-center">
-                  <button
-                    onClick={() => navigate("jobs")}
-                    className="text-sm text-stone underline underline-offset-4 hover:text-ink"
-                  >
-                    Browse all positions on the board
-                  </button>
-                </div>
               </>
             )}
           </div>
@@ -459,6 +451,15 @@ export default function PublicLanding() {
                 title="No open positions right now"
                 description="Check back soon or explore the full board for upcoming announcements."
               />
+              <div className="pb-8 text-center">
+                <button
+                  onClick={() => navigate("jobs")}
+                  className="inline-flex min-h-[44px] items-center gap-2 text-sm text-stone underline underline-offset-4 hover:text-ink"
+                >
+                  Go to the full positions board
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3">

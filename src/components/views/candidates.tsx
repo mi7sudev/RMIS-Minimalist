@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertTriangle, ArrowUpRight, Building2, Clock, KeyRound, LayoutGrid, List, Mail, MapPin,
-  Phone, RefreshCw, Search, UserCheck, Users,
+  Phone, RefreshCw, Search, UserCheck, UsersRound,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -376,7 +376,7 @@ export default function Candidates() {
         <SkeletonKpis count={4} />
       ) : (
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <KpiCard label="Total on file" value={total} icon={Users} tone="info" hint="all registered candidates" />
+          <KpiCard label="Total on file" value={total} icon={UsersRound} tone="info" hint="all registered candidates" />
           <KpiCard label="Showing" value={`${start}–${end}`} icon={List} tone="neutral" hint={`of ${total}`} />
           <KpiCard label="Complete profiles" value={completeOnPage} icon={UserCheck} tone="ok" hint="on this page" />
           <KpiCard label="Has login" value={accountsOnPage} icon={KeyRound} tone="neutral" hint="on this page" />
@@ -456,7 +456,7 @@ export default function Candidates() {
           {list.length === 0 ? (
             <div className="dlg-card py-6">
               <EmptyState
-                icon={Users}
+                icon={UsersRound}
                 title="No candidates match"
                 description="Try a different search, or clear the profile and account filters."
               />

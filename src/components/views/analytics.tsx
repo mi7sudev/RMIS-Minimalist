@@ -14,8 +14,8 @@ import {
   ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  AlertTriangle, Filter, History, Inbox, PieChart as PieChartIcon,
-  RefreshCw, TrendingUp, Users,
+  AlertTriangle, Filter, History, Inbox, ChartPie as ChartPieIcon,
+  RefreshCw, TrendingUp, UsersRound,
 } from "lucide-react";
 import {
   EmptyState, Monogram, PageHeader, SectionCard, SkeletonKpis, SkeletonRows, StatusPill,
@@ -315,7 +315,7 @@ export default function Analytics() {
             <SectionCard
               title="Status distribution"
               description="All applications by stored status."
-              icon={PieChartIcon}
+              icon={ChartPieIcon}
               chipTone="plum"
             >
               {donutData.length === 0 ? (
@@ -388,7 +388,7 @@ export default function Analytics() {
         <SectionCard
           title="Drill-down"
           description={drill === "All" ? "All stages." : `Filtered to ${drill}.`}
-          icon={Users}
+          icon={UsersRound}
           chipTone="plum"
           actions={
             <>
@@ -417,7 +417,7 @@ export default function Analytics() {
           }
         >
           {drillRows.length === 0 ? (
-            <EmptyState icon={Users} tone="plum" title="No applicants in this selection." compact />
+            <EmptyState icon={UsersRound} tone="plum" title="No applicants in this selection." compact />
           ) : (
             <div className="max-h-96 space-y-1 overflow-y-auto scroll-thin pr-1">
               {drillRows.map((r) => (

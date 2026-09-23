@@ -52,20 +52,12 @@ export function SiteHeader() {
           )}
 
           {user ? (
-            <>
-              <button
-                onClick={() => navigate(ROLE_HOME[user.role])}
-                className="dlg-ghost hidden min-h-[44px] items-center px-5 text-sm sm:inline-flex"
-              >
-                Dashboard
-              </button>
-              <button
-                onClick={() => navigate(ROLE_HOME[user.role])}
-                className="dlg-cta inline-flex min-h-[44px] items-center px-6 text-sm"
-              >
-                Dashboard
-              </button>
-            </>
+            <button
+              onClick={() => navigate(ROLE_HOME[user.role])}
+              className="dlg-cta inline-flex min-h-[44px] items-center px-6 text-sm"
+            >
+              Dashboard
+            </button>
           ) : (
             <>
               <button
@@ -75,10 +67,10 @@ export function SiteHeader() {
                 Sign in
               </button>
               <button
-                onClick={() => navigate("signin")}
+                onClick={() => navigate("signup")}
                 className="dlg-cta inline-flex min-h-[44px] items-center px-6 text-sm"
               >
-                Sign in
+                Sign up
               </button>
             </>
           )}

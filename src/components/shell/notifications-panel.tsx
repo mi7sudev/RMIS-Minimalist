@@ -23,7 +23,7 @@ type AdminStats = {
   };
 };
 
-type Item = { label: string; count: number; go: () => void };
+type Item = { label: string; singular: string; count: number; go: () => void };
 
 export function NotificationCenter() {
   const { user } = useSession();
@@ -61,11 +61,13 @@ export function NotificationCenter() {
   const attention: Item[] = [
     {
       label: "applications awaiting review",
+      singular: "application awaiting review",
       count: stats?.pendingReview ?? 0,
       go: () => navigate("review-queue"),
     },
     {
       label: "job deadlines this week",
+      singular: "job deadline this week",
       count: stats?.needsAttention.deadlinesThisWeek ?? 0,
       go: () => navigate("recruitment"),
     },
@@ -73,6 +75,7 @@ export function NotificationCenter() {
   const updates: Item[] = [
     {
       label: "incomplete applicant profiles",
+      singular: "incomplete applicant profile",
       count: stats?.needsAttention.incompleteProfiles ?? 0,
       go: () => navigate("candidates", { status: "incomplete" }),
     },
@@ -80,6 +83,7 @@ export function NotificationCenter() {
   const system: Item[] = [
     {
       label: "failed logins (24h)",
+      singular: "failed login (24h)",
       count: stats?.needsAttention.failedLogins24h ?? 0,
       go: () => navigate("settings", { tab: "audit" }),
     },
@@ -139,7 +143,8 @@ export function NotificationCenter() {
                       className="flex min-h-[44px] w-full items-center justify-between gap-3 rounded-[12px] px-3 text-left hover:bg-fog"
                     >
                       <span className="text-sm text-stone">
-                        <span className="font-medium text-ink">{r.count}</span> {r.label}
+                        <span className="num font-medium text-ink">{r.count}</span>{" "}
+                        {r.count === 1 ? r.singular : r.label}
                       </span>
                       <ChevronRight className="h-4 w-4 shrink-0 text-pebble" aria-hidden="true" />
                     </button>

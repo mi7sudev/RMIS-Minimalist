@@ -10,17 +10,17 @@
 
 import { useEffect, useState } from "react";
 import {
-  BarChart3,
   Briefcase,
-  ClipboardCheck,
-  Home,
-  LayoutDashboard,
+  ChartColumn,
+  Gauge,
+  House,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
-  Settings,
+  ScanSearch,
+  Settings2,
   UserRound,
-  Users,
+  UsersRound,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -50,40 +50,40 @@ export const NAV_CONFIG: Record<Role, NavGroup[]> = {
   ADMIN: [
     {
       group: "Operations",
-      items: [{ view: "operations", label: "Command Center", icon: LayoutDashboard }],
+      items: [{ view: "operations", label: "Command Center", icon: Gauge }],
     },
     {
       group: "Recruitment",
       items: [
         { view: "recruitment", label: "Jobs", icon: Briefcase },
-        { view: "candidates", label: "Candidates", icon: Users },
-        { view: "review-queue", label: "Review", icon: ClipboardCheck },
+        { view: "candidates", label: "Candidates", icon: UsersRound },
+        { view: "review-queue", label: "Review", icon: ScanSearch },
       ],
     },
     {
       group: "Insights",
-      items: [{ view: "analytics", label: "Analytics", icon: BarChart3 }],
+      items: [{ view: "analytics", label: "Analytics", icon: ChartColumn }],
     },
     {
       group: "Administration",
-      items: [{ view: "settings", label: "Settings", icon: Settings }],
+      items: [{ view: "settings", label: "Settings", icon: Settings2 }],
     },
   ],
   EVALUATOR: [
     {
       group: "My Work",
-      items: [{ view: "review-queue", label: "Review Queue", icon: ClipboardCheck }],
+      items: [{ view: "review-queue", label: "Review Queue", icon: ScanSearch }],
     },
     {
       group: "Browse",
       items: [
-        { view: "candidates", label: "Candidates", icon: Users },
+        { view: "candidates", label: "Candidates", icon: UsersRound },
         { view: "recruitment", label: "Jobs", icon: Briefcase },
       ],
     },
   ],
   APPLICANT: [
-    { group: "Portal", items: [{ view: "home", label: "Home", icon: Home }] },
+    { group: "Portal", items: [{ view: "home", label: "Home", icon: House }] },
     { group: "Account", items: [{ view: "profile", label: "Profile", icon: UserRound }] },
   ],
 };

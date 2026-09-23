@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle, BarChart3, Briefcase, CalendarClock, ClipboardCheck, Clock,
+  AlertTriangle, Briefcase, CalendarClock, ChartColumn, ClipboardCheck, Clock,
   Inbox, LayoutDashboard, RefreshCw, ShieldAlert, UserRound, UserX,
 } from "lucide-react";
 import {
@@ -395,7 +395,7 @@ export default function CommandCenter() {
               className="dlg-ghost mt-4 inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-full px-4 text-sm"
               onClick={() => navigate("analytics")}
             >
-              <BarChart3 className="h-4 w-4" aria-hidden />
+              <ChartColumn className="h-4 w-4" aria-hidden />
               Open Analytics
             </button>
           </div>
