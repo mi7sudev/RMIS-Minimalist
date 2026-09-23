@@ -682,3 +682,54 @@ Spec findings (verbatim summary + orchestrator disposition):
 Stage Summary:
 - Two-axis review complete. Standards: 1 reported hard violation DISPROVEN with code+runtime evidence; 2 sanctioned copy edits documented; 3 smell follow-ups filed (KanbanBoard extraction, shell sticky-offset token, shellPad rename). Spec: no missing requirements after supplementary sweep; disclosed scope items justified; 3 accepted watch items.
 - Aggregate coverage now: 75-combo main sweep + 25-combo supplementary sweep = 100 role×view×viewport combinations, all PAGE=ok OV=0, plus 6 dynamic-state checks (popover/modal/sheet/dossier) and 11 evidence screenshots.
+
+---
+Task ID: 6-a
+Agent: Standards reviewer (general-purpose)
+Task: Standards-axis code review of git diff 4691b7f...HEAD
+
+Work Log:
+- Read worklog.md tail (~150 lines) for repo conventions (documented: hash-routed SPA, snake_case-legacy schema, one-extraction PDS lock, raw-SQL JSON writes, *_lnk junction tables).
+- Diff stat: src/+prisma/+scripts/ = 159 files, +27,829. Read in full: lib/{validation,auth,mqr,requirements,notify,api,rate-limit,client,snapshot,status,router,pds-extract(first 120)}, ui/shell.tsx, api/evaluator/applications/[id]/route.ts, api/applicant/profile/auto-apply/route.ts (first 120), review-workspace.tsx (1-400), prisma/schema.prisma (head).
+- Targeted greps: duplicated kanban container class, ghostBtn/ctaBtn copies, safeJsonParse double-parse, any/@ts-ignore/eslint-disable (zero hits outside ui/), measured main-component lengths in the 8 largest views.
+
+Stage Summary:
+- Code health is high: consistent section-banner comments, small pure lib modules, single-source status vocabulary, zero `any`/ts-ignore in business code; all findings are judgement-call smells, none blocking.
+- Real duplication clusters: tokenize/tokens + normDate/normDateText + extractFirstNumber/extractQuantity copied between mqr.ts, requirements.ts, pds-extract.ts, auto-apply route; kanban container string and ghostBtn/ctaBtn constants copied across views.
+- Dead/speculative: router.ts always-false `&& false` noop guard; shell.tsx empty SECTION_CHIP_TONE lookup table that always falls back.
+- Long functions: JobsView container ~477 lines (view does decompose into sub-components, but the main container is segmented mostly by comments); evaluator PATCH email fan-out repeats the same sendEmail envelope 4x.
+---
+Task ID: 6-b
+Agent: Spec reviewer (general-purpose)
+Task: Spec-axis review of implementation vs RMIS-FLOW-SPECIFICATION.md
+
+Work Log:
+- Read worklog tail (last 150 lines) for context; read RMIS-FLOW-SPECIFICATION.md in full (757 lines, §0–§17).
+- Diffed 4691b7f...HEAD (whole app, 426 files); inventoried src/lib (notify.ts covers email/sms; audit.ts = audit-log) and all 44 API route.ts handlers.
+- Deep-read flow-critical code: status.ts, mqr.ts, requirements.ts, profile-completeness.ts, notify.ts, rate-limit.ts, audit.ts, router.ts, session-provider.tsx; routes auth/login, session, jobs (GET/POST), jobs/apply, applications/[id], evaluator queue + applications/[id] (GET/PATCH) + notice + regrets + email, admin/users/[id], files; spot-grepped applicant profile (PUT server-gated flag), profile/clear, register, documents (10 MB caps), extract (streaming keep-alive, EXTRACTED thresholds), admin/stats needs-attention, seed accounts, snapshot.ts.
+- Grep sweeps to prove absences: assessments (interview scorecard) — only `assessments: []` stub; admin/positions — no route; android/textbee SMS — zero hits; PDS photo extraction — explicit "not available" stub at pds-extract.ts:472.
+- Cross-checked client contracts in views: apply-dialogs verify-mqr→apply chain, review-workspace decision/revise/notice/direct-email cards + regretAlreadySent, profile-view canMarkComplete + 1.2 s autosave (personal-info-section), applicant-home journey labels/next-step hints, 15 s/60 s/focus polling cadences.
+
+Stage Summary:
+- High spec fidelity overall: MQR gate (verbatim verdict strings, substitution thresholds), completeness gate (3 rules + wording contract), status machine vocabulary, notification doctrine (silent-revert, regret-without-SMS, 409 stage guards, bulk-regret idempotency), intranet chokepoints, lockout ladder, snapshots, and direct-email constraints all match the spec.
+- Missing: interview assessment scorecard (§6.5/§7.15 — no route/model/UI, decision coupling absent) and /api/admin/positions CRUD (§6.6); both noted with spec quotes in report.
+- Partial: SMS `android` provider absent (§9.1), PDS ID-photo extraction stubbed off (§7.5.7), legacy `snapshot_attachment` column dropped (6 of 7 snapshot columns, §5.6).
+- No wrong implementations found; no notable scope creep (Document/AuditLog-in-Prisma = sanctioned storage normalization per §0.5).
+---
+Task ID: 6 (orchestration)
+Agent: Z.ai Code (main orchestrator)
+Task: Mobile responsiveness fixes for applicant dashboard + profile page; full audit; code-review skill aggregation
+
+Work Log:
+- User reported applicant dashboard + profile page not fully responsive on mobile.
+- Reproduced via agent-browser (session app, cookie re-auth): dashboard "Open Positions" section 501px wide on 375px viewport (OV=142); profile sections 372-478px min-content (OV=13-119 at 375, OV=40 at 320).
+- Root cause (both views): grid items with min-width:auto pass min-content floors into auto tracks; truncate/nowrap text (journey-card title + shrink-0 pill = 501px; SectionCard header description truncate = 372-478px) and the 7x44px stepper chip scroller (344px) supplied those floors. overflow-x-hidden on main masked body scroll so OV sweep missed it until per-element probing.
+- Fixes: min-w-0 on both applicant-home sections; min-w-0 on profile-view active-section wrapper + mobile stepper wrapper; SectionCard description truncate -> sm:truncate (wraps on mobile, kills min-content floor app-wide).
+- Verified: all 7 profile sections OV=0 at 375/320; dashboard OV=0 at 320/375; full resp-audit.sh sweep 75/75 OV=0 (audit-run3.log); screenshots confirm clean journey timelines, wrapped hints, intact pills.
+- bun run lint clean; tsc --noEmit clean (src/); dev.log healthy; committed 24e9c5a.
+- Ran code-review skill: fixed point 4691b7f, diff 426 files/73.6K lines; spec RMIS-FLOW-SPECIFICATION.md; no repo standards docs -> Fowler 12-smell baseline; two parallel sub-agents (6-a Standards, 6-b Spec) both appended worklog sections.
+
+Stage Summary:
+- Applicant dashboard + profile page now fully responsive on phones (320/375/390), tablets, desktop, ultrawide. Commit 24e9c5a.
+- Review verdict: Standards = 10 judgement-call findings (7 duplication, 1 dead code, 1 speculative generality, 1 long function), none blocking. Spec = high fidelity, 0 wrong implementations, 2 missing features (interview assessment scorecard route/UI, admin positions master CRUD API), 3 partials (android SMS provider, PDS embedded-photo extraction stub, snapshot_attachment column dropped).
+- docs/agents/issue-tracker.md missing — user informed re /setup-matt-pocock-skills.
