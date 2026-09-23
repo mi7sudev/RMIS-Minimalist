@@ -218,7 +218,9 @@ export default function CommandCenter() {
       />
 
       <div className="grid gap-6 lg:grid-cols-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
-        <div className="space-y-6 lg:col-span-2">
+        {/* min-w-0: activity rows' truncate meta text must not widen the auto track
+            on phones (observed OV=51 at 320px) */}
+        <div className="min-w-0 space-y-6 lg:col-span-2">
           {/* Needs attention */}
           <section className="space-y-3">
             <div className="flex flex-wrap items-baseline gap-3">

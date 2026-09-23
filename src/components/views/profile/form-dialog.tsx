@@ -135,7 +135,7 @@ export default function FormDialog({
           {description && <DialogDescription className="text-sm text-stone">{description}</DialogDescription>}
         </DialogHeader>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {visible.map((f) => {
             const value = values[f.key];
             const disabled = f.disabledIf?.(values) ?? false;

@@ -275,7 +275,7 @@ export function SectionCard({
               />
             ) : null}
             <div className="min-w-0">
-              <h2 className="truncate text-[15px] font-semibold leading-6 text-ink">{title}</h2>
+              <h2 className="truncate font-display text-lg leading-7 text-ink">{title}</h2>
               {/* Wraps below sm, truncates from sm up. Full-width nowrap (truncate
                   everywhere) gave the card a huge min-content floor that blew out
                   auto grid tracks on phones; wrapping text has none. */}

@@ -321,7 +321,9 @@ export default function Analytics() {
               {donutData.length === 0 ? (
                 <EmptyState icon={Inbox} tone="plum" title="No applications recorded yet." compact />
               ) : (
-                <div className="mt-2 grid grid-cols-1 items-center gap-6 sm:grid-cols-[200px_1fr]">
+                // minmax(0,1fr): the legend rows' nowrap labels must not floor
+                // the 1fr track's auto minimum (observed OV=61 at 1024px).
+                <div className="mt-2 grid grid-cols-1 items-center gap-6 sm:grid-cols-[200px_minmax(0,1fr)]">
                   {/* Donut with centered total — the award-dash staple */}
                   <div className="relative mx-auto h-[200px] w-[200px]">
                     <span

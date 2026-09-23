@@ -738,8 +738,10 @@ export default function Settings() {
       />
 
       <div className="grid gap-6 lg:grid-cols-[240px_1fr] lg:items-start">
-        {/* Left vertical tab rail (white card); horizontal scroll pills on mobile */}
-        <nav className="dlg-card p-2 lg:sticky lg:top-6" aria-label="Settings sections">
+        {/* Left vertical tab rail (white card); horizontal scroll pills on mobile.
+            min-w-0: the nowrap tab buttons' min-content must not widen the auto
+            track on phones (observed OV 231-286 at 320/375). */}
+        <nav className="dlg-card min-w-0 p-2 lg:sticky lg:top-6" aria-label="Settings sections">
           <div className="flex gap-1 overflow-x-auto scroll-thin lg:flex-col lg:overflow-visible">
             {TABS.map((t) => (
               <button
